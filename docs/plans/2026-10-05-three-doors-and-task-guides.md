@@ -433,8 +433,12 @@ survived review once, and #364 is the pilot for the guide format.
 table, what it exposes), Goals, a "Running and configuring it" pointer
 to `docs/run/README.md`, a "Developing it" pointer to
 `docs/contributing.md`, and Status. It moves from the Run door to the
-Develop door in the same commit. No compatibility anchors: a former
-anchor 404s to the top of a page whose first screen links every guide.
+Develop door in the same commit. One compatibility anchor, and only
+one: the `## Running in a container` stub D10 keeps for the changelog's
+link, the one inbound anchor in a file that may not be edited. Every
+other former anchor lands on the top of a page whose first screen links
+every guide, since every other inbound link is in a file the move's own
+PR retargets.
 
 **D10. Inbound links and prose pointers move in the PR that moves their
 target.** Every link and every by-name mention in the inventory above
@@ -443,14 +447,13 @@ has a link pointing at a removed anchor. Two exceptions, by mechanism:
 `events_docgen.py`'s `LOGGING_SECTION` changes in M3d and
 `docs/reference/events.md` is regenerated, never hand-edited; and
 `CHANGELOG.md` L3386, which a pull request may not edit and the link
-checker does not scan. So that `main` never holds it broken, M3a leaves
-a forwarding stub in the README: the `## Running in a container`
-heading, kept so its anchor resolves, over one sentence linking
-`docs/run/running-in-a-container.md`. Once M3a has merged, a
-documentation commit straight to `main` retargets the changelog link to
-the guide, and M3b deletes the stub (its "On this page" entry with it),
-confirming first with `git grep -n 'README.md#running-in-a-container'`,
-untruncated, that nothing links the anchor any more.
+checker does not scan. The changelog is a dated execution record and is
+not rewritten to follow a move, so its link keeps resolving instead: M3a
+leaves a permanent forwarding stub in the README, the `## Running in a
+container` heading (kept so its anchor resolves) over one sentence
+linking `docs/run/running-in-a-container.md`. It survives M3d's end
+state (D9). No commit outside a pull request is needed between
+milestones.
 
 **D11. The live schema comment follows the table; the migrations stay.**
 The `record.events.name` column comment, "The event name, from the
@@ -845,8 +848,8 @@ Pages are this plan's modules; the reader is the caller.
   `README.md` (two links: Choosing an image, and the deployment
   pointer), `deploy/k8s/deployment.yaml`, `docker-compose.yml`,
   `vinga-server/Dockerfile`, and `AGENTS.md`'s operator-surface
-  sentence, which says task guides do not exist yet. Then the
-  `CHANGELOG.md` retarget straight to `main` (D10).
+  sentence, which says task guides do not exist yet; and the permanent
+  `## Running in a container` stub in the README (D10).
 - **M3b:** the six guides, the server README, the `docs/run/` index,
   the root `README.md` (the `#providers` link), and
   `vinga-server/examples/asr-openai.yaml`.
@@ -990,5 +993,7 @@ Instead: parse multiline Markdown links for door discovery, or reject a multilin
 5. **P2: The changelog workaround rewrites a dated execution record.**
 Evidence: D10 requires a post-M3a direct-to-main edit of `CHANGELOG.md` to retarget its old container anchor. The authority taxonomy says dated execution records report what was true when written and are not rewritten as the code moves. This also creates a required, non-PR handoff between stacked milestones.
 Instead: retain the `running-in-a-container` forwarding anchor permanently, even after the README is shortened, and remove D10's direct changelog edit. Amend D9's "no compatibility anchors" rule accordingly.
+
+   *Resolution:* Accepted. The changelog link is no longer edited: the `## Running in a container` stub is permanent, D9's end state keeps it as the one compatibility anchor, and D10 needs no commit to `main` between milestones.
 
 **Verdict: not ready.**
