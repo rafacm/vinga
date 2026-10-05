@@ -85,8 +85,6 @@ is what a reader is after in it.
 
 ## Device
 
-**Implemented today, with the durable record marked inline.**
-
 A device is hardware: buttons, microphone, speaker, display, battery,
 an identity (the `Device-Id` it presents), and perhaps a location
 ("the kitchen"). Under
@@ -105,11 +103,10 @@ the device record's and travels with it when the board underneath is
 replaced, and what anybody told an assistant about themselves was never
 the hardware's to lose.
 
-A device joins a deployment before any of this matters, and that is a
-solved problem rather than a planned one: the board is pointed at the
-server, the server's OTA endpoint answers its check-in, and an unclaimed
-board is claimed through the 6-digit activation ceremony (issue #40,
-implemented). The operator's procedure is in
+A device joins a deployment before any of this matters: the board is
+pointed at the server, the server's OTA endpoint answers its check-in,
+and an unclaimed board is claimed through the 6-digit activation
+ceremony. The operator's procedure is in
 [the server README](../vinga-server/README.md#onboarding-a-device) and
 the wire exchange behind it is in
 [the Xiaozhi notes](xiaozhi-notes.md#activation-the-6-digit-code-ceremony);
@@ -118,8 +115,8 @@ meant: this is a *device* activation, joining a deployment once, and
 not the *agent* activation that assembles a prompt at the start of a
 session or after a switch.
 
-What the server knows about a device comes from three sources, kept
-distinct on purpose:
+What is known about a device comes from three sources, kept distinct
+on purpose:
 
 - **Identity and declaration.** The stored record is
   `devices.<mac>`, keyed by the `Device-Id` the board presents on the
@@ -201,23 +198,18 @@ distinct on purpose:
   server rather than of the domain: what matters here is that none of
   these observed facts lands in the stored record above, which holds
   what an operator and a conversation put there and nothing a board
-  reports about itself. A durable, queryable record of the observed
-  facts is **decided direction** (issue #96).
-- **Hardware facts from the board catalog**: what the model implies
+  reports about itself.
+- **Hardware facts from the board guides**: what the model implies
   but the wire never says: microphone count, echo cancellation,
-  display, button layout. Keyed by the reported board model; the
-  per-board [board guides](devices/README.md) are the prose form for
-  the help agent, and a machine-readable sibling serves the server.
+  display, button layout. They are written down per board model in
+  the [board guides](devices/README.md), for the people using the
+  board; the server reads none of them.
 
-The help agent reads all three ("this board has one microphone and no
-echo cancellation, so I cannot be interrupted mid-reply"). The runtime
-adapts to what they imply rather than controlling the device: the
-device owns its own listening mode, so adaptation is by observation,
-which is the thin-device guideline holding.
+The runtime adapts to what the device reports rather than controlling
+it: the device owns its own listening mode, so adaptation is by
+observation, which is the thin-device guideline holding.
 
 ## Agent
-
-**Implemented today.**
 
 An agent is what answers: a system prompt, an LLM and the rest of its
 provider choices, a voice, an ASR language pin, and the MCP servers
@@ -240,8 +232,6 @@ carried it through the server's own text are recorded in
 
 ## Binding
 
-**Implemented today, with the exception marked inline.**
-
 A binding connects a device to the agents reachable from it, with one
 designated default. Bindings are many-to-many: one agent can serve
 several devices (the same home agent in every room), and one device can
@@ -254,10 +244,7 @@ allowlist.
 A fresh wake always gets the default agent: the binding is resolved
 when the device connects, so whatever happened in the last session, the
 next one starts where the configuration says. Reaching another bound
-agent is a [handover](glossary.md#handover). Changing a device's
-default by voice ("make Nadia the default agent on this device") is
-**decided direction** and belongs to
-[the meta capabilities](#meta-capabilities) below.
+agent is a [handover](glossary.md#handover).
 
 ## Conversation and session
 
