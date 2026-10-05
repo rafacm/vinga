@@ -239,6 +239,7 @@ historical  vinga memory set agent poet
 historical  vinga metric latency
 historical  vinga metric list
 historical  vinga metric show
+historical  vinga metric show tokens
 historical  vinga ota-url
 historical  vinga provider
 historical  vinga provider delete
@@ -258,6 +259,7 @@ historical  vinga provider show llm claude
 historical  vinga reference
 historical  vinga reference server
 historical  vinga reload
+historical  vinga schema
 historical  vinga schema provider asr openai
 historical  vinga session as
 historical  vinga session as grouped per-turn
