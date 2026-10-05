@@ -500,8 +500,9 @@ stamped at the record chain's head before it (`1010_turns_name_their_utterance`
 at `3073d08b`, re-read at M3d's base), reads
 `col_description` for `record.events.name` and asserts the new text,
 downgrades one revision and asserts the old text is back. It is
-watched failing first (the assertion run before the migration exists). `1002_conversation_threads.py`
-(L214) keeps the old text: a migration is history. So does the
+watched failing first (the assertion run before the migration exists).
+`1002_conversation_threads.py` (L214) keeps the old text: a migration
+is history. So does the
 `memory/migrations/versions/2002_memory_scopes.py` docstring.
 
 **D12. Changelog.** One fragment per milestone,
