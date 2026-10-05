@@ -323,7 +323,7 @@ The trial ran four engines on this machine, and each is one entry in the documen
 
 The same deployment you built in step 3 ships as [`presets/local-stack.yaml`](vinga-server/examples/presets/local-stack.yaml), and the same thing on vendor APIs as [`presets/cloud-stack.yaml`](vinga-server/examples/presets/cloud-stack.yaml), which is what `-f` normally points at once a document is bigger than a screen. Every field of every type is documented in [`docs/reference/domain-config.md`](docs/reference/domain-config.md), generated from the models the server validates against, and [`vinga-server/README.md`](vinga-server/README.md#providers) explains what each provider is for and what its numbers do. A credential never goes in the document: name the variable holding it with `api_key_env`, or store it encrypted with `vinga provider secret set`.
 
-That was the trial. Running vinga somewhere it stays up is [`docs/deployment.md`](docs/deployment.md): the same server in a [Docker Compose lane](docs/deployment.md#the-docker-lane) and a [Kubernetes lane](docs/deployment.md#the-kubernetes-lane), with the manifests and the hardened compose file committed under [`deploy/`](deploy/). Which image tag to deploy from, and the slim variant that carries neither local engine, are in [Choosing an image](docs/run/running-in-a-container.md#choosing-an-image). Everything else this project knows is indexed in [`docs/`](docs/README.md).
+That was the trial. Running vinga somewhere it stays up is [`docs/deployment.md`](docs/deployment.md): the same server in a [Docker Compose lane](docs/deployment.md#the-docker-lane) and a [Kubernetes lane](docs/deployment.md#the-kubernetes-lane), with the manifests and the hardened compose file committed under [`deploy/`](deploy/), and each task of running it, from providing the database to onboarding a device, has a guide of its own in [`docs/run/`](docs/run/README.md). Which image tag to deploy from, and the slim variant that carries neither local engine, are in [Choosing an image](docs/run/running-in-a-container.md#choosing-an-image). Everything else this project knows is indexed in [`docs/`](docs/README.md).
 
 ## Supported Hardware
 
@@ -344,7 +344,7 @@ Any board xiaozhi-esp32 supports can work, since the device runs upstream's firm
 - [**reference/**](docs/reference/): generated from the code and diffed by CI, so it cannot come to describe a server this repository does not build. Every CLI command, every configuration field, the API contract, and the structured events.
 - [**architecture/**](docs/architecture/README.md): the promises vinga makes to whoever runs it, the guidelines that keep them, and the design and CLI standards every change is held to.
 
-The other two READMEs are pages in their own right: [`vinga-server/`](vinga-server/README.md) for every provider option, the security defaults, the container and onboarding a device, and [`vinga-esp32/`](vinga-esp32/README.md) for the firmware side.
+The other two READMEs are pages in their own right: [`vinga-server/`](vinga-server/README.md) for every provider option and the security defaults, and [`vinga-esp32/`](vinga-esp32/README.md) for the firmware side.
 
 ## Credits
 
