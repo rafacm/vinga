@@ -51,8 +51,6 @@ why.
 - [Memory](#memory): what an agent keeps, and what it is keyed by.
 - [Meta capabilities](#meta-capabilities): the requests every
   conversation can answer, and the three tools that answer them.
-- [The help agent](#the-help-agent): the built-in agent that explains
-  the device and the system.
 - [Who the user is](#who-the-user-is): the limitation there being no
   user entity leaves.
 
@@ -557,36 +555,6 @@ vinga-owned code and log their reason, per
 its own past threads, not another agent's. That preserves the focus
 story and the credential scoping that make per-agent MCP configuration
 worth having; it is a privacy boundary, not a convenience default.
-
-## The help agent
-
-**Decided direction** (issue #21), except the board guides, which
-exist.
-
-A built-in agent, bound to every device by default, that answers three
-kinds of question:
-
-- **This device**: which button starts a conversation, how long to hold
-  it to power off, what the display shows. Its source is the guide for
-  the board it runs on, selected at runtime, so it explains
-  the hardware actually in front of the user.
-- **This system**: vinga's concepts, the contents of this page: what an
-  agent is, what a conversation is, why the wake word wakes the device
-  and not an agent.
-- **Device commands**: the controls the device itself publishes as MCP
-  tools (volume, screen brightness), phrased as things the user can
-  just say.
-
-There is one help agent, not one per board (issue #21). Its prompt is
-composed at the start of a session from a shared part plus a block of
-facts for the board that checked in, keyed on the reported board model,
-and a board the deployment has no facts for gets an honest vague
-answer rather than a confident wrong one.
-
-The [board guides](devices/README.md) that feed it are user-facing
-markdown, one per supported board, and they exist today (issue #93), so
-the help agent's knowledge is reviewable documentation rather than
-prompt text.
 
 ## Who the user is
 

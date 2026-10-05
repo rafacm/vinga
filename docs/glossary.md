@@ -290,17 +290,6 @@ across deliberately, on phrasing that asks for it, remains decided
 direction (issue #190). See
 [the concepts page](concepts.md#conversation-and-session).
 
-### Help agent
-
-The planned built-in agent bound to every device by
-default. Answers how the device in front of the user works (from the
-guide for the board it runs on, selected at runtime), what
-vinga's concepts mean, and which voice commands the device itself
-publishes as MCP tools. Knows whether its device has a wake word
-enabled, and that the wake word wakes the device, not an agent. See
-[the concepts page](concepts.md#the-help-agent), which names the
-issue this direction belongs to.
-
 ### Idle timeout
 
 A realtime session with no conversation for the
