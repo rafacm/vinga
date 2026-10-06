@@ -109,9 +109,16 @@ session.
 The persona, the fragments and the guidance are assembled when a
 conversation starts
 and again when it switches agents, and held for the life of that
-activation; what memory holds is read on every reply, so a fact stored
-by one conversation is known to a concurrent one on its next reply and
-a note written in one round is read in the next. So this command
+activation. What memory holds is read once per activation too, at the
+first reply on that conversation, and kept for every reply after it, so
+a fact another live conversation stores, or an operator corrects, is
+seen from this conversation's next activation (a new session, an agent
+switch or a switch back) rather than its next reply. Three things make
+the next reply read memory again: a fact erased outright, by
+`vinga memory delete`, the API or a model's permanent `forget`; the
+agent's `memory` section being switched on or off by an apply; and a
+read that failed, which is never kept. What the conversation's own model writes reaches it at once, as
+the tool result it already is. So this command
 answers what a session opening now would be given, which is what an
 operator auditing a configuration wants, and a conversation that
 started before the last apply is holding the older text until it ends.
