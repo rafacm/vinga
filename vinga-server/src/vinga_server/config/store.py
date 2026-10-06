@@ -2451,13 +2451,22 @@ def _swapped_record(record: DeviceRecord, old: str, new: str) -> DeviceRecord:
     and a board's as a board's, because which it was is all the record
     says about it and the swap does not know what is at the new address.
 
+    Which placeholder a record holds is read through the fold
+    (`_own_placeholder`), because a row written before the spellings
+    were reserved may hold its own in any spelling that folds onto it,
+    and it reads as unnamed like any other. It lands on the new address
+    in the canonical spelling rather than in the old one's capitals and
+    spacing: those spelled the old MAC, there is no new-address version
+    of somebody's capitals to keep, and what a swap writes for a name
+    nobody chose is the name the server mints.
+
     It cannot collide, and the check that would catch it runs anyway:
     the only row that may hold a minted name for the new MAC is the
     record at that address, and this write has already refused one.
     """
-    for was, becomes in zip(minted_device_names(old), minted_device_names(new), strict=True):
-        if record.name == was:
-            return record.model_copy(update={"name": becomes})
+    position = _own_placeholder(old, record.name)
+    if position is not None:
+        return record.model_copy(update={"name": minted_device_names(new)[position]})
     return record
 
 
@@ -3757,8 +3766,8 @@ def _refuse_reserved_name(mac: str, name: str | None) -> None:
     `_refuse_device_credential` follows and for the same reason: a name
     written before this existed still reads and is still renameable.
 
-    A device's OWN minted names pass, exactly as spelled, and that
-    exemption is what keeps an export idempotent: a document exported
+    A device's OWN minted names pass, and that exemption is what keeps
+    an export idempotent: a document exported
     from a store where a board has never been named carries
     `Device <its mac>`, one holding a browser carries `Browser <its
     mac>`, and applying either back has to write the record it came
@@ -3776,12 +3785,40 @@ def _refuse_reserved_name(mac: str, name: str | None) -> None:
     a listing and nobody in a room, since the name still reads as
     nobody's and the agent still says nothing.
 
+    They pass in any spelling that folds onto them (`_own_placeholder`),
+    not only as minted. A row written before the spellings were reserved
+    may hold `browser  AA:BB:...` at its own address, which reads as
+    unnamed, so its export carries it, and an exact comparison would
+    refuse that export on apply: the document the store produced, from a
+    row nothing is wrong with. The fold is the rule the reservation is
+    read by, so it is the rule the exemption is read by too.
+
     The value is not passed to the sentence, the rule this file keeps
     about every device name: a name is free text an operator types on a
     command line.
     """
-    if name is not None and is_default_device_name(name) and name not in minted_device_names(mac):
+    if name is not None and is_default_device_name(name) and _own_placeholder(mac, name) is None:
         raise ConfigError(DEVICE_NAME_RESERVED)
+
+
+def _own_placeholder(mac: str, name: str | None) -> int | None:
+    """Which of `mac`'s own minted names `name` folds onto, as its
+    position in `minted_device_names(mac)`, or None where it folds onto
+    none of them.
+
+    Through the fold, because that is how every reader of a minted name
+    reads it (`is_default_device_name`): a spelling that folds onto a
+    device's own placeholder IS that placeholder to the index, to the
+    prompt and to the reservation. The position rather than the name, so
+    a swap can name the same word on the new address.
+    """
+    if name is None:
+        return None
+    folded = fold_device_name(name)
+    for position, minted in enumerate(minted_device_names(mac)):
+        if fold_device_name(minted) == folded:
+            return position
+    return None
 
 
 def _device_change(mac: str, written: object) -> _DeviceBinding:

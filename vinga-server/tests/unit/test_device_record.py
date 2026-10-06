@@ -31,10 +31,10 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from tests.support.leaks import chain
-from tests.support.stores import bindings, stored_row
+from tests.support.stores import bindings, planted, stored_row
 from vinga_server.config import ConfigError, views
 from vinga_server.config.api import build_api
 from vinga_server.config.loader import (
@@ -728,6 +728,46 @@ def test_an_export_of_a_browser_applies_and_writes_nothing(store: ConfigStore) -
 
     assert [entry.wrote for entry in applied] == [False]
     assert _record(store) == minted
+
+
+# A row written before either spelling was reserved can hold its own
+# minted name in any spelling the fold maps onto it: nothing refused
+# `browser  AA:BB:...` then. It reads as unnamed today, so its export
+# carries it, and applying that export back has to write nothing rather
+# than refuse the document the store itself produced.
+
+
+@pytest.mark.parametrize(
+    "legacy",
+    [f"browser  {MAC.upper()}", f"DEVICE\t{MAC.upper()}", f" Device {MAC} "],
+)
+def test_a_folded_spelling_of_its_own_minted_name_exports_and_applies_back(
+    store: ConfigStore, legacy: str
+) -> None:
+    _agents(store)
+    store.bind_device(MAC, ["sam"])
+    planted(store, update(schema.devices).where(schema.devices.c.mac == MAC).values(name=legacy))
+    exported = _record(store)
+    assert exported.name == legacy
+
+    applied = store.apply({"devices": {MAC: exported.model_dump()}})
+
+    assert [entry.wrote for entry in applied] == [False]
+    assert _record(store) == exported
+
+
+def test_a_folded_spelling_of_another_devices_minted_name_is_still_refused(
+    store: ConfigStore,
+) -> None:
+    """The exemption folds the device's OWN names and nothing else."""
+    _agents(store)
+    store.bind_device(MAC, ["sam"])
+    store.bind_device(OTHER_MAC, ["sam"])
+
+    with pytest.raises(ConfigError) as caught:
+        store.rename_device(OTHER_MAC, f"browser  {MAC.upper()}")
+
+    assert str(caught.value) == DEVICE_NAME_RESERVED
 
 
 # --- what a stored string may carry ------------------------------------

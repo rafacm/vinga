@@ -55,12 +55,13 @@ import psycopg
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from tests.support.stores import (
     holding_the_write_lock,
     memory,
     memory_rows,
+    planted,
     rows,
     the_lock_held,
 )
@@ -471,6 +472,40 @@ async def test_a_browser_nobody_named_is_still_one_after_a_swap(
     replaced = store.replace_device(DYING, FRESH)
 
     assert replaced.name == f"Browser {FRESH}"
+    applied = store.apply(
+        {"devices": {FRESH: dict(store.read_device(FRESH).entry.model_dump())}}
+    )
+    assert [entry.wrote for entry in applied] == [False]
+
+
+@pytest.mark.parametrize(
+    ("legacy", "moved"),
+    [
+        (f"browser  {DYING.upper()}", f"Browser {FRESH}"),
+        (f"DEVICE\t{DYING.upper()}", f"Device {FRESH}"),
+    ],
+)
+async def test_a_folded_placeholder_from_before_the_reservation_moves_too(
+    store: ConfigStore, legacy: str, moved: str
+) -> None:
+    """A row written before either spelling was reserved may hold its
+    own placeholder in any spelling the fold maps onto it, and it reads
+    as unnamed, so it moves like one. It lands in the canonical
+    spelling, because the old one spelled the old MAC: there is no
+    new-address version of somebody's capitals to keep, and what a
+    swap writes for a name nobody chose is the name the server mints."""
+    a_working_configuration(store)
+    store.bind_device(DYING, [AGENT])
+    planted(
+        store,
+        update(domain_schema.devices)
+        .where(domain_schema.devices.c.mac == DYING)
+        .values(name=legacy),
+    )
+
+    replaced = store.replace_device(DYING, FRESH)
+
+    assert replaced.name == moved
     applied = store.apply(
         {"devices": {FRESH: dict(store.read_device(FRESH).entry.model_dump())}}
     )
