@@ -87,9 +87,9 @@ def declared_fields() -> dict[str, set[str]]:
     """Every event's declared field names, from its declaration.
 
     The vocabulary's authority is the declaration (#155): the generated
-    reference and the README's index are both rendered from it, and the
-    README's own table stopped naming fields when it became a
-    name-and-when index. So what the stored field names are checked
+    reference and the event index are both rendered from it, and the
+    index's own table (in the logs and traces guide now) stopped naming
+    fields when it became a name-and-when index. So what the stored field names are checked
     against is the declaration itself rather than a table of prose. The
     base fields are dropped here because the store keeps them on the row
     and on the session rather than in the payload column.

@@ -21,8 +21,9 @@ which happens inside the emitter's guard: a construction that refuses is said
 once on the emitter's own channel and dropped, because a telemetry bug must
 never cost a reply.
 
-The [README's Logging section](../../vinga-server/README.md#logging) is the
-human overview, with one line per event saying when it fires.
+The [Logging section](../run/logs-and-traces.md#logging) of the logs and
+traces guide is the human overview, with one line per event saying when it
+fires.
 
 ## How to read it
 

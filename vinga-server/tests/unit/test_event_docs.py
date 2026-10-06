@@ -7,9 +7,10 @@ it turns the lane red. The tests here are the completeness half of that,
 which a diff cannot give: a generator that silently skipped an event
 would produce a document CI is perfectly happy with.
 
-The README index is held to names only, and deliberately so. It carried
-field and token claims in prose once, which nothing parsed and nothing
-could: prose can go stale while a name-level check stays green, and
+The index in the logs and traces guide is held to names only, and
+deliberately so. It carried field and token claims in prose once, which
+nothing parsed and nothing could: prose can go stale while a name-level
+check stays green, and
 half-checked documentation reads as checked. So the schema claims live
 in the generated reference now and the index says what exists and when
 it fires, which is exactly what these tests check it says: every
@@ -67,7 +68,9 @@ def documented() -> dict[str, Declaration]:
     catalog declares: the document has one source now."""
     return events_docgen.documented()
 
-README = Path(__file__).resolve().parents[2] / "README.md"
+# The task guide the event index lives in. It was the server README's
+# Logging section until the README became the package's own page.
+GUIDE = Path(__file__).resolve().parents[3] / "docs" / "run" / "logs-and-traces.md"
 
 COMMITTED = Path(__file__).resolve().parents[3] / "docs" / "reference" / "events.md"
 
@@ -76,7 +79,7 @@ REGENERATE = (
     "`uv run vinga-server events reference > ../docs/reference/events.md`"
 )
 
-# Where the index starts in the README, and what the section it lives in
+# Where the index starts in the guide, and what the section it lives in
 # is called. Matched on the header row rather than on the heading, since
 # the heading covers the formats and the switch as well.
 INDEX_HEADER = "| `event` | when |"
@@ -88,7 +91,7 @@ def index_rows() -> list[tuple[str, str]]:
     The event cell is unwrapped from its backticks; the when cell is
     left as written, since these tests are about names and never about
     wording."""
-    lines = README.read_text(encoding="utf-8").splitlines()
+    lines = GUIDE.read_text(encoding="utf-8").splitlines()
     start = lines.index(INDEX_HEADER)
     rows = []
     for line in lines[start + 1 :]:
@@ -107,7 +110,7 @@ def logging_section() -> str:
     Sliced at the next top-level heading rather than read to the end of
     the file, so an assertion about what this section says cannot be
     satisfied by a sentence three sections further down."""
-    lines = README.read_text(encoding="utf-8").splitlines()
+    lines = GUIDE.read_text(encoding="utf-8").splitlines()
     start = lines.index("## Logging")
     end = next(
         position
@@ -274,7 +277,7 @@ def check_constraint(rendered: str, declared: Any, kind: str, where: str) -> Non
     assert rendered == "", where
 
 
-# --- the README index, at name level ----------------------------------
+# --- the guide's index, at name level ---------------------------------
 
 
 def test_every_declared_event_has_a_row() -> None:
@@ -319,7 +322,7 @@ def test_the_base_field_claim_is_scoped_to_the_session_channel() -> None:
 def test_the_index_points_at_the_generated_reference() -> None:
     """The index makes no schema claim of its own, so it has to say
     where the schema claims are."""
-    assert "(../docs/reference/events.md)" in logging_section()
+    assert "(../reference/events.md)" in logging_section()
 
 
 # --- what a record may tell an operator to do -------------------------

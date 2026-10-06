@@ -2,7 +2,8 @@
 
 Retained JSON logs are what a deployment measures itself from, so the
 shape of these records is a contract: `event`, `session`, and `device`
-on every one, plus the per-event fields the server README documents.
+on every one, plus the per-event fields the generated event schema
+reference (`docs/reference/events.md`) documents.
 They are metadata; the record of what was said is the conversation
 store's (#120). The assertions run against
 `caplog.records`, because the fields ride `extra=` and never appear in
