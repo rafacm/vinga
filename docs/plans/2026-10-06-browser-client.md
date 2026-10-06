@@ -590,7 +590,7 @@ be a browser.
 
 ## Milestones
 
-- [ ] **M1: the browser credential and the page's home.** The
+- [x] **[M1: the browser credential and the page's home](2026-10-06-browser-client-implementation.md#m1-the-browser-credential-and-the-pages-home)** (PR TBD). The
   subprotocol credential in `ws.py` (Q3), identity minting (D1), the
   keyless `/try/` page and its revisioned static routes with a placeholder
   page (D2), the unbound start request (D4), the route-table inventory
