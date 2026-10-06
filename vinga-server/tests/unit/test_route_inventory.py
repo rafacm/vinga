@@ -29,6 +29,7 @@ PUBLIC_PROBE = "public: a supervisor's probe, answering literals only"
 TOKEN_ISSUER = "public: the OTA endpoint, behind the configured segment"
 ONBOARDING_KEY = "the onboarding key"
 PUBLIC_PAGE = "public: the browser client's static page and modules"
+TRY_TOKEN = "a try link's token, spent once, presented from the page's own origin"
 DEVICE_TOKEN = "a device token, checked before the accept"
 API_BEARER = "the configuration API's bearer token"
 
@@ -55,6 +56,8 @@ EXPECTED = {
     ("http", "/try", "GET"): PUBLIC_PAGE,
     ("http", "/try/static/{version}/{name}/", "GET"): PUBLIC_PAGE,
     ("http", "/try/static/{version}/{name}", "GET"): PUBLIC_PAGE,
+    ("http", "/try/redeem/", "POST"): TRY_TOKEN,
+    ("http", "/try/redeem", "POST"): TRY_TOKEN,
     ("websocket", "/xiaozhi/v1/", "-"): DEVICE_TOKEN,
     ("mount", "/api", "-"): API_BEARER,
     ("asgi", "/api", "-"): API_BEARER,
@@ -132,6 +135,23 @@ def test_every_key_guarded_route_meets_a_wrong_key_with_the_stock_404(
 
     assert answer.status_code == 404
     assert answer.content == unserved.content
+
+
+TOKEN_GUARDED = sorted(
+    (path, method) for (_, path, method), guard in EXPECTED.items() if guard == TRY_TOKEN
+)
+
+
+@pytest.mark.parametrize(("path", "method"), TOKEN_GUARDED)
+def test_every_try_token_route_refuses_a_request_with_no_token(
+    client: TestClient, path: str, method: str
+) -> None:
+    """From the page's own origin, so the token is the only thing
+    missing."""
+    answer = client.request(method, path, json={}, headers={"Sec-Fetch-Site": "same-origin"})
+
+    assert answer.status_code == 403
+    assert set(answer.json()) == {"error"}
 
 
 def test_the_websocket_refuses_an_upgrade_with_no_token(client: TestClient) -> None:

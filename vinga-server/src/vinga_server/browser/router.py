@@ -1,14 +1,26 @@
-"""Where the browser client is served, and how an unbound one starts.
+"""Where the browser client is served, how a try link is redeemed, and
+how an unbound browser starts.
 
-Three things, mounted together whenever onboarding is enabled, since a
+Four things, mounted together whenever onboarding is enabled, since a
 browser needs the onboarding alias to check in at all (#613, D2):
 
 - `GET /try/`, the page, keyless and `no-store`;
 - `GET /try/static/<version>/<name>`, its modules, immutable;
+- `POST /try/redeem`, which spends a try link's token and binds the
+  browser presenting it (D5), keyless because the token is the
+  credential, and refused from any origin but the page's own;
 - `POST /x/<key>/try-identity`, on the onboarding alias and behind its
   key guard, which mints an identity for a browser that holds none
   (D4). A wrong key meets the alias's stock 404, through the same
   guard every other alias route stands behind.
+
+The page is inert. A try link carries its token in the URL's fragment,
+which no browser sends to any server, so `GET /try/` is the same page
+for a person, a link preview, a prefetch and a scanner, and spends
+nothing for any of them; only the page's own script, reading the
+fragment, can redeem it. The redemption answers the identity and the
+onboarding path in its body, which the page keeps and checks in at,
+while its own address stays `/try/`.
 
 The mint refuses while a default agent is set (D4a). A default agent
 admits every unknown MAC without a code, so a browser minted there
@@ -39,17 +51,29 @@ admission rule D4a exists to avoid; #612 closes the window by making
 every unbound device pair.
 """
 
+import json
+from urllib.parse import urlsplit
+
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
 from vinga_server.composition import Composition
-from vinga_server.config.models import ONBOARDING_MOUNT_PATH
+from vinga_server.config.api import store_dependency
+from vinga_server.config.models import BROWSER_MOUNT_PATH, ONBOARDING_MOUNT_PATH
 from vinga_server.device.bindings import DeviceBindings
 from vinga_server.onboarding.browser import mint
 from vinga_server.onboarding.keys import _guarded, onboarding_path
+from vinga_server.onboarding.try_links import redeem
 from vinga_server.ota.router import spellings
 
-from .assets import ASSET_HEADERS, PAGE_HEADERS, PAGE_PATH, STATIC_PATH, Assets
+from .assets import (
+    ASSET_HEADERS,
+    COMMON_HEADERS,
+    PAGE_HEADERS,
+    PAGE_PATH,
+    STATIC_PATH,
+    Assets,
+)
 
 # What a browser appends to the onboarding path to ask for an identity.
 TRY_IDENTITY_SEGMENT = "try-identity"
@@ -73,9 +97,31 @@ TRY_IDENTITY_UNAVAILABLE = (
     "Try again in a moment."
 )
 
+# Where the page redeems a try link's token.
+REDEEM_PATH = f"{BROWSER_MOUNT_PATH}/redeem"
+
+# What every way of not redeeming answers, byte for byte: a token never
+# issued, expired, already spent, presented from another origin, or a
+# body that is not one. One sentence, so a guesser learns nothing from
+# which it got, and the page shows it as it stands.
+REDEEM_REFUSED = (
+    "This try link cannot be used: it has been opened already, it has expired, or "
+    "the server has restarted since it was made. Ask the person who runs this server "
+    "for a new one."
+)
+
+# How much of a redemption's body is read before it is refused. A token
+# is forty-three characters, and its JSON object a few more; anything
+# near this is not one.
+REDEEM_BODY_LIMIT = 1024
+
 # An identity is the browser's own from the moment it is handed over:
 # nothing between here and the page keeps a copy.
 _NO_STORE = {"Cache-Control": "no-store"}
+
+# And what a redemption's answer carries, either way: not stored, not
+# named to anybody in a `Referer`, not read as another type.
+_REDEEM_HEADERS = {**COMMON_HEADERS, **_NO_STORE}
 
 
 def build_router(key: str | None, assets: Assets | None = None) -> APIRouter:
@@ -106,6 +152,36 @@ def build_router(key: str | None, assets: Assets | None = None) -> APIRouter:
     for spelling in spellings(f"{STATIC_PATH}/{{version}}/{{name}}/"):
         router.get(spelling)(static)
 
+    async def redeem_link(request: Request) -> Response:
+        """Spend a try link's token and bind the browser presenting it,
+        or the one refusal.
+
+        The origin is asked first and the body second, and both before
+        the token is claimed, so a request from another origin or with a
+        body that is not one spends nothing."""
+        if not same_origin(request):
+            return _refused()
+        token = await _token_of(request)
+        comp: Composition = request.app.state.composition
+        # The server's own configuration store, over the engine its
+        # lifespan opened: the store the bindings this browser is about
+        # to check in against are read from.
+        store = next(store_dependency(comp.api))
+        identity = await redeem(comp.try_links, token, store)
+        if identity is None:
+            return _refused()
+        return JSONResponse(
+            {
+                "mac": identity.mac,
+                "client_id": identity.client_id,
+                "onboarding_path": onboarding_path(key),
+            },
+            headers=_REDEEM_HEADERS,
+        )
+
+    for spelling in spellings(f"{REDEEM_PATH}/"):
+        router.post(spelling)(redeem_link)
+
     if key is None:
         for spelling in spellings(f"{onboarding_path(None)}{TRY_IDENTITY_SEGMENT}/"):
             router.post(spelling)(try_identity)
@@ -135,3 +211,53 @@ async def try_identity(request: Request) -> Response:
         # failure is already in the log, from the view itself.
         return JSONResponse({"error": TRY_IDENTITY_UNAVAILABLE}, status_code=503, headers=_NO_STORE)
     return JSONResponse({"mac": identity.mac, "client_id": identity.client_id}, headers=_NO_STORE)
+
+
+def same_origin(request: Request) -> bool:
+    """Whether this request comes from a page of this server's own
+    origin, which for a redemption is the page at `/try/`.
+
+    The browser says so itself: `Sec-Fetch-Site` is set by the browser,
+    never by a page, and a proxy in front of this server does not touch
+    it, so where it is present it decides alone. A browser that sends
+    no fetch metadata still sends `Origin` on a POST, and that is read
+    against the `Host` the request arrived with; a request carrying
+    neither is not a browser on this page at all. The comparison is of
+    the authority only, because a TLS-terminating proxy hands this
+    server `http` for a page the browser loaded over `https`.
+    """
+    site = request.headers.get("sec-fetch-site")
+    if site is not None:
+        return site == "same-origin"
+    origin = request.headers.get("origin")
+    host = request.headers.get("host")
+    if origin is None or host is None:
+        return False
+    try:
+        parts = urlsplit(origin)
+    except ValueError:
+        return False
+    return parts.scheme in ("http", "https") and parts.netloc.lower() == host.lower()
+
+
+async def _token_of(request: Request) -> object:
+    """What a redemption's body says the token is, or None when it is
+    not a JSON object of exactly that one member, or is longer than any
+    such object could be. Never raised from: what a parser says about a
+    body quotes the body, and this one may hold a credential."""
+    received = bytearray()
+    async for chunk in request.stream():
+        received += chunk
+        if len(received) > REDEEM_BODY_LIMIT:
+            return None
+    try:
+        body = json.loads(received)
+    except ValueError:
+        return None
+    if not isinstance(body, dict) or set(body) != {"token"}:
+        return None
+    return body["token"]
+
+
+def _refused() -> Response:
+    return JSONResponse({"error": REDEEM_REFUSED}, status_code=403, headers=_REDEEM_HEADERS)

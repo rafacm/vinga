@@ -160,6 +160,7 @@ from .try_links import (  # noqa: E402
     Issuer,
     TryLinks,
     link_origin,
+    redeem,
 )
 from .unbound import (  # noqa: E402
     ACTIVATION_ALGORITHMS,
@@ -223,5 +224,6 @@ __all__ = [
     "onboarding_url",
     "portal_url_line",
     "public_origin",
+    "redeem",
     "websocket_url_for",
 ]

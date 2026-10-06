@@ -46,6 +46,7 @@ bearer credential: it reaches the operator's authenticated issuance
 response, the redeeming browser's request body, and nothing else (D7a).
 """
 
+import asyncio
 import base64
 import ipaddress
 import secrets
@@ -53,22 +54,36 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 # The bounds are read through the package at the moment a decision needs
 # one, the rule `pending` states: a suite moves them on the name they
 # live on, and a name imported from the package would be a snapshot.
 import vinga_server.onboarding as onboarding
-from vinga_server.config.loader import SnapshotOnlyError, TryLinkRefusedError
+from vinga_server.config.loader import (
+    ConfigError,
+    DeviceAlreadyBoundError,
+    SnapshotOnlyError,
+    TryLinkRefusedError,
+)
 from vinga_server.config.models import BROWSER_MOUNT_PATH, ServerConfig
 from vinga_server.config.responses import RefusalReason, TryLink
 
-from .browser import Randomness
+from .browser import BrowserIdentity, Randomness, mint
+
+if TYPE_CHECKING:
+    from vinga_server.config.store import ConfigStore
 
 # How many random bytes a token is. Thirty-two, the size `secrets`
 # recommends for a token that has to resist guessing: the link is
 # public-facing for ten minutes and answers anyone who holds it.
 TOKEN_BYTES = 32
+
+# What a browser is named when a try link binds it. The full MAC, which
+# is unique per row, so the name is too; and the word a listing reads it
+# by, so an operator tells a browser from a board at a glance.
+BROWSER_NAME = "Browser {mac}"
 
 # The refusals at issuance, each a state of the deployment rather than a
 # fault in the request, and each fixed. None of them names a command:
@@ -235,3 +250,42 @@ class Issuer:
             page=f"{BROWSER_MOUNT_PATH}/#{token}",
             lifetime_s=int(onboarding.TRY_LINK_TTL_S),
         )
+
+
+def browser_name(mac: str) -> str:
+    """The name a browser bound by a try link is given."""
+    return BROWSER_NAME.format(mac=mac)
+
+
+async def redeem(
+    links: TryLinks,
+    token: object,
+    store: "ConfigStore",
+    randomness: Randomness | None = None,
+) -> BrowserIdentity | None:
+    """Spend `token` and bind a new browser with it, or None.
+
+    The claim comes first and is synchronous, so a redemption that loses
+    it awaits nothing and writes nothing (D5d). The winner mints an
+    identity and has the store create the device, bound to the default
+    agent and named, in one transaction (D5b); a MAC that already has a
+    row is minted again, `TRY_LINK_MINTS` times at most, and every other
+    refusal (the default agent cleared since the link was issued, a
+    database that will not answer) is None with nothing written. The
+    token is spent either way: a link is one attempt.
+
+    `randomness` is the minter's, injected so a test can make two draws
+    collide; None is the operating system's.
+    """
+    if not links.claim(token):
+        return None
+    for _ in range(onboarding.TRY_LINK_MINTS):
+        identity = mint(randomness)
+        try:
+            await asyncio.to_thread(store.enroll_device, identity.mac, browser_name(identity.mac))
+        except DeviceAlreadyBoundError:
+            continue
+        except ConfigError:
+            return None
+        return identity
+    return None
