@@ -578,11 +578,14 @@ vinga-server config apply
 
 **The domain schema alone, when the record is worth keeping.** A dropped
 database takes the conversation record with it, since both halves live
-in one. What is broken here is the domain half, so drop that schema as
-the server role and rerun the provisioning file after it:
+in one. What is broken here is the domain half, so with the server
+stopped (step 1), drop that schema in place of step 2, as the server
+role that owns it, then rerun the provisioning file (step 3):
 
-```sql
-drop schema domain cascade;
+```bash
+# The vinga service names the deployment's own database and the server
+# role; ~/.pgpass holds that role's password, never an argument.
+PGSERVICE=vinga psql -c 'drop schema domain cascade;'
 ```
 
 The rerun is the same either way, and for the same reason: a
