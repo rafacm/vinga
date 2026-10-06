@@ -318,6 +318,13 @@ async def _build_composition(
     # even with onboarding off, so no handler needs a branch for its
     # absence; with onboarding off nothing ever puts anything in it.
     pending = onboarding.PendingDevices()
+    # And the try links this server has issued and not yet seen
+    # redeemed (#613), for the same reason and in the same shape: state
+    # of this process, written by the configuration API below and read
+    # by the browser's redeem route, so both have to hold this one
+    # object. Always built; with onboarding off the API refuses to issue
+    # into it and nothing redeems out of it.
+    try_links = onboarding.TryLinks()
     # Built before the API's runtime rather than beside the providers
     # below, because the API's status read reports these managers and
     # they have to exist to be handed over. An unknown reference or an
@@ -673,7 +680,7 @@ async def _build_composition(
     # what they are doing, and passing the same object is what makes that
     # a report rather than a snapshot of what was true when the API was
     # built. The reload goes with them, because applying a fresh read to
-    # those managers is the one action that namespace serves, and the
+    # those managers is the action that namespace applies them by, and the
     # prompt assembly goes with them because what it answers is what a
     # session opening now would be sent. The diff read goes with them
     # because one of the two worlds it compares is this one: the
@@ -737,6 +744,14 @@ async def _build_composition(
         # a live conversation's prompt at its next leg. One replica
         # (#316) is what makes one process's store the whole of it.
         memory_erased=memory.erased,
+        # And what issues a try link (#613): the links above, the server
+        # section that says whether onboarding is on and which origin a
+        # link may name, and whether a store stands behind this world,
+        # which the bindings view decided once. The API learns none of
+        # where those come from.
+        try_links=onboarding.Issuer(
+            try_links, config.server, bindings.snapshot_authoritative
+        ),
     )
     # And the handle onto the runtime the API reads it from, installed
     # here because this is where that runtime exists. Registered after
@@ -769,6 +784,7 @@ async def _build_composition(
         transcripts=transcripts,
         llm_input=llm_input,
         api=api_runtime,
+        try_links=try_links,
     )
     # Connected last, and closed first on the way out so stdio child
     # processes do not outlive the server. A server that will not connect

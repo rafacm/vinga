@@ -938,6 +938,10 @@ REMEDIES: dict[RefusalReason, str] = {
     ),
     RefusalReason.PROVIDER_MISSING: f"Create it first with `{PROGRAM} provider set`.",
     RefusalReason.MCP_SERVER_MISSING: f"Create it first with `{PROGRAM} mcp-server set`.",
+    RefusalReason.NO_DEFAULT_AGENT: (
+        f"Set one with `{PROGRAM} default-agent set <name>`, and a browser opening a "
+        f"link is bound to that agent."
+    ),
 }
 
 # The tokens this client can name, as the strings a body spells them

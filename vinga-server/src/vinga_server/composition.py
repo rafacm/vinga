@@ -18,7 +18,7 @@ no longer reached back to `ota` for a router (issue #143), which is what
 put this module in their import path at all.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from vinga_server.auth import DeviceAuth
 from vinga_server.capture import CaptureStore, DeviceFacts
@@ -31,7 +31,7 @@ from vinga_server.events.live import LiveEvents
 from vinga_server.generation import Generations
 from vinga_server.llm_input_export import LlmInputExport
 from vinga_server.memory.store import MemoryStore
-from vinga_server.onboarding import PendingDevices
+from vinga_server.onboarding import PendingDevices, TryLinks
 from vinga_server.registry import SessionRegistry
 from vinga_server.telemetry import Telemetry
 from vinga_server.tools.mcp import McpServers
@@ -114,3 +114,11 @@ class Composition:
     # staged while a conversation runs rather than read after it.
     llm_input: LlmInputExport | None
     api: ApiRuntime
+    # The try links issued and not yet redeemed (#613), held in memory
+    # and nowhere else. Runtime state shared with the configuration API
+    # the way `pending` is: the API issues into it and the browser's
+    # redeem route claims out of it, and they are the same object or no
+    # link would ever redeem. Last, and defaulted, because it is the one
+    # field the composition root builds before everything else here and
+    # a test that composes one by hand has no reason to know it.
+    try_links: TryLinks = field(default_factory=TryLinks)

@@ -156,7 +156,11 @@ from .pending import (  # noqa: E402
     _drawn,
     _fact,
 )
-from .try_links import TryLinks  # noqa: E402
+from .try_links import (  # noqa: E402
+    Issuer,
+    TryLinks,
+    link_origin,
+)
 from .unbound import (  # noqa: E402
     ACTIVATION_ALGORITHMS,
     ACTIVATION_TIMEOUT_MS,
@@ -191,6 +195,7 @@ __all__ = [
     "TYPO_ATTEMPT_LENGTH",
     "Claim",
     "Handler",
+    "Issuer",
     "NetLoc",
     "Offer",
     "Origin",
@@ -210,6 +215,7 @@ __all__ = [
     "activation_object",
     "assemble",
     "derive_key",
+    "link_origin",
     "events",
     "log_banner",
     "onboarding_key",
