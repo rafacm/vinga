@@ -94,7 +94,9 @@ def test_redeeming_binds_and_names_a_new_browser_before_its_first_word() -> None
         first = int(body["mac"].split(":")[0], 16)
         assert first & 0x02 and not first & 0x01
         assert body["client_id"] == str(uuid.uuid5(CLIENT_ID_NAMESPACE, body["mac"]))
-        assert body["onboarding_path"] == onboarding_path(
+        # Relative to the deployment's root, which for a deployment with
+        # no prefix in front of it is the server's own.
+        assert "/" + body["onboarding_path"] == onboarding_path(
             onboarding_key(app.state.composition.server)
         )
         assert browsers() == {body["mac"]: ["assistant"]}
@@ -104,7 +106,7 @@ def test_redeeming_binds_and_names_a_new_browser_before_its_first_word() -> None
         # And its first check-in, at the path it was handed, is a bound
         # device's: a token, and no code to claim.
         reply = client.post(
-            body["onboarding_path"],
+            "/" + body["onboarding_path"],
             json={**SYSTEM_INFO, "board": {"type": "vinga-browser"}},
             headers={"Device-Id": body["mac"], "Client-Id": body["client_id"]},
         )

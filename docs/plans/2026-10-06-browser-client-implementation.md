@@ -342,8 +342,18 @@ write path every device write already takes, rather than a sixth path.
   ceremony's bounds and read through the package, the rule that file
   states. No configuration key; the plan review did not ask for one.
 - **What the redeem answers:** `mac`, `client_id` and
-  `onboarding_path` (`/x/<key>/`, or `/x/` keyless), `no-store`, with
-  `Referrer-Policy: no-referrer` and `nosniff` on either answer.
+  `onboarding_path`, `no-store`, with `Referrer-Policy: no-referrer`
+  and `nosniff` on either answer. `onboarding_path` is relative to the
+  deployment's root (`x/<key>/`, or `x/` keyless), not to the server's,
+  because `server.public_url` may carry a path prefix a proxy strips.
+  The page resolves it against its own base minus `try/` (the base is
+  two levels above its module, `new URL("../../", import.meta.url)`)
+  and stores the path that results on its origin, prefix included,
+  which is what M3's check-in and WebSocket use. Every other URL the
+  page uses is relative to it the same way: the module (rendered
+  `static/<version>/page.js` for `/try/` and `try/static/...` for
+  `/try`, since a relative reference resolves against the directory)
+  and the redemption (`redeem` against the base).
 - **The default agent read for issuance** is the store's, in the
   request: the store is what a redemption's transaction reads, so the
   two cannot disagree about which default exists. The redemption reads

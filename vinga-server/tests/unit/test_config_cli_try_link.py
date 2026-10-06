@@ -268,3 +268,17 @@ def test_a_try_link_request_that_never_got_an_answer_still_ends_info(
     assert "could not be reached" in printed.err
     assert deployment.TRY_LINK_LABEL not in printed.out
     assert "configured:" not in printed.out
+
+
+def test_a_configured_origin_with_a_path_prefix_keeps_it(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A deployment a proxy serves under a prefix names it in
+    `server.public_url`, and the link is the page under that prefix."""
+    deploy(run, ServerConfig(public_url=f"{PUBLIC}/vinga"))
+    capsys.readouterr()
+
+    assert run("info") == 0
+
+    (link,) = link_lines(capsys.readouterr().out)
+    assert link.startswith(f"{PUBLIC}/vinga/try/#")

@@ -131,8 +131,12 @@ def build_router(key: str | None, assets: Assets | None = None) -> APIRouter:
     served = assets if assets is not None else Assets.packaged()
     router = APIRouter()
 
-    async def page() -> Response:
-        return Response(served.page(), media_type="text/html; charset=utf-8", headers=PAGE_HEADERS)
+    async def page(request: Request) -> Response:
+        return Response(
+            served.page(slashed=request.url.path.endswith("/")),
+            media_type="text/html; charset=utf-8",
+            headers=PAGE_HEADERS,
+        )
 
     async def static(version: str, name: str) -> Response:
         found = served.file(version, name)
@@ -174,7 +178,11 @@ def build_router(key: str | None, assets: Assets | None = None) -> APIRouter:
             {
                 "mac": identity.mac,
                 "client_id": identity.client_id,
-                "onboarding_path": onboarding_path(key),
+                # Relative to the deployment's root rather than from the
+                # server's: behind a proxy that serves this deployment
+                # under a path prefix, the page resolves it against its
+                # own address minus `try/`, which keeps the prefix.
+                "onboarding_path": onboarding_path(key).removeprefix("/"),
             },
             headers=_REDEEM_HEADERS,
         )

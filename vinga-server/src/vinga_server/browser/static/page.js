@@ -15,7 +15,14 @@ document.documentElement.dataset.vingaAssets = "loaded";
 // device: a cleared browser is a new, unbound one.
 const STORAGE_KEY = "vinga.browser";
 
-const REDEEM_PATH = "/try/redeem";
+// Every URL this page uses is resolved against where it was served
+// rather than named from the root, so a deployment a proxy serves under
+// a path prefix keeps it. This module is at `<base>static/<version>/`,
+// the page's base is two levels up, and the deployment's root is one
+// level above that.
+const PAGE_BASE = new URL("../../", import.meta.url);
+const DEPLOYMENT_ROOT = new URL("../", PAGE_BASE);
+const REDEEM_URL = new URL("redeem", PAGE_BASE);
 
 function say(sentence) {
   const status = document.getElementById("status");
@@ -27,7 +34,7 @@ function say(sentence) {
 async function redeem(token) {
   let answer;
   try {
-    answer = await fetch(REDEEM_PATH, {
+    answer = await fetch(REDEEM_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token }),
@@ -55,7 +62,9 @@ async function redeem(token) {
       JSON.stringify({
         mac: body.mac,
         client_id: body.client_id,
-        onboarding_path: body.onboarding_path,
+        // Handed over relative to the deployment's root, and kept as
+        // the path it resolves to on this origin, prefix included.
+        onboarding_path: new URL(body.onboarding_path, DEPLOYMENT_ROOT).pathname,
       }),
     );
   } catch {

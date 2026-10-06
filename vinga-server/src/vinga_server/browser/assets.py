@@ -6,7 +6,9 @@ that is not in `ALLOWLIST` is not a file this server has, whatever the
 filesystem beside it holds, so there is no listing and no path to
 traverse (#613, D2).
 
-Modules are addressed by version, `/try/static/<version>/<name>`, and
+Modules are addressed by version, `/try/static/<version>/<name>`, named
+by the page relative to itself so a path prefix in front of the
+deployment is kept, and
 served immutable; the page that names them is served `no-store`, so a
 page fetched after an upgrade names the new set and can never import a
 module a browser cached from the old one, and a request for any other
@@ -104,7 +106,20 @@ class Assets:
             digest.update(f"{name}\0{len(content)}\0".encode())
             digest.update(content)
         self.version = digest.hexdigest()[:VERSION_LENGTH]
-        self._page = index.replace(ASSETS_MARKER, f"{STATIC_PATH}/{self.version}").encode()
+        # Relative to the page, never from the root: a deployment served
+        # under a path prefix (`server.public_url` may carry one) is
+        # reached at `<prefix>/try/`, and a root-relative module path
+        # would reach past the prefix. Two renderings, one per spelling of
+        # the page's own path, because a relative reference resolves
+        # against the directory: `static/...` from `/try/`, and
+        # `try/static/...` from `/try`, which a browser reads as a file in
+        # the directory above.
+        relative = STATIC_PATH.removeprefix(PAGE_PATH)
+        mount = PAGE_PATH.strip("/").rsplit("/", 1)[-1]
+        self._pages = {
+            True: index.replace(ASSETS_MARKER, f"{relative}/{self.version}").encode(),
+            False: index.replace(ASSETS_MARKER, f"{mount}/{relative}/{self.version}").encode(),
+        }
 
     @classmethod
     def packaged(cls) -> "Assets":
@@ -115,9 +130,11 @@ class Assets:
             {name: (static / name).read_bytes() for name in ALLOWLIST},
         )
 
-    def page(self) -> bytes:
-        """The page, naming this version's modules."""
-        return self._page
+    def page(self, slashed: bool = True) -> bytes:
+        """The page, naming this version's modules relative to itself.
+        `slashed` is which spelling of the page's path it is answering:
+        `/try/` (the default) or `/try`."""
+        return self._pages[slashed]
 
     def file(self, version: str, name: str) -> tuple[bytes, str] | None:
         """One allowlisted file of this version and its media type, or
