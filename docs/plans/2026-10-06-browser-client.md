@@ -282,7 +282,8 @@ by a scripted mock LLM reaches the page and changes its gain.
 
 **D4. An unbound browser pairs.** A browser opening the page with no
 stored identity (cleared storage, or the onboarding URL typed directly)
-asks the server to mint one (`POST /x/<key>/try/identity`), checks in,
+asks the server to mint one (`POST /x/<key>/try-identity`, on the
+onboarding path the person pasted), checks in,
 and is unbound unless a default agent covers it: today's rule, which
 #612 will change to pairing only for every device. If the reply carries
 an activation section, the page shows the six-digit code and polls, as
@@ -295,7 +296,7 @@ everything.** Today a default agent admits an unknown MAC without a
 code, which would let a cleared browser reach an agent unbound, against
 the issue's rule. Rather than a browser-only exception to that rule
 (a second rule #612 would then have to absorb), the page's own start
-request (`POST /x/<key>/try/identity`) refuses to mint an identity while
+request (`POST /x/<key>/try-identity`) refuses to mint an identity while
 a default agent is set, and the page tells the person to ask for a try
 link. With no default agent set, it mints, checks in, and pairs with the
 six-digit code as D4 describes. When #612 makes every unbound device
