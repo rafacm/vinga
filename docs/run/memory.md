@@ -116,8 +116,11 @@ written is something somebody said in a room and arguments land in
 shell history and in the process list:
 
 ```bash
-echo "the user is vegetarian" | vinga memory set agent poet 7
+# Write the corrected fact in an editor, then hand the file over: on
+# -f, or on standard input. Nothing of it is on a command line.
+"${EDITOR:-vi}" corrected.txt
 vinga memory set agent poet 7 -f corrected.txt
+vinga memory set agent poet 7 < corrected.txt
 ```
 
 And removing is `vinga memory delete`, which asks before it acts:
