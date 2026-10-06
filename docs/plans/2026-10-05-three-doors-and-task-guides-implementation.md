@@ -559,7 +559,7 @@ link rather than losing the sentence: a paragraph in
   one database, which the one-replica record says is not a supported
   topology. It moved verbatim, since it is an operator's option and
   not a commitment (D8c); the contradiction predates this move and is
-  worth a look.
+  worth a look. (The review round removed it: finding 5.)
 - **Two mutation survivors on the first round**, both findings about
   the tests: dropping fence tracking survived because the fixture's
   fence happened to split into the same paragraph count, and
@@ -648,3 +648,76 @@ On agentpi, from the worktree root unless noted:
   exercises and adds no migration; the image job and kubeconform,
   which run in CI on the pull request because M3a touches `deploy/`,
   `docker-compose.yml` and the Dockerfile (comments only).
+
+### PR review round
+
+Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, read-only sandbox, runtime 4m10s, at commit ac40be9f ([the round](https://github.com/rafacm/vinga/pull/618#issuecomment-6006191404)).
+
+1. **P1: an unopenable destination escaped as a traceback.** `read()`
+   caught `OSError` and `UnicodeDecodeError`, and `main()` only the
+   audit's own error, so a destination path with a NUL byte (a
+   `ValueError` from the operating-system call) reached stderr as a
+   library traceback, against the no-leak contract.
+   *Resolution:* `read()` catches `ValueError`, which includes
+   `UnicodeDecodeError`, and reports the text-free "cannot read the
+   destination on row N", exit 2.
+   `test_a_destination_no_file_can_have_exits_2` was watched failing
+   first (exit 1, ending in `ValueError: embedded null byte`), and
+   narrowing the handler back turns exactly it red
+   (`.logs/m3a-fix1-mutation.txt`); a second test pins the non-UTF-8
+   case nothing exercised before (`e8e94cad`).
+2. **P1: `dropdb` and `createdb` ran on libpq's defaults.** The
+   whole-database reset took psql's connection from the `vinga-admin`
+   service but gave the two destructive commands none, so they could
+   act on a same-named database wherever the reader typed.
+   *Resolution:* both run under `PGSERVICE=vinga-admin` with
+   `--maintenance-db=postgres`, the block says why, and `database.md`'s
+   `~/.pgpass` line uses `*` for the database so the maintenance
+   connection finds the password. `docs/reference/cli.md`'s
+   hand-written recipe, which the block came from, had the same pair
+   and gets the same fix (`b423f998`).
+3. **P2: the domain-only reset showed its SQL before stopping the
+   server, with no way to run it.**
+   *Resolution:* the SQL block is now a shell block that stops the
+   server and then runs the statement with
+   `PGSERVICE=vinga psql -c`, as the server role on the deployment's
+   own database; `database.md` describes that second service, and the
+   paragraph after it says which lines of the whole-database block to
+   skip. Declared edited, row 28 paragraph 6 (`f6e4d155`).
+4. **P2: the onboarding guide said a wrong key is logged beside the
+   right one.** `onboarding/keys.py` deliberately logs neither key:
+   `_log_mismatch` emits `onboarding_key_mismatch` with only the
+   attempt's length, or `onboarding_key_unshaped` for a segment no
+   person typed at a key.
+   *Resolution:* the paragraph says so and links both events in the
+   generated reference. The falsehood predates M3a: the README carried
+   it since at least the 2026-08-19 rename (`ffa2a72d`), and the code
+   has quoted neither key since the PR #153 review its docstring names;
+   M3a moved it verbatim. Declared edited, row 32 paragraph 26
+   (`8b8f5115`).
+5. **P2: the exposure guide told an operator to run the image twice.**
+   Two processes on one database break activation, apply and the
+   session cap, as the container guide's one-replica paragraph says.
+   *Resolution:* the paragraph is removed; `m3a.tsv` splits the Ports
+   and topology unit so it is a declared `DROP` (row 37), since none of
+   it moved anywhere (`499c4b43`). The discovery recorded above is
+   closed by it.
+6. **P2: two Past releases lines restated their release's steps.**
+   *Resolution:* each line is the date, linked, and a few words naming
+   the change, with no instruction; the 2026-08-11 line keeps
+   `SAMTAL_API_SECRET` as the old name only (`1b635e7f`).
+
+After the fixes, against `git show origin/main:vinga-server/README.md`
+(byte-identical to the base used above), the audit exits 0:
+
+```text
+20 units, 135 paragraphs moved, 24 declared edited, 6 declared dropped, 1 kept in the page, 0 findings
+```
+
+The audit's tests `34 passed`; the link check reports
+`checked 311 files, 0 failures` and the Run and Use check
+`checked 22 Run and Use pages, 0 findings`; the D8c sweep over
+`docs/run/` still has 27 positions (`.logs/m3a-d8c-guides-3.txt`): the
+removed paragraph's "later" is gone, and the guide title database.md
+now links for the configuration-only reset is one more;
+the census ran last, and its outcome is in the hand-back.
