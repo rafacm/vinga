@@ -26,6 +26,17 @@ import pytest
 
 SPEECH = Path(__file__).with_name("speech.wav")
 
+# What every page the lane opens runs first: see the file.
+INSTRUMENT = Path(__file__).with_name("instrument.js")
+
+# What makes an AudioWorklet module fail to load, for the case about a
+# microphone whose setup fails after the capture was granted. Added from
+# outside, so the client ships no switch for it.
+FAIL_WORKLETS = (
+    "AudioWorklet.prototype.addModule = function () {"
+    " return Promise.reject(new DOMException('failed by the browser lane', 'AbortError')); };"
+)
+
 # How long a realtime session may sit quiet before the server hangs up.
 # Short, so the lane meets the ending (D9) within one loop of the
 # microphone, and longer than the first sentence takes to end as an
