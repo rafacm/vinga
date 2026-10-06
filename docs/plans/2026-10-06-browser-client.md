@@ -252,6 +252,30 @@ guide gives the edge-configuration check that proves it (one request to
 key, expecting no match). M2
 writes it; nothing about it is new to boards.
 
+**D2b. Assets are addressed by revision.** The page's `index.html`
+(served `no-store`) references its modules and worklets under
+`/try/static/<revision>/<file>`, where `<revision>` is the server's
+build revision, and those responses are `Cache-Control: immutable` for a
+long max-age; a request for another revision's path answers 404. So a
+page loaded after an upgrade can only import the new set, and a cached
+old module can never be imported by a new page. A test serves the page
+at one revision, changes the revision, and asserts the new page names
+the new paths and the old ones are refused.
+
+**D3b. Where each audio part runs.** Two worklet processors in one
+module, `audio-worklet.js`, registered under two names. The capture
+processor collects 16 kHz samples into 960-sample (60 ms) blocks and
+posts each block to the main thread as a transferred `Float32Array`; the
+main thread owns the WebCodecs `AudioEncoder`, which is a window API and
+is not assumed inside a worklet, and sends each encoded packet on the
+WebSocket. Received packets go to the main thread's `AudioDecoder`; each
+decoded `AudioData` is copied to a `Float32Array` and posted (transferred)
+to the playback processor, which owns a jitter buffer (a queue of
+blocks, starting playback once 120 ms are buffered, rendering silence on
+underrun and reporting it), the gain the device tool sets (D3a), and the
+running PCM sum the lane reads (Q5a). Messages to it are three: append
+samples, set gain, flush (on a barge-in's `tts stop`).
+
 **D3. The client's parts.** Four ES modules and one worklet, each with
 one job: `identity.js` (storage, the start request), `ota.js` (the
 check-in by `fetch` with the board's headers, which same-origin `fetch`
@@ -676,6 +700,8 @@ Say instead: refuse `POST /api/runtime/try-links` when onboarding is disabled, w
 5. **P2: The static-cache strategy can serve stale protocol code after an upgrade.**
 Evidence: D2 serves fixed asset paths such as `/try/static/page.js`, while only saying `Cache-Control` is "tied to the server's revision." The page is `no-store`, but its module imports may remain cached under unchanged URLs.
 Say instead: choose and specify either revisioned or content-hashed asset URLs, or `no-cache` plus a revision-derived validator. Add an upgrade/cache test showing a fresh `/try/` page cannot load an older module set.
+
+   *Resolution:* Accepted, revisioned URLs: D2b serves modules and worklets at `/try/static/<revision>/<file>` (immutable), the `no-store` page names the current revision, another revision answers 404; a test changes the revision and asserts a fresh page cannot import the old set.
 
 6. **P2: The audio design names only a capture worklet but requires a playback processor.**
 Evidence: D3 specifies `capture-worklet.js`, then requires decoded audio to play through "a second worklet node with a jitter buffer." An `AudioWorkletNode` needs a registered processor; WebCodecs encoding also cannot be assumed to run inside that processor.
