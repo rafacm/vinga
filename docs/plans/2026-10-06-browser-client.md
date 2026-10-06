@@ -596,7 +596,7 @@ be a browser.
   page (D2), the unbound start request (D4), the route-table inventory
   test, and the integration handshake test. A server change a reviewer
   can read alone.
-- [x] **[M2: the try link](2026-10-06-browser-client-implementation.md#m2-the-try-link)** (PR TBD). The token store with its atomic claim (D5,
+- [x] **[M2: the try link](2026-10-06-browser-client-implementation.md#m2-the-try-link)** ([PR #625](https://github.com/rafacm/vinga/pull/625)). The token store with its atomic claim (D5,
   D5d, D6), the API route and its no-default-agent refusal (D5a),
   `vinga info`'s line and its origin rule (D5c), the inert `GET /try/`
   page that reads the token from the fragment and clears it, the
