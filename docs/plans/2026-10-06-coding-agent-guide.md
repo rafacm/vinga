@@ -307,4 +307,6 @@ Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
 
 7. **P2: The proposed event check can miss the event it claims to confirm.** Evidence: plan, D4 (`docs/plans/2026-10-06-coding-agent-guide.md:120`) checks a board's check-in with `vinga events tail`; logs-and-traces.md (`docs/run/logs-and-traces.md:168`) says the stream retains nothing and reconnects at the present. The plan should start the tail before the simulator or board action, or use a retained record where recording is enabled. Verification should assert the expected `ota_check` and `session_open` events, not merely run the command.
 
+   *Resolution:* Accepted. D4b starts `vinga events tail` before the action it watches, uses the records where recording is on, and D7 asserts `ota_check`, `session_open` and the reply or failure events by name.
+
 **Verdict: not ready.** The P1 scope, secret-handling, and apply behavior need amendments before implementation.
