@@ -348,7 +348,7 @@ Any board xiaozhi-esp32 supports can work, since the device runs upstream's firm
 [`docs/`](docs/README.md) is the index, and it says which class each page belongs to and therefore what that page may claim. Four doors into it:
 
 - [**system-overview.md**](docs/system-overview.md): one conversation turn end to end, from the wake word to the spoken reply, diagrammed and explained a step at a time.
-- [**devices/**](docs/devices/README.md): a guide per board. Which button starts a conversation, which wake word is enabled, what the display shows, and the serial procedures that get a server's address into a board.
+- [**devices/**](docs/devices/README.md): a guide per board, and one for the browser client your server serves. Which button starts a conversation, which wake word is enabled, what the display shows, and the serial procedures that get a server's address into a board.
 - [**reference/**](docs/reference/): generated from the code and diffed by CI, so it cannot come to describe a server this repository does not build. Every CLI command, every configuration field, the API contract, and the structured events.
 - [**architecture/**](docs/architecture/README.md): the promises vinga makes to whoever runs it, the guidelines that keep them, and the design and CLI standards every change is held to.
 
