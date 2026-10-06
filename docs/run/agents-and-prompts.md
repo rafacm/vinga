@@ -100,10 +100,17 @@ automatic trimming: a server that silently dropped an instruction block
 would be worse than one that says what it injected. The number to tune
 against is the total, which is the sum of the blocks plus the blank line
 between each pair of them: the prompt is the blocks joined and nothing
-else, so a character counted here is a character the model receives. Agent activation also logs a `prompt_assembled`
-event with the same per-source counts, so a model that degrades in the
-field can be diagnosed from the retained logs without reproducing the
-session.
+else, so a character counted here is a character the model receives.
+The logs carry the same sizes in two halves. Agent activation logs a
+[`prompt_assembled`](../reference/events.md#prompt_assembled) event
+whose `sources` counts the persona, the fragments and the guidance, and
+no memory, since memory is read separately. Every reply round's
+[`llm_round`](../reference/events.md#llm_round) event carries the rest:
+`system_characters` for the whole system prompt the round sent,
+`memory_characters` and `memory_sources` for the memory blocks' sizes,
+and `memory_facts` for which facts were in them. Between the two, a
+model that degrades in the field can be diagnosed from the retained
+logs without reproducing the session.
 
 **It is a preview of a new session**, not a readback of a running one.
 The persona, the fragments and the guidance are assembled when a

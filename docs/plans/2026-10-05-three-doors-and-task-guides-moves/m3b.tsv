@@ -18,6 +18,6 @@
 617	28-48	docs/run/memory.md	kinds=procedure,explanation	edited=30,33,36
 617	49-50	docs/run/tools-and-mcp.md	kinds=explanation	edited=49,50
 # What the model is actually sent
-1027	docs/run/agents-and-prompts.md	kinds=procedure,explanation	edited=9
+1027	docs/run/agents-and-prompts.md	kinds=procedure,explanation	edited=8,9
 # What the MCP servers are doing; Applying a change without a restart (617, 69-82) stays for M3c
 1141	docs/run/tools-and-mcp.md	kinds=procedure,explanation
