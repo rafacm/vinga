@@ -42,8 +42,8 @@ what each class of page may claim.
 
 ## Use vinga
 
-- [**devices/**](devices/): one guide per board vinga targets,
-  describing the hardware in front of you.
+- [**devices/**](devices/): one guide per device, describing what is
+  in front of you: each board vinga targets, and the browser client.
 - [**The common page**](devices/README.md): what every board running
   the upstream firmware shares: listening modes, networks, getting a
   board onto your server, and what the device answers by voice.
@@ -55,6 +55,11 @@ what each class of page may claim.
   a stub 🚧, brought up far enough to learn what its guide records.
 - [**devices/flashing.md**](devices/flashing.md): writing the firmware
   over USB, the one procedure that is the same on every board.
+- [**The browser client**](devices/browser.md): a page your server
+  serves that makes a web browser on a computer a device, with nothing
+  to install: how a browser joins, realtime and auto listening, the
+  controls and the ending, and the one browser it was checked in,
+  headless Chromium.
 - [**concepts.md**](concepts.md): what a device, an agent, a binding
   and a conversation are.
 - [**glossary.md**](glossary.md): one short definition per word vinga
@@ -145,7 +150,7 @@ that builds it.
 | --- | --- | --- | --- |
 | **Facts**: what a key means, its default, bounds and refusals | the models' `Field(description=)` and the entity descriptor registry | the generated [Reference](#reference) | `vinga schema`, `vinga reference`, `--help` |
 | **Concepts**: what the nouns are and how they relate | [`concepts.md`](concepts.md) and [`glossary.md`](glossary.md) | the Run and Use doors | the same pages |
-| **Device behavior** | [`devices/`](devices/), one guide per board; the browser client's guide is #613 | the Use door | the same guides |
+| **Device behavior** | [`devices/`](devices/), one guide per board and one for the browser client | the Use door | the same guides |
 | **State**: what this deployment has, what is missing, the next command | `vinga info` reports which deployment this is and how much of each kind is configured; a readiness model that names what is missing is #611 | `vinga info` | `vinga info` |
 | **Procedures**: how to do one task | one task guide per task under [`run/`](run/README.md) | the Run door | the same guides through their index, [`run/README.md`](run/README.md), which the coding-agent guide (#611) links rather than repeats |
 | **Direction**: decided, not built | its owning issue or record; direction nobody owns is recorded, dated, on [`architecture/direction.md`](architecture/direction.md) | the Develop door | not read |
