@@ -157,6 +157,26 @@ added: its check-in in `vinga events tail --device <mac>` and the agent
 it reaches. Every command and flag is checked against `--help` at the
 implementation commit.
 
+**D4a. The simulator's prerequisites are stated.** `vinga simulator
+run` needs the `sim` extra on a workstation CLI (`docs/reference/cli.md`
+says how to install it), and it needs an OTA URL: `vinga info` prints
+the short onboarding URL only when onboarding is enabled. The guide
+says both: use the image's CLI, which carries the extra, or install the
+extra; and where onboarding is off, ask the person for the OTA URL their
+boards use (`server.ota_path` on the deployment's own host) rather than
+guess one. D7's smoke test runs the simulator from a workstation-style
+install (`uv tool install` of the package with the extra, at the
+worktree's commit) as well as from the image.
+
+**D4b. Watch before acting, and assert what should appear.** The event
+stream keeps nothing and joins at the present, so the guide starts
+`vinga events tail` (for a board, `--device <mac>`) before the
+simulator run or the board's power-on, not after; where recording is
+on, the conversation and session records are the retained check. D7
+asserts the events by name: `ota_check` and `session_open` for a
+check-in and a conversation, then `heard`, `replied` or the failure
+events the logs guide lists, never merely that the command ran.
+
 **D5. No future on the page.** The `/try/` link, the three-stage Getting
 Started and the readiness model are not mentioned; #613, #610 and #611
 M2 add their lines when they land, which their own plans' operator
@@ -282,6 +302,8 @@ Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    *Resolution:* Accepted, with finding 4 in D1b: a revision before this page existed, `unknown`, and a `-dirty` tree the agent cannot see each get a stated action, and none falls back to presenting `main` as the install's instructions.
 
 6. **P2: The simulator step is not available on every documented path.** Evidence: plan, D4 and D7 (`docs/plans/2026-10-06-coding-agent-guide.md:120`) treats `vinga simulator run` and an OTA URL from `vinga info` as unconditional. A workstation CLI needs the `sim` extra (`docs/reference/cli.md:164`), while onboarding can be disabled (`vinga-server/src/vinga_server/config/cli/deployment.py:790`), in which case `info` prints no URL. The plan should give the installed-client prerequisite and a person-controlled path for deployments using the legacy OTA URL. Its smoke test should exercise the workstation CLI, not only the worktree environment.
+
+   *Resolution:* Accepted. D4a states the `sim` extra and the OTA URL prerequisites, with a person-controlled answer when onboarding is off, and D7 exercises the simulator from a workstation-style install as well as the image.
 
 7. **P2: The proposed event check can miss the event it claims to confirm.** Evidence: plan, D4 (`docs/plans/2026-10-06-coding-agent-guide.md:120`) checks a board's check-in with `vinga events tail`; logs-and-traces.md (`docs/run/logs-and-traces.md:168`) says the stream retains nothing and reconnects at the present. The plan should start the tail before the simulator or board action, or use a retained record where recording is enabled. Verification should assert the expected `ota_check` and `session_open` events, not merely run the command.
 
