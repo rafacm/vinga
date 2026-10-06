@@ -51,13 +51,15 @@ cancellation, and the room. Whether a reply interrupts itself turns on
 how much of the assistant's own voice survives the board's cancellation
 and reaches the endpointer, and no test can tell you that number.
 
-Three files per session, sharing one timeline:
+Three files per session, sharing one timeline, and a directory of
+per-turn clips beside them:
 
 | File | What it holds |
 | --- | --- |
 | `<session>.wav` | Stereo 16 kHz s16le. Channel 0 is the microphone as decoded, channel 1 is what was paced out to the speaker. |
 | `<session>.jsonl` | Every structured event, plus a `t_ms` offset into the audio, plus dropped frames per second and the endpointer's opinion per frame. |
-| `<session>.json` | What the capture was made against: server revision, the firmware the device reported, the resolved providers verbatim, and the barge-in thresholds. |
+| `<session>.json` | What the capture was made against: server revision, the firmware the device reported, each agent's resolved providers by name, type, host and model (the four the conversation store keeps, so no option and no credential), and the barge-in thresholds. |
+| `<session>.turns/` | Mono 16 kHz clips, two per turn: `<utterance>.heard.wav`, the exact audio the turn's transcription was handed, and `<utterance>.reply.wav`, what was paced out while that turn was answered. |
 
 Stereo rather than two files is the whole point: sample N in both
 channels is the same instant, so echo leakage is a measurement (cross
@@ -71,11 +73,15 @@ frames a configuration discards (not listening, or `barge_in: false`
 during a reply) are in the file anyway. Those are the frames that
 explain a misfire.
 
-Storage is 64 kB/s, so a fifteen minute session is about 58 MB and the
-2000 MB budget is around nine hours. Both bounds matter: the model
-caches share the volume and grow underneath the budget, so capture
-declines to start and says why rather than being the thing that fills
-the disk.
+Storage is 64 kB/s, so a fifteen minute session is about 58 MB of WAV;
+the per-turn clips add about half as much again, so the 2000 MB budget
+is around six hours of sessions. Whole captures are pruned oldest first,
+with their clips, except a session still recording and the newest
+finished one, and `capture_over_budget` says so when nothing more can
+go; a capture that reaches `max_session_s` is cut there, with
+`capture_limit`. Both bounds matter: the model caches share the volume
+and grow underneath the budget, so capture declines to start and says
+why rather than being the thing that fills the disk.
 
 A capture cut off by a restart stays readable. The WAV header carries
 byte counts that are only patched on a clean close, so a truncated file
@@ -89,5 +95,13 @@ break things, and say a marker phrase aloud when something goes wrong.
 It is on the WAV, and the `heard` event beside it in the decision track
 points at the interesting twenty seconds instead of ten minutes of
 scrubbing; with the conversation store on and `text: true`, the phrase
-itself is one query away, since both records carry the same session id. Copy the three files off
-after each session; a field recording is not repeatable.
+itself is one query away, since both records carry the same session id.
+Copy the session's files and its clip directory off after each session;
+a field recording is not repeatable.
+
+Nothing here leaves the host unless
+[`server.telemetry.export_audio`](../reference/server-config.md#servertelemetry)
+is on, in which case a closed session's recording, its manifest and its
+clips are also uploaded beside its trace in the telemetry backend
+([Exporting traces](logs-and-traces.md#exporting-traces)), staged under
+the capture directory until the upload has finished with them.

@@ -70,7 +70,9 @@ profile, which is what the project README's quick start starts. The
 profile is what keeps the two apart: the command above selects no
 profile and so starts the database alone, exactly as it always has,
 and `docker compose --profile server up -d --wait` starts the
-published image beside it. A checkout that runs the server from source
+published image beside it, which reads `VINGA_API_SECRET` from a `.env`
+beside the compose file, as the quick start writes it, and refuses to
+start without one. A checkout that runs the server from source
 wants the first; there is nothing to opt out of.
 
 The test lanes use that same instance, and refuse to run rather than
@@ -88,7 +90,9 @@ remember. The extras above are the two optional local engines, which is
 what an extra flag is still for.
 
 The test lanes run the whole pipeline on the built-in mock providers, so
-they need no keys, no model downloads, and no network.
+they need no keys, no model downloads, and no network, apart from the
+integration lane's tier-closure tests, which build throwaway installs
+with `uv sync` and download packages when uv's cache is cold.
 
 ### The local lane: a real conversation
 
@@ -96,7 +100,10 @@ CI never touches real engines. To check the overall work with them, an
 opt-in third lane holds one real conversation end to end: it starts a
 real server on the fully local pipeline (Silero, faster-whisper, Ollama,
 Piper), speaks a Piper-synthesized question through the device simulator,
-and asserts the transcript and a coherent spoken reply.
+and asserts the transcript and a coherent spoken reply. Two more tests
+ride the same lane and the same summary: tool calling against the real
+model, with a pre-flight of its own for a model that can call tools, and
+two personas.
 
 ```bash
 uv sync --extra faster-whisper --extra piper
@@ -116,19 +123,25 @@ reply   : "The capital of Sweden is Stockholm." (first sentence +3.8 s, 2.0 s of
 
 A pre-flight check runs first and fails with the command that fixes
 whatever is missing (extras not installed, no Ollama answering, no usable
-model). By default it talks to Ollama at `localhost:11434` and prefers
+model). By default it talks to Ollama's OpenAI-compatible endpoint at
+`http://localhost:11434/v1`, which is the form `VINGA_LOCAL_OLLAMA`
+takes too, and prefers
 `qwen3:8b`, falling back to the first installed model;
 `VINGA_LOCAL_OLLAMA` and `VINGA_LOCAL_LLM_MODEL` override both. The
 first run downloads the whisper model and Piper voice at server startup
 and can take a few minutes; later runs finish in seconds. Without
-`VINGA_LOCAL_LANE=1` the lane skips, so a bare `pytest` stays safe.
+`VINGA_LOCAL_LANE=1` the lane skips, so a bare `pytest` stays safe,
+though even a skipping run needs the development database reachable,
+since the lane provisions its stores when it is collected.
 
 ### The smoke lane: a conversation with a container
 
 A fourth lane runs nothing itself. It points at a server that is already
 up and holds one whole conversation with it: both probes, an OTA check whose
-token it verifies, and a full utterance-to-audio exchange through the
-device simulator. CI runs it against the image it just built, seeding
+token it verifies, that the root and the interactive API documents answer
+404, and a full utterance-to-audio exchange through the device
+simulator, and, when `VINGA_SMOKE_REVISION` is set, that the container
+names that build. CI runs it against the image it just built, seeding
 that image's own CLI into the database it then reads, which is what
 turns "a seeded database and one `docker run` serve a conversation"
 into something checked rather than remembered.
@@ -139,10 +152,15 @@ address is its own. Join them to the network compose made for it
 (`docker network ls` lists it as your project's `_default`) and name
 the service instead, which is what `VINGA_DB_HOST` is doing here; CI
 does the same thing with a network and a database container of its
-own.
+own. The lane also gets a database of its own, `vinga_smoke`, because
+the seed below writes a whole configuration and would otherwise replace
+the development configuration in `vinga`; `createdb` runs inside the
+compose database container, over its own socket.
 
 ```bash
-# From vinga-server/.
+# From vinga-server/. Once: the lane's own database.
+docker compose exec postgres createdb -U vinga vinga_smoke
+
 docker build -t vinga-server:local .
 
 # The network compose made for the database, named after the directory
@@ -163,6 +181,7 @@ docker run --rm --network "$net" \
   -e VINGA_AUTH_SECRET \
   -e VINGA_API_SECRET \
   -e VINGA_DB_HOST=postgres \
+  -e VINGA_DB_NAME=vinga_smoke \
   -v smoke-data:/data \
   -v "$PWD/tests/smoke:/smoke:ro" \
   -v "$PWD/tests/smoke/config.yaml:/config/config.yaml:ro" \
@@ -172,6 +191,7 @@ docker run -d --name vinga-smoke -p 8003:8003 --network "$net" \
   -e VINGA_AUTH_SECRET \
   -e VINGA_API_SECRET \
   -e VINGA_DB_HOST=postgres \
+  -e VINGA_DB_NAME=vinga_smoke \
   -v smoke-data:/data \
   -v "$PWD/tests/smoke/config.yaml:/config/config.yaml:ro" \
   vinga-server:local

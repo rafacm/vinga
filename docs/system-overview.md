@@ -186,7 +186,10 @@ shown, not added to the conversation this server keeps, and not stored,
 and no event or log line carries a byte of it: what says it happened is
 a `sentence_withheld` event, carrying its length in characters and
 which tool it was shaped like, under the same naming rule `tool_call`
-follows. A reply left with nothing at all to say, every sentence of it
+follows, or `unknown` where its keys fit more than one offered tool.
+The one place it does go is the opt-in trace export of what a model was
+sent and wrote (`server.telemetry.export_llm_input`), which captures a
+model's output before any of this filtering. A reply left with nothing at all to say, every sentence of it
 withheld, says the agent's fallback phrase
 ([When a reply fails](run/slow-and-failed-replies.md#when-a-reply-fails))
 with the reason `nothing_sayable`, because the alternative is the
@@ -215,9 +218,10 @@ in [`architecture/diagrams/plantuml/`](architecture/diagrams/plantuml/).
 cancels it, but only on evidence that you really did speak: acoustics
 alone, mid-reply, are as often the room or the assistant's own voice
 leaking past the echo cancellation. Too little speech is a noise blip
-and is ignored, the moment right after playback starts is ignored, and
-anything else pauses the reply and asks the transcriber before deciding,
-so a wrong guess costs one transcription rather than the answer. The
+and is ignored, an interruption that lands while the reply is still
+being transcribed merges with what it interrupted, and anything else
+pauses the reply and asks the transcriber before deciding, so a wrong
+guess costs one transcription rather than the answer. The
 branches are drawn in
 [`barge-in-decision`](architecture/diagrams/plantuml/vinga-barge-in-decision.png).
 

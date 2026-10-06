@@ -45,8 +45,8 @@ server:
 What lands is the `record` schema of the same database the
 domain half's `domain` schema is in, which means the same instance, the
 same credentials and the same backup: one row per session, one per
-conversation, one per turn, one per tool call a turn made, and one per
-structured event, which is the same decision track the capture writes
+conversation, one per turn, one per tool call a turn made, one per recap
+checkpoint, and one per structured event, which is the same decision track the capture writes
 beside its audio. What each row holds, column by column, is the
 generated [conversation store reference](../reference/conversations-schema.md),
 and `vinga-server conversations schema` prints the same document. A
@@ -96,9 +96,10 @@ newest turns first, up to `resumption_budget_tokens`. That budget is
 approximate by design (the count is estimated from the stored
 characters), what it drops when a thread is longer than it are whole
 turns oldest first, and a thread rebuilt from its tail is told so, as
-is one whose record has holes in it. Arguments and results of the tools
-a turn ran stay in the store: what a rebuilt conversation carries is
-what was said, and the names of the tools that ran.
+is one whose record has holes in it. A turn's tool calls are rebuilt as
+the session kept them, each with its arguments and its result, so a
+rebuilt conversation carries what was said and what its tools were
+asked and answered; a call that never got a result does not come back.
 
 A thread longer than that budget is not silently trimmed. The tool
 answers with the choice instead, for the agent to put to the user: a
@@ -122,8 +123,9 @@ the session closes, which is what this server always did.
 
 ## Who it records
 
-**The switches are deployment-wide, and they are the only privacy
-control vinga has.** There are no per-user controls, so enabling text
+**The switches are deployment-wide, and beside erasing on demand they
+are the only privacy control vinga has.** There are no per-user
+controls, so enabling text
 storage on a device a household shares stores what guests say to it,
 which is the same statement
 [Capturing a session](capturing-a-session.md) makes about audio.
@@ -171,7 +173,10 @@ from its earliest surviving turn or loses its title, recap checkpoints
 that summarized an erased turn go along with everything descended from
 them, the activity stamp falls back to what the survivors support, and
 a thread left with no turns is deleted whole, because a title and two
-timestamps are not a conversation.
+timestamps are not a conversation. A thread that goes, by erasure or by
+retention, takes its memory with it in the same transaction, the
+conversation's ledger and the facts it forgot, and an erasure's answer
+counts those too.
 
 A session that is still running when its row goes stops being
 recorded: the writer finds the row gone and stops writing for that
@@ -211,10 +216,13 @@ the addressed API under
 rather than raw tables. A database provisioned without that file
 simply has no analyst role, and serves exactly the same.
 
-There is deliberately no analysis command, and the ids on `sessions`,
-`conversations`, `turns` and `events` are identity columns a sequence
-never hands out twice, so a client that has read up to one can ask for what came after
-it and cannot be handed a different row under the same number.
+Beside raw SQL, `vinga metric` reads the named aggregate views over the
+record (served at `/api/metrics`), and `vinga session` and
+`vinga conversation` list and show single sessions and threads. The ids
+on `sessions`, `conversations`, `turns` and `events` are identity
+columns a sequence never hands out twice, so a client that has read up
+to one can ask for what came after it and cannot be handed a different
+row under the same number.
 
 ## How it is written
 
@@ -223,12 +231,14 @@ does every database call behind a queue nothing on the session loop ever
 waits on, and it commits at turn boundaries and at session close, so a
 page opened mid conversation reads everything up to the last completed
 turn. A database that is wedged or locked drops events, says so once per
-session, and records the count on the session row, and it never delays a
-reply.
+session, and records the count on the session row (where `telemetry` is
+on; with it off the count stays zero), and it never delays a reply.
 
 Turns and closes are never refused at the queue, whatever the backlog:
 they are the record's structural truth and they arrive at conversational
-pace. That is not a promise that a close always lands. A close whose own
+pace. That is not a promise that every turn or close lands. A turn
+whose write still fails after three attempts is dropped, and its thread
+is marked incomplete rather than silently short. A close whose own
 transaction fails leaves the session row open-shaped, with a null
 `closed_at` and no close reason, which is the same incomplete state a
 process killed mid-session leaves behind: it is readable, it is listed,
