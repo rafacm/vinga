@@ -533,7 +533,7 @@ Which is why it is not one number per server: `trailing_silence_ms`
 is an option on a VAD provider entry, an agent binds the entry it
 wants, and a handover builds the incoming agent's endpointer, so a
 dictation agent can be patient while its siblings stay quick
-([the server README](../vinga-server/README.md#listening-and-barge-in)).
+([Tuning when a turn ends](run/turn-taking.md#listening-and-barge-in)).
 
 ### TTS (text-to-speech)
 
