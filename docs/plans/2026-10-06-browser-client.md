@@ -247,23 +247,28 @@ the firmware does, and the operator claims it with
 `vinga device pending claim`. Nothing here anticipates #612; when it
 lands, the page needs no change because it follows the reply.
 
-**D5. The `/try/` link.** `POST /api/runtime/try-links` (operator
-bearer, like every `/api` route) mints a token: 32 random bytes,
-urlsafe base64, held in the server's process memory with an expiry
-(D6) and a used flag, never written to the database or the event
-stream. `vinga info` calls it and prints `<public origin>/try/<token>`,
-the origin derived the way the onboarding URL is. `GET /try/<token>`
-consumes the token (a second use, an expired one or an unknown one
-answer the same 404 a never-served path does), mints an identity
-(D1), binds it to the default agent with `bind_device` (the row named
-`Browser <last 6 hex>` through the existing rename, so it reads as a
-browser in every listing), and answers a small page that stores the
-identity and moves to `/x/<key>/try/` with `history.replaceState` and
-`location.replace`, so the token leaves the address bar and the history
-entry. With no default agent set, it binds nothing and the page says
-so, naming `vinga default-agent set`. The route is outside `/api`, so it
-is never behind the operator token, and it carries no secret beyond the
-single-use token itself.
+**D5. The `/try/` link carries its token in the fragment, and a GET
+spends nothing.** `POST /api/runtime/try-links` (operator bearer, like
+every `/api` route) mints a token: 32 random bytes, urlsafe base64, held
+in the server's process memory with an expiry (D6) and a used flag,
+never written to the database or the event stream. `vinga info` calls it
+and prints `<origin>/try/#<token>` (D5c says which origin). The token
+travels in the URL's fragment, which a browser never sends to any
+server, puts in no `Referer`, and no proxy or server access log can
+therefore record, which is what keeps it out of every log rather than
+out of the logs this server controls. `GET /try/` is an inert static
+page with `Cache-Control: no-store` and `Referrer-Policy: no-referrer`:
+a link preview, a prefetch or a scanner fetching it gets the page and
+spends nothing, because the token never reached the server. The page's
+script reads `location.hash`, clears it from the address bar and the
+history entry (`history.replaceState`), and redeems it with a
+same-origin `POST /try/redeem` carrying the token in the body. Redeeming
+consumes the token (an unknown, expired or used token answers one fixed
+refusal, indistinguishable between the three), mints an identity (D1),
+binds and names the device in one operation (D5b), and answers the
+identity and the onboarding page's path, to which the page moves. The
+routes are outside `/api`, so never behind the operator token; the POST
+body is never logged, and the sentinel tests plant a token through it.
 
 **D6. The try link's lifetime.** Ten minutes and one use, as constants,
 not configuration: the issue says minutes, and a key nobody needs is
@@ -421,6 +426,8 @@ Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    *Resolution:* Accepted. D3a: the page advertises MCP in its hello and answers `initialize`, `tools/list` and `tools/call` like the firmware, publishing only tools a browser can honestly implement under the firmware's names (`self.get_device_status`, `self.audio_speaker.set_volume`); M3's lane asserts discovery and one scripted call changing the page's gain.
 
 3. **P1: The try token is not kept out of every log.** The issue makes that a condition of putting the token in `/try/<token>`. The plan relies on uvicorn access logging being off, while acknowledging that a reverse proxy may log the path (plan:44 (`docs/plans/2026-10-06-browser-client.md:44`), plan:246 (`docs/plans/2026-10-06-browser-client.md:246`)). A warning does not satisfy the condition for an exposed deployment. **Amend the deployment procedure** with a required proxy rule that suppresses or redacts this path before access logging, and verify it through the documented proxy setup. Give the token response `Referrer-Policy: no-referrer` and `Cache-Control: no-store` so loading its script cannot repeat the URL in a same-origin `Referer` header or a cache.
+
+   *Resolution:* Accepted, by a different mechanism than the finding proposes. Rather than require a proxy rule, D5 moves the token into the URL's fragment (`<origin>/try/#<token>`): a browser never sends a fragment to any server or in a `Referer`, so no proxy or server log can record it. `GET /try/` is inert (`no-store`, `no-referrer`), and the page redeems the token with a same-origin `POST /try/redeem`.
 
 4. **P2: An ordinary GET can consume and bind a try link before the person opens it.** `GET /try/<token>` spends the sole use and writes a device row (plan:222 (`docs/plans/2026-10-06-browser-client.md:222`)). A link preview, prefetch or scanner can make that GET; the subsequent human visit receives 404. **Make the GET inert**, then redeem through a same-origin POST from the opened page, with a test that fetching or previewing the URL leaves it usable.
 
