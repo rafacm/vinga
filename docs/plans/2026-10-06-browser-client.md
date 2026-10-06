@@ -27,8 +27,10 @@ new configuration key in M1 to M3 unless the plan review asks for one
 (D6 names the one candidate); a device guide `docs/devices/browser.md`
 (the Use door), a line in `docs/run/onboarding-a-device.md`, the
 `/try/` step in `docs/run/with-a-coding-agent.md` (#611's D8), and the
-glossary's Device entry widened to a browser. No upgrade action; a
-deployment that never opens a try link behaves exactly as before.
+glossary's Device entry widened to a browser. No upgrade action beyond
+one sentence (D5e): a restart, an image upgrade included, ends every
+unredeemed try link, so an operator issues a fresh one; a deployment
+that never opens a try link behaves exactly as before.
 
 **Attribution:** anthropic/claude-opus-5-5, thinking high; Claude Code 2.1.289; 2026-10-06.
 
@@ -570,5 +572,7 @@ Reviewed 2026-10-06 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.0
 6. **P2: The browser lane's required coverage is contradicted by the Risk section.** Evidence: Q5a requires the browser lane on every event that triggers the server workflow because OTA, session, protocol, and packaging changes can break it (lines 172-183 (`docs/plans/2026-10-06-browser-client.md:172`)). The Risks section allows it to run only when `browser/` or `ws.py` changes (lines 425-427 (`docs/plans/2026-10-06-browser-client.md:425`)). The latter would repeat the settled coverage failure. Remove the conditional skip; optimize the lane without narrowing its trigger scope.
 
 7. **P2: "No upgrade action" is false for outstanding try links.** Evidence: try links exist only in process memory (lines 277-281 (`docs/plans/2026-10-06-browser-client.md:277`)), while the operator surface claims no upgrade action (lines 24-31 (`docs/plans/2026-10-06-browser-client.md:24`)). A restart or image upgrade invalidates every unredeemed link before its advertised ten-minute lifetime. The plan should state this expiry condition in the operator and upgrade guidance, test restart invalidation as the same fixed refusal, and tell an operator to issue a fresh link after a restart.
+
+   *Resolution:* Accepted. D5e: a restart or upgrade invalidates every unredeemed link (the store is in memory); redemption afterwards meets the same fixed refusal, tested, and the onboarding and upgrading guides each say to issue a fresh link after a restart. The operator-surface line is corrected to match.
 
 Verdict: not ready. Address the P1 and P2 amendments before implementation.
