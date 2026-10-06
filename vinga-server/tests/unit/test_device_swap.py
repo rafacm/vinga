@@ -457,6 +457,26 @@ async def test_a_board_nobody_named_is_still_a_board_nobody_named(
     assert store_module.DEVICE_NAME_RESERVED in str(refused.value)
 
 
+async def test_a_browser_nobody_named_is_still_one_after_a_swap(
+    store: ConfigStore
+) -> None:
+    """The browser's placeholder moves the way the board's does, and
+    keeps its word: it is also derived from the address and reserved to
+    the device whose own MAC it is, so left behind it would be a name
+    the exported document could not write back."""
+    a_working_configuration(store)
+    store.set_default_agent(AGENT)
+    store.enroll_device(DYING, f"Browser {DYING}")
+
+    replaced = store.replace_device(DYING, FRESH)
+
+    assert replaced.name == f"Browser {FRESH}"
+    applied = store.apply(
+        {"devices": {FRESH: dict(store.read_device(FRESH).entry.model_dump())}}
+    )
+    assert [entry.wrote for entry in applied] == [False]
+
+
 async def test_a_named_board_keeps_the_name_a_person_chose(
     store: ConfigStore
 ) -> None:
