@@ -143,8 +143,8 @@ it an instruction, and in a field session it was one: a 0.9 s utterance
 transcribed as `vinga, Oliver, Greta, Mateo`, and the model read the
 agent names as a request and handed over to an agent nobody had
 asked for. The server never hands a transcript that is the prompt and
-nothing else (trimmed, case-insensitive, and ignoring a full stop the
-model added) to the LLM as if spoken. Nor does it treat the echo as
+nothing else (trimmed, case-insensitive, and ignoring sentence-final
+punctuation the model added) to the LLM as if spoken. Nor does it treat the echo as
 proof of silence, because a field test caught that reading swallowing
 real speech: nine echoes in two days of testing, every one on a clip
 under two seconds, two of them a user saying "yes, please" and being

@@ -30,7 +30,8 @@ its siblings have. Each server's tools are offered under its entry name
 `[A-Za-z0-9_-]+` name and cannot be `self` or a builtin's name
 (`switch_agent`, `remember`, `update_memory`, `forget`,
 `restore_memory`, `recall`, `set_state`, `clear_state`,
-`new_conversation`, `resume_conversation`). Both transports the
+`new_conversation`, `resume_conversation`, `set_device_location`). Both
+transports the
 specification defines are supported:
 
 ```bash
@@ -113,8 +114,9 @@ that environment variable at startup, and any secret-looking key
 somewhere in its value. The reference may be the whole value or sit
 inside a larger one, so `Authorization: Bearer $WEATHER_TOKEN` keeps the
 word `Bearer` in the configuration instead of inside the secret. An
-unset variable fails the boot, as does an unknown reference or a
-reserved entry name. A server that is merely unreachable does not: it
+unset variable fails the boot of an entry some agent references (one
+nobody references is never connected, so its variables are never
+read), as does an unknown reference or a reserved entry name. A server that is merely unreachable does not: it
 logs a warning, contributes no tools, and reconnects in the background
 when a session that would use it opens.
 
@@ -200,7 +202,10 @@ decision about a third party's words, not a decision to let that server
 hand your own credential back through a prompt or a gated read, and a
 careless server that echoes what it was configured with is the ordinary
 case rather than the hostile one. Values shorter than eight characters
-are left alone, since an `env` holds ports and locales too.
+are left alone, since an `env` holds ports and locales too, unless the
+value is known to be a credential: one read from the variable a
+secret-bearing key references, and a stored secret, are replaced
+whatever their length.
 
 Both channels are capped at 4000 characters per block, and a longer one
 is skipped whole rather than truncated: half an instruction is an
@@ -224,8 +229,9 @@ more than one agent; the memory family (`remember`, `update_memory`,
 `forget`, `restore_memory`, `recall`) and the conversation ledger's
 `set_state` and `clear_state`, offered to every agent whose `memory`
 section leaves them on, which is every agent that does not say
-otherwise; and `new_conversation` and `resume_conversation`, always
-offered.
+otherwise; and `new_conversation`, `resume_conversation` and
+`set_device_location`, which records where the board now is when
+somebody says it has been moved, always offered.
 
 A successful `switch_agent` ends the current agent's reply: the new
 agent greets the user in its own prompt and its own voice, on its own

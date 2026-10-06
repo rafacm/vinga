@@ -67,8 +67,9 @@ that change a fact address:
   assistant is asked to say out loud so you can ask for it back;
   `restore_memory` brings back the last thing forgotten in the
   conversation, or a named one. A removal is held rather than erased
-  until that conversation ends, and `permanently: true` erases outright
-  with nothing to bring back.
+  for as long as the conversation it was made in is kept, which on a
+  deployment that stores no conversations is until the session closes,
+  and `permanently: true` erases outright with nothing to bring back.
 
 An assistant reaches its own facts and its device's, and nothing else:
 every numbered operation is bounded by ownership in the query itself, so
@@ -89,8 +90,8 @@ The ledger is keyed by the conversation, not by the connection, so it
 survives a device hanging up and comes back when that conversation is
 resumed. It is deleted in the same transaction as the thread it belongs
 to, whether that thread goes because it was erased through the API or
-because retention pruned it, and the deletion answers how much of it
-went. On a deployment that does not store conversation text a thread
+because retention pruned it, and an erasure through the API answers
+how much of it went. On a deployment that does not store conversation text a thread
 cannot be resumed at all, so every conversation there begins with an
 empty ledger and anything worth keeping has to be remembered instead.
 
