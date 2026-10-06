@@ -378,6 +378,26 @@ class SnapshotOnlyError(ConfigError):
     """
 
 
+class TryLinkRefusedError(ConfigError):
+    """A try link was not issued, because this deployment is in a state
+    where opening one could not do what the link promises (#613).
+
+    A link's promise is that the browser opening it is bound to an agent
+    before its first word. Three states break it, and each is a fact
+    about the deployment rather than about the request: onboarding is
+    off, so there is no page and no alias for the browser to check in
+    at; no default agent is set, so there is nothing to bind it to; and
+    the store already holds as many live links as it will, which clears
+    as they are opened or expire. Nothing was changed by any of them.
+
+    Its own type for the status it answers with, which is the one every
+    nothing-was-changed state here shares. Raised by the token store and
+    its issuer, and it lives here rather than beside them for the reason
+    the others do: what has to answer it with a status code is the
+    configuration API.
+    """
+
+
 class ProviderRefusedError(ConfigError):
     """An apply could not build the engines the stored configuration
     names, so nothing was applied.

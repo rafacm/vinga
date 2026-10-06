@@ -24,6 +24,8 @@ A file each, under this one:
   configuration API and `vinga-server config` read it.
 - `unbound` is the one home of the question "what does a device with no
   agent get", plus the reply section that answers it.
+- `browser` mints a browser's identity, and `try_links` holds the
+  try links that bind one, issues them and redeems them (#613).
 
 The key derivation and the origin resolution take the file half of the
 configuration (`server`) rather than the composed whole, because they
@@ -93,6 +95,27 @@ MINT_WINDOW_S = 600.0
 # keeps what it had.
 RELEASED_GRACE_S = 60.0
 
+# The try link's parameters (#613, D6, D6a), constants for the reason
+# the four above are: the issue says minutes, and a key nobody needs is
+# one more thing to document and refuse.
+#
+# How long a link stands once issued. Ten minutes: long enough to send
+# it to the laptop on the other side of the room, short enough that a
+# link left in a chat history is spent bearer material soon after.
+TRY_LINK_TTL_S = 600.0
+
+# How many unredeemed links the store holds at once. Each `vinga info`
+# issues one, so this is a handful of operators running it a few times
+# each inside ten minutes, with room to spare; past it a new link is
+# refused until one is opened or expires, which is what keeps neither
+# memory nor live bearer material growing without bound.
+TRY_LINK_CAPACITY = 32
+
+# How many identities one redemption mints before it gives up on a MAC
+# collision. Forty-six random bits make even the second draw a
+# curiosity; three is a bound, not an expectation.
+TRY_LINK_MINTS = 3
+
 # And the submodules, imported after the emitter and the bounds rather
 # than above them, which is the whole of what the markers below are
 # for: each of them reads one or the other out of this module, so both
@@ -133,6 +156,7 @@ from .pending import (  # noqa: E402
     _drawn,
     _fact,
 )
+from .try_links import TryLinks  # noqa: E402
 from .unbound import (  # noqa: E402
     ACTIVATION_ALGORITHMS,
     ACTIVATION_TIMEOUT_MS,
@@ -161,6 +185,9 @@ __all__ = [
     "ONBOARDING_OFF",
     "PENDING_CAPACITY",
     "RELEASED_GRACE_S",
+    "TRY_LINK_CAPACITY",
+    "TRY_LINK_MINTS",
+    "TRY_LINK_TTL_S",
     "TYPO_ATTEMPT_LENGTH",
     "Claim",
     "Handler",
@@ -169,6 +196,7 @@ __all__ = [
     "Origin",
     "PendingDevice",
     "PendingDevices",
+    "TryLinks",
     "Unbound",
     "_CODE_CEILING",
     "_TYPO_ATTEMPT_RE",
