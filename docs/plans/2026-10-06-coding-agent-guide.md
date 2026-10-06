@@ -276,13 +276,18 @@ claiming: D7.
 
 `docs/run/with-a-coding-agent.md` (new), `docs/run/README.md`,
 `docs/README.md` (Run door), the root `README.md` (one sentence at
-Getting Started), `AGENTS.md` (one line), and
+Getting Started, and D9's rewrite of its secret generation to the 0600
+pipe form), `AGENTS.md` (one line), and
 `changelog.d/611-coding-agent-guide.md` (`### Added`).
 
 ## Milestones
 
-- [ ] **M1: the guide.** Decisions 1 to 9 and D1 to D7. One PR; it
-  leaves #611 open for M2.
+- [ ] **M1: the guide.** Decisions 1 to 9 and D1 to D9, including
+  D9's three parts: Getting Started's secret generation rewritten, the
+  secret and NVS steps marked as person-run handoffs on the guide, and
+  the credential sweep over every page the guide links, each with its
+  outcome in the implementation record. One PR; it leaves #611 open for
+  M2.
 
 ## Plan review round
 
@@ -341,5 +346,7 @@ The plan should require `vinga events tail --follow` (and `--device <mac>` for a
 3. **P2: The milestone does not commit the secret-safety prerequisite it depends on.**
 Evidence: D9 requires this PR to rewrite Getting Started's shell-expanded secrets and run a linked-page credential sweep (plan:222-234 (`docs/plans/2026-10-06-coding-agent-guide.md:222`)). But the sole M1 checklist ends at D7 (plan:273-276 (`docs/plans/2026-10-06-coding-agent-guide.md:273`)), and the footprint characterizes README work as only "one sentence" (plan:266-271 (`docs/plans/2026-10-06-coding-agent-guide.md:266`)).
 The plan should include D9's README rewrite, handoff validation, and whole linked-page leak sweep in M1's checklist and documentation footprint, with their outcomes required in the implementation record.
+
+   *Resolution:* Accepted. The footprint names D9's README rewrite, and the M1 item lists D9's three parts (the rewrite, the person-run handoffs, the linked-page sweep), each with its outcome required in the record.
 
 Verdict: **ready after the P1/P2 amendments.**
