@@ -17,7 +17,7 @@ the pages that say what a change to any of this is held to.
 - [The overview](#the-overview): the whole system in one picture.
 - [One conversation turn, in detail](#one-conversation-turn-in-detail):
   the eleven steps from a spoken sentence to a spoken answer, in two
-  flows.
+  flows, and the one kind of sentence a reply never speaks.
 - [What this diagram leaves out](#what-this-diagram-leaves-out):
   interrupting a reply, and which stages leave your machine.
 - [Transports](#transports): the one transport a device and the server
@@ -135,7 +135,8 @@ that setup is the thin note at the top of the diagram, and the
    assistant's voice). One kind of sentence is not spoken: a model that
    writes a tool call into its own prose instead of issuing it would
    have the JSON read out loud, so a sentence shaped like a call to a
-   tool this reply offered is dropped, with an event saying it happened.
+   tool this reply offered is dropped, with an event saying it happened
+   ([below](#when-a-model-writes-a-tool-call-into-its-speech)).
 
 9. **The audio is resampled, re-encoded, and paced.** The voice's sample
    rate is converted to the 24 kHz the server announced in the `hello`
@@ -158,6 +159,51 @@ that setup is the thin note at the top of the diagram, and the
     to is hung up after `server.limits.idle_timeout_s` (two minutes by
     default), because otherwise its microphone would stream to the
     server for the whole hour the session is allowed.
+
+#### When a model writes a tool call into its speech
+
+A reply is spoken sentence by sentence, and every sentence is spoken
+except one kind: a sentence shaped like a call to a tool this reply
+actually offered. Some models, small local ones especially, write their
+calls out as ordinary prose instead of issuing them, and read aloud
+that is JSON in the assistant's voice on the one user-facing surface
+with no filter on what a model produced.
+
+The check is narrow, and it is anchored to the tools of the reply it is
+in rather than to "looks like JSON": someone asking an agent to explain
+a JSON snippet is a real conversation and gets an answer. A sentence is
+withheld when it contains a complete JSON object that either names one
+of the offered tools, in its own `name` or in the `name` under a
+`function` key, or whose keys all fall inside the properties one
+offered tool declared. The second is the shape the field actually
+produces, where the name never made it out and only the arguments did
+(`{"volume":"100"}`), so nothing about it can be matched by name; keys
+are compared and values never are, since the observed one had the wrong
+type for the schema it belonged to.
+
+The sentence goes whole and the reply carries on. It is not spoken, not
+shown, not added to the conversation this server keeps, and not stored,
+and no event or log line carries a byte of it: what says it happened is
+a `sentence_withheld` event, carrying its length in characters and
+which tool it was shaped like, under the same naming rule `tool_call`
+follows. A reply left with nothing at all to say, every sentence of it
+withheld, says the agent's fallback phrase
+([When a reply fails](run/slow-and-failed-replies.md#when-a-reply-fails))
+with the reason `nothing_sayable`, because the alternative is the
+silence that phrase exists to end.
+
+**One bound, stated rather than hidden.** The test is on each sentence
+as it arrives, because a sentence has already been handed to the voice
+by then. Sentences are cut at newlines, so a pretty-printed call
+arrives as a handful of fragments no JSON decoder can read, and those
+fragments are spoken. Closing that would mean holding sentences back to
+see what follows them, which puts a stall in front of live speech at
+every ordinary `{` in every reply. The residue is left visible through
+the event instead: an operator seeing `sentence_withheld` repeatedly,
+or hearing the fragments, is reading a fact about the model this
+deployment configured. The same event is what makes the cost of the
+key-matching rule visible, since an agent reading out a JSON example
+whose keys mirror an offered tool is withheld too.
 
 ## What this diagram leaves out
 
