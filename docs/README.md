@@ -14,7 +14,7 @@ what each class of page may claim.
 - [**Getting Started**](../README.md#getting-started): the path from
   nothing to a board answering a server on your own computer.
 - [**run/**](run/): one task guide per page, from running the container
-  to onboarding a device, listed one line each in
+  to reading what a conversation cost, listed one line each in
   [the guides' index](run/README.md).
 - [**deployment.md**](deployment.md): from a published image to a
   deployment that stays up, in a Docker Compose lane and a Kubernetes
@@ -24,10 +24,6 @@ what each class of page may claim.
   thing a deployment runs against its own Postgres before the server
   does; its header says what the executor needs and why rerunning it
   is safe.
-- [**vinga-server**](../vinga-server/README.md): the server in full:
-  conversation behavior, logging, traces, cost and the conversation
-  store; running, configuring and securing it, onboarding a device and
-  choosing its providers are task guides under `run/`.
 - [**system-overview.md**](system-overview.md): one conversation turn
   from the wake word to the spoken reply, each concept explained
   before its acronym is used.
@@ -74,6 +70,9 @@ what each class of page may claim.
   authoring tool.
 - [**system-overview.md**](system-overview.md): one conversation turn
   end to end, the walk the diagrams illustrate.
+- [**vinga-server**](../vinga-server/README.md): the server package's
+  own page: what it is, the two endpoints a device needs, and the four
+  pipeline stages its configuration is written in.
 - [**contributing.md**](contributing.md): running the server from a
   checkout, what it is built on, and the unit, integration, local and
   smoke lanes a change is exercised in.
@@ -144,7 +143,7 @@ that builds it.
 | **Concepts**: what the nouns are and how they relate | [`concepts.md`](concepts.md) and [`glossary.md`](glossary.md) | the Run and Use doors | the same pages |
 | **Device behavior** | [`devices/`](devices/), one guide per board; the browser client's guide is #613 | the Use door | the same guides |
 | **State**: what this deployment has, what is missing, the next command | `vinga info` reports which deployment this is and how much of each kind is configured; a readiness model that names what is missing is #611 | `vinga info` | `vinga info` |
-| **Procedures**: how to do one task | one task guide per task under [`run/`](run/README.md); the tasks not yet moved there are in the server README, and moving them is #609 | the Run door | the same guides through their index, [`run/README.md`](run/README.md), which the coding-agent guide (#611) links rather than repeats |
+| **Procedures**: how to do one task | one task guide per task under [`run/`](run/README.md) | the Run door | the same guides through their index, [`run/README.md`](run/README.md), which the coding-agent guide (#611) links rather than repeats |
 | **Direction**: decided, not built | its owning issue or record; direction nobody owns is recorded, dated, on [`architecture/direction.md`](architecture/direction.md) | the Develop door | not read |
 
 ## Authority

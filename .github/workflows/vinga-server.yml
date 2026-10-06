@@ -474,10 +474,12 @@ jobs:
 
       # The Run and Use page check, the same invocation docs.yml runs
       # after its link check. It runs here too because a Run or Use
-      # page can live under this workflow's paths (the server README)
-      # and change in a pull request the documentation workflow never
-      # sees. It reads docs/README.md and the pages it links from the
-      # repository root, hence the working directory.
+      # page can live under this workflow's paths and change in a pull
+      # request the documentation workflow never sees; the server
+      # README was one until it moved to the Develop door, and the step
+      # stays so that which workflow checks a page never depends on
+      # which door it is in. It reads docs/README.md and the pages it
+      # links from the repository root, hence the working directory.
       - name: Run and Use pages carry no issues or direction
         working-directory: .
         run: python3 scripts/check_run_use_pages.py .
