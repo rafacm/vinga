@@ -120,18 +120,22 @@ Create the `.env` file that the vinga server and the CLI both read:
 
 # .env holds secrets, so create it readable only by you
 umask 077
-cat > .env <<EOF
-# The bearer token for the configuration API
-VINGA_API_SECRET=$(openssl rand -hex 32)
+
+# The bearer token for the configuration API, then the secret that
+# signs device tokens. openssl writes each straight into the file, so
+# neither is printed, held in a variable or traced by the shell.
+{
+  printf 'VINGA_API_SECRET='; openssl rand -hex 32
+  printf 'VINGA_AUTH_SECRET='; openssl rand -hex 32
+} > .env
+
+cat >> .env <<EOF
 
 # Where the CLI reaches that API, which is this machine. Loopback
 # because the token above grants every write, and plain http is
 # allowed to a loopback address and to nothing else. Administering a
 # deployment you do not host is https, and this is the line to change.
 VINGA_API_URL=http://127.0.0.1:8003/api
-
-# The secret that signs device tokens
-VINGA_AUTH_SECRET=$(openssl rand -hex 32)
 
 # The address boards on your LAN reach this machine on.
 # The server listens on 0.0.0.0 and cannot tell which interface that is.
