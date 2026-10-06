@@ -24,6 +24,19 @@ from the served configuration instead, and an empty answer from there
 cannot say no default agent is set, only that none was when it was
 loaded; the mint refuses that too, with a 503 a retry may outlive. A
 refusal hands nothing over and writes nothing.
+
+The refusal is asked at the mint and nowhere after it, so one window
+stays open, deliberately. A browser minted while no default agent is
+set, which never pairs, is admitted without a code once an operator
+later sets one: its MAC is unbound, and a default agent covers every
+unbound MAC. That adds no capability. D4a is a product rule (a cleared
+browser pairs), not an access boundary: under a default agent the stock
+OTA check-in hands a token to any unknown MAC, so whoever holds the
+onboarding path can already reach the default agent with a made-up MAC,
+and an identity minted earlier gains nothing over that. Remembering
+which MACs were minted, to make them pair anyway, would be the second
+admission rule D4a exists to avoid; #612 closes the window by making
+every unbound device pair.
 """
 
 from fastapi import APIRouter, HTTPException, Request, Response
