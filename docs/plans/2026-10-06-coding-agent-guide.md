@@ -117,6 +117,13 @@ with stored state, names the command that would fix it and lets the
 person decide. Configuring by voice, users and roles (#606) are not
 mentioned: they do not exist.
 
+**D3a. Diff before writing and before applying.** `vinga apply` installs
+everything stored, not only what this session wrote. So the agent runs
+`vinga diff` before its first write, and again immediately before
+`vinga apply`; if anything is pending that it did not write, it shows
+the person the list and asks before applying, rather than installing a
+change nobody in this conversation asked for.
+
 **D4. Closing the loop uses what exists.** After a configuration change:
 `vinga apply`, then `vinga simulator run` against the deployment's OTA
 URL (`vinga info` prints it), whose transcript and reply show the
@@ -241,6 +248,8 @@ Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    *Resolution:* Accepted. D9 marks two kinds of step as person-run handoffs (secrets, and the NVS write carrying the Wi-Fi password) that the agent hands over and never runs or reads; Getting Started's shell-expanding secret generation is rewritten in this PR to the 0600 pipe form; and the credential grep runs over every page the guide links.
 
 3. **P1: `apply` can install changes the person never requested.** Evidence: plan, D3–D4 (`docs/plans/2026-10-06-coding-agent-guide.md:108`) promises to change only what was requested, then runs `vinga apply`; configuration.md (`docs/run/configuration.md:220`) says `apply` installs the stored snapshot and points to `vinga diff` for *everything* pending. The plan should require a diff before writing and immediately before applying. If unrelated changes are pending, the agent must show them and seek the person's decision rather than install them.
+
+   *Resolution:* Accepted. D3a: `vinga diff` before the first write and immediately before `vinga apply`; anything pending that the agent did not write is shown to the person and applied only on their say.
 
 4. **P2: Revision-pinned reading still executes `main` artifacts.** Evidence: plan, D1 (`docs/plans/2026-10-06-coding-agent-guide.md:87`) pins pages to the running revision, but the linked Getting Started (`README.md:94`) downloads Compose and provisioning files from `main` and installs the CLI from `main` (`README.md:152`). The plan should pin those artifacts and any workstation CLI installation to the same revision, or use the CLI shipped in the running image.
 
