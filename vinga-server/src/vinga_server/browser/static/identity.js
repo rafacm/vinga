@@ -104,9 +104,12 @@ export async function redeem(token) {
 // pasted. Refused, with the server's own sentence, while a default
 // agent would admit a new browser without pairing.
 export async function start(pasted) {
-  const onboardingPath = urls.onboardingPath(pasted.trim());
+  const onboardingPath = urls.pasted(pasted.trim());
   if (onboardingPath === null) {
-    throw new Refused("That is not an onboarding address. Paste the whole URL `vinga info` printed.");
+    throw new Refused(
+      "That is not this server's onboarding address: paste the whole URL its operator gave you, " +
+        "and open this page at the address it names if it names another address than this one.",
+    );
   }
   const body = await answered(
     fetch(urls.onboarding(onboardingPath, "try-identity"), {

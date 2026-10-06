@@ -30,6 +30,28 @@ export function onboardingPath(value) {
   return relative.endsWith("/") ? relative : `${relative}/`;
 }
 
+// The onboarding path in an onboarding URL a person pasted, in the same
+// relative form, or null when it is not this deployment's. Only a whole
+// URL is taken, and only one that names this page's own origin and this
+// deployment's root: the key in an onboarding URL is that deployment's
+// secret, and the request this path is used for would carry it to
+// whatever served this page. A bare path is refused as well, since it
+// cannot say which deployment it came from, and what `vinga info`
+// prints is always a whole URL.
+export function pasted(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  const rest = url.pathname.slice(ROOT.pathname.length);
+  if (url.origin !== ROOT.origin || !url.pathname.startsWith(ROOT.pathname) || !rest.startsWith("x/")) {
+    return null;
+  }
+  return onboardingPath(rest);
+}
+
 // A request under the onboarding path: the check-in itself, `activate`
 // and `try-identity`.
 export function onboarding(path, segment = "") {

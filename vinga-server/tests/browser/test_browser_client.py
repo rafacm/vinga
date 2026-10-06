@@ -19,6 +19,7 @@ import json
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 from lane import DIAGNOSTICS, LANE_AGENT, Server, redact
@@ -40,6 +41,9 @@ TOOL_REPLY = {
     "tool_arguments": {"volume": VOLUME},
 }
 
+# An onboarding key no deployment here has, shaped like one.
+FOREIGN_KEY = "AnotherDeploymentsKey0123"
+
 OBSERVE = "test-observe=1"
 NO_ECHO = "test-echo-cancellation=off"
 
@@ -59,8 +63,13 @@ class Visit:
     # microphone frame, ("received", <type>, <state>) for a message.
     wire: list[tuple[str, ...]] = field(default_factory=list)
     device_tokens: list[str] = field(default_factory=list)
+    # Every request the page made, and every socket it opened, by URL.
+    requests: list[str] = field(default_factory=list)
+    sockets: list[str] = field(default_factory=list)
 
     def watch(self, socket: WebSocket) -> None:
+        self.sockets.append(socket.url)
+
         def sent(payload: Any) -> None:
             if isinstance(payload, bytes):
                 self.wire.append(("sent", "audio"))
@@ -111,6 +120,7 @@ def open_link(browser: Browser, server: Server, switches: str, link: bool = True
     page.on("console", lambda message: visit.console.append(message.text))
     page.on("pageerror", lambda error: visit.console.append(str(error)))
     page.on("websocket", visit.watch)
+    page.on("request", lambda request: visit.requests.append(request.url))
 
     def checked_in(response: Any) -> None:
         if response.request.method == "POST" and "/x/" in response.url:
@@ -358,9 +368,27 @@ def test_an_unbound_browser_pairs_with_a_code(visits: Callable[..., Visit], serv
     once the operator claims the code."""
     server.seed(PLAIN_REPLY)
     server.api("DELETE", "/default-agent")
-    onboarding = server.api("GET", "/runtime/info")["onboarding_url"]
+    # The path `vinga info` prints, at the origin the page is opened on,
+    # which is the one a person pastes into a page they opened from it.
+    onboarding = server.base + urlsplit(server.api("GET", "/runtime/info")["onboarding_url"]).path
     visit = visits(OBSERVE, link=False)
     page = visit.page
+
+    # Another deployment's onboarding URL is refused before anything is
+    # sent: its key is that deployment's secret, and this server is not
+    # where it goes.
+    page.locator("#onboarding").fill(f"https://elsewhere.example/x/{FOREIGN_KEY}/")
+    page.locator("#join").click()
+    visit.wait_for("the refusal", lambda: "another address" in visit.status())
+    assert not any(FOREIGN_KEY in url for url in visit.requests), visit.requests
+    assert FOREIGN_KEY not in server.log_text()
+    assert not page.locator("#start").is_visible()
+
+    # And a bare path, which cannot say whose deployment it came from.
+    page.locator("#onboarding").fill(urlsplit(onboarding).path)
+    page.locator("#join").click()
+    visit.wait_for("the refusal", lambda: "another address" in visit.status())
+    assert not any("try-identity" in url for url in visit.requests), visit.requests
 
     page.locator("#onboarding").fill(onboarding)
     page.locator("#join").click()
