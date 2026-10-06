@@ -5,8 +5,8 @@ what you will have at the end and linking the generated
 [reference](../reference/) for every key, route and event it names
 rather than restating it. They are grouped by what you are doing.
 
-The server's conversation behavior and observability are in the
-[server README](../../vinga-server/README.md).
+Changing the server rather than running it is
+[Contributing to vinga](../contributing.md).
 
 ## Deploying
 
@@ -69,6 +69,26 @@ The server's conversation behavior and observability are in the
 - [Composing what an agent is told](agents-and-prompts.md): previewing
   the whole system prompt block by block, and sharing text between
   agents as fragments.
+- [Tuning when a turn ends](turn-taking.md): how a device listens
+  while a reply plays, what it takes for speech to interrupt one, and
+  giving one agent a patient endpointer.
+- [Masking slow replies and saying when one fails](slow-and-failed-replies.md):
+  the filled pause a slow reply plays, the fixed phrase a failed one
+  says, and what each costs at a start and an apply.
 - [Onboarding a device](onboarding-a-device.md): the short URL a board
   is given, checking what answers there, and binding the board by the
   code it shows.
+
+## Observing
+
+- [Reading logs and traces](logs-and-traces.md): the log format, the
+  index of events and when each fires, watching a board or the whole
+  server live, and exporting traces to Jaeger, Langfuse or both.
+- [Capturing a session](capturing-a-session.md): recording microphone
+  and speaker on one timeline with the decisions beside them, for a
+  problem no test lane can reproduce.
+- [Pricing a conversation](conversation-cost.md): the usage each stage
+  reports, and the model definitions a backend needs to price it.
+- [Recording conversations](conversation-store.md): what the
+  conversation store keeps and for how long, resuming a past
+  conversation, erasing one on demand, and reading the record.

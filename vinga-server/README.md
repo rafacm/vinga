@@ -40,13 +40,6 @@ everything the server exposes: the interactive API docs are turned off,
 the WebSocket requires a device token the OTA endpoint issued, and every
 request to `/api` carries a bearer token.
 
-## On this page
-
-- [Goals](#goals): what this server is for, and what it refuses to become.
-- [Developing it](#developing-it): a pointer to the contributing page, which covers what it is built on and the lanes a change is exercised in before it ships.
-- [Running in a container](#running-in-a-container): a pointer to the task guides in [`docs/run/`](../docs/run/README.md), which cover the image, its database, its limits and exposure, configuring it and its configuration API, securing it, upgrading, recovery, onboarding a device, and choosing the providers, tools, memory and prompt an agent works with.
-- [Status](#status): what works today, and what is still a promise.
-
 ## Goals
 
 - Python, and one Postgres database holding everything this server
@@ -65,6 +58,17 @@ request to `/api` carries a bearer token.
     the device's own
 - Distributed as a multi-arch container image, deployable on your own
   infrastructure
+
+## Running and configuring it
+
+Everything a person running this server does is a task guide in
+[`docs/run/`](../docs/run/README.md), one task per page, listed one
+line each in that directory's index: running the container and
+providing its database, exposing and securing it, configuring it and
+using its configuration API, choosing an agent's providers, tools,
+memory and prompt, tuning when a turn ends and what a slow or failed
+reply says, and reading its logs, traces, cost and conversation
+record.
 
 ## Developing it
 
