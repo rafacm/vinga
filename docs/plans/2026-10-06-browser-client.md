@@ -243,10 +243,13 @@ a board makes, and the identity-mint request (D4a), which the page sends
 to the onboarding path for the same reason. `docs/run/exposing-a-
 deployment.md` already has to say that a proxy logging request targets
 records the onboarding key from boards' check-ins; this plan extends
-that sentence to browsers and adds the rule it implies: exclude the
-`/x/` path family from request-target logging, or accept that the key
-is in those logs, since it is a deployment-scoped path segment and not a
-per-device credential (the trade `onboarding/keys.py` records). M2
+that sentence to browsers and makes the rule required, not advisory: a
+proxy in front of vinga must redact or suppress the request target of
+every `/x/` route (the check-in, `activate`, the poll and
+`try-identity`, for boards and browsers alike) before it logs, and the
+guide gives the edge-configuration check that proves it (one request to
+`/x/<key>/` through the proxy, then the proxy's own log searched for the
+key, expecting no match). M2
 writes it; nothing about it is new to boards.
 
 **D3. The client's parts.** Four ES modules and one worklet, each with
@@ -631,6 +634,8 @@ Reviewed 2026-10-06 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.0
 1. **P1: D2a permits logging the onboarding secret.**
 Evidence: D2a says a proxy may "accept that the key is in those logs"; security.md (`docs/run/security.md:220`) says neither onboarding segment is written to a log. This violates the no-leak contract.
 Say instead: proxy request-target logging for every `/x/` route, including `try-identity` and `activate`, is required to redact or suppress the path. Remove the acceptance alternative and add an edge-configuration verification step.
+
+   *Resolution:* Accepted. D2a no longer offers accepting the key in a log: redacting or suppressing the request target of every `/x/` route (check-in, activate, poll, try-identity; boards and browsers alike) is a required rule in the exposure guide, with an edge check that searches the proxy's own log for the key after one request and expects no match.
 
 2. **P1: Expired try tokens have no deletion mechanism.**
 Evidence: D5/D6 define an in-memory token record with expiry, while D7a promises it is not retained beyond expiry. No pruning, timer, or expiry sweep is specified. Issuing links indefinitely therefore retains expired bearer material and grows memory.
