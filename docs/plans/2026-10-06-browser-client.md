@@ -270,6 +270,35 @@ identity and the onboarding page's path, to which the page moves. The
 routes are outside `/api`, so never behind the operator token; the POST
 body is never logged, and the sentinel tests plant a token through it.
 
+**D5a. No default agent, no link.** The link's promise is that opening it
+binds the browser before its first word, which needs an agent to bind
+it to. So the refusal is at issuance: `POST /api/runtime/try-links`
+refuses when no default agent is set, with a fixed sentence naming
+`vinga default-agent set`, and `vinga info` prints that sentence where
+the link would be. Redemption never meets the case (a default agent
+removed between issuance and redemption is the one race, answered by
+the same fixed refusal and no write). Pairing from the onboarding page
+stays the separate route (D4).
+
+**D5b. Bind and name in one operation.** A new store method creates the
+device row bound to the default agent and named in the same
+transaction, refusing (not merging) if the MAC already exists, so a
+spent link can never leave a half-made device. The name is
+`Browser <full MAC>`: the MAC is unique per row, so the name is too, and
+it reads as a browser in every listing. A MAC collision (46 random bits)
+is answered by minting again, up to a small bound, inside the same
+redemption; failing that bound refuses with no write. A test injects a
+failure between what are today two writes and asserts nothing remains.
+
+**D5c. Which origin the link names.** The link must open a secure
+context. `vinga info` prints `server.public_url` when it is set and is
+`https://` or names `localhost`; otherwise, when the CLI reached the API
+on a loopback address, it prints `http://localhost:<port>/try/#…` from
+the port it used, which is a secure context on the machine running the
+server; otherwise it prints no link and one sentence saying to set
+`server.public_url` to an HTTPS address. It never prints the listen
+address, and never a guess.
+
 **D6. The try link's lifetime.** Ten minutes and one use, as constants,
 not configuration: the issue says minutes, and a key nobody needs is
 one more thing to document and refuse. The plan review may ask for a
@@ -434,6 +463,8 @@ Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    *Resolution:* Accepted, by the same change as finding 3: the GET carries no token (the fragment is never sent), so a preview, prefetch or scanner spends nothing; redemption is a same-origin POST from the opened page. M2's tests fetch the page as a previewer would and assert the token still redeems.
 
 5. **P2: The no-default-agent path contradicts itself and the link's guarantee.** D5 says it consumes the token and shows a page without binding; its unit-test list says the route *refuses* without a default agent (plan:235 (`docs/plans/2026-10-06-browser-client.md:235`), plan:293 (`docs/plans/2026-10-06-browser-client.md:293`)). The issue says opening the link binds before the first word. **Choose one refusal point**, preferably declining to issue a link when no default agent is set, with a fixed actionable message. Keep direct onboarding-page pairing as the separate route.
+
+   *Resolution:* Accepted, the finding's preferred option: D5a refuses at issuance when no default agent is set, with a fixed sentence naming `vinga default-agent set` that `vinga info` prints in the link's place; a default agent removed between issuance and redemption meets the same fixed refusal with no write.
 
 6. **P2: Cleared browsers can bypass the issue's pairing rule until #612 lands.** D4 explicitly follows today's default-agent behavior, which admits an unknown MAC without a code, while the issue says a cleared browser is new and unbound and gets pairing only (plan:212 (`docs/plans/2026-10-06-browser-client.md:212`)). **State #612 as a release dependency and test the cleared-storage case with a default agent set**, or implement the pairing rule for browser identities here.
 
