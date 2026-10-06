@@ -19,6 +19,7 @@ import shlex
 import sys
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal, cast, get_args, get_origin
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel
 
@@ -33,6 +34,7 @@ from vinga_server.config.responses import (
     ConfigDocument,
     ConfigReloadResult,
     RuntimeInfo,
+    TryLink,
 )
 from vinga_server.config.transport import APPLY_LOCATION, check_transportable
 
@@ -51,7 +53,7 @@ from .entities import (
 from .input import _fragment
 from .invocation import Invocation
 from .output import INSTALLS, UNBOUNDED, UNNAMEABLE, _imported, _names, _yaml
-from .reach import PROGRAM, UNRECOGNIZED_ANSWER, Reached
+from .reach import PROGRAM, UNRECOGNIZED_ANSWER, Address, Reached, _loopback
 
 # What `apply` waits instead, because it is the one request whose
 # server-side work is not a database call. The server's envelope is one
@@ -136,6 +138,24 @@ ONBOARDING_OFF_HERE = (
     "device onboarding is off (server.onboarding.enabled is false), so this deployment "
     "serves no short URL. Devices are configured at the path server.ota_path names, "
     "which is not printed here, since it is this deployment's secret."
+)
+
+# The label in front of the try link (#613), which says what the link
+# does, so the link itself stands alone on the line under it for the
+# reason the onboarding URL does: it is selected whole and opened, and a
+# label in front of it is a label pasted into an address bar.
+TRY_LINK_LABEL = "try link (opens this deployment in a browser, once, within ten minutes)"
+
+# And what stands after the label when neither end can name an origin a
+# browser can open the page on: the server has no `https://` public URL
+# configured, and this CLI reached the API somewhere other than this
+# machine's loopback, so `localhost` would name the wrong machine. A
+# link with a guessed origin would open nothing, or a page with no
+# microphone, so there is none.
+NO_LINK_ORIGIN = (
+    "no link is printed, because this server names no origin a browser can open it on "
+    "and this CLI did not reach it on this machine. Set server.public_url to the "
+    "deployment's https:// origin, or run this command on the server's own machine."
 )
 
 # The label in front of the build that answered. One line and not two:
@@ -803,6 +823,56 @@ def _identity_block(info: Mapping[str, object]) -> str:
     )
 
 
+def _situated_link(link: Mapping[str, object], address: Address) -> Mapping[str, object]:
+    """A try link with its origin named, where this client can name it.
+
+    The server names its configured public origin when it has one a
+    browser can use, and nothing otherwise; what it cannot know is the
+    address this client reached it on. When that is this machine's
+    loopback, the page is at `localhost` on the same port, which is a
+    secure context for the browser on this machine. Anything else is
+    left unnamed, and the renderer says why (#613, D5c).
+
+    The scheme and port are the API target's own, so a loopback TLS
+    terminator stays `https`. `localhost` rather than the literal the
+    target was typed with, because that is the name every browser
+    treats as a secure context.
+    """
+    if link["origin"] is not None:
+        return link
+    parts = urlsplit(address.base)
+    if parts.hostname is None or not _loopback(parts.hostname):
+        return link
+    port = parts.port
+    authority = "localhost" if port is None else f"localhost:{port}"
+    return {**link, "origin": f"{parts.scheme}://{authority}"}
+
+
+def _try_link_block(link: Mapping[str, object]) -> str:
+    """What `info` prints of a try link: the label, and the link alone
+    on the line under it, or the sentence that stands in its place.
+
+    Made printable like every other value an answer carries; not
+    bounded, because a truncated link is a wrong one, the rule the
+    onboarding URL keeps. On stdout and nowhere else: the token in it is
+    a credential, and the operator's own terminal is the one place it
+    is printed (D7a).
+    """
+    if link["origin"] is None:
+        return f"\n{TRY_LINK_LABEL}: {NO_LINK_ORIGIN}\n"
+    return f"\n{TRY_LINK_LABEL}:\n{printable(f'{link["origin"]}{link["page"]}', UNBOUNDED)}\n"
+
+
+def _try_link_declined(sentence: str) -> None:
+    """The server's refusal of a try link, where the link would be.
+
+    A refusal of this act is a state of the deployment (no default
+    agent yet, onboarding off, the store full) rather than a failure of
+    `info`, so it is a line of the answer and the command goes on.
+    """
+    print(f"\n{TRY_LINK_LABEL}: {printable(sentence, UNBOUNDED)}")
+
+
 def _configured_counts(document: Mapping[str, object]) -> str:
     """What `info` prints of the stored half: how much of each kind
     there is, and which agent an unbound board reaches.
@@ -1008,6 +1078,10 @@ def _info_path(args: Invocation) -> str:
     return _path("runtime", "info")
 
 
+def _try_links_path(args: Invocation) -> str:
+    return _path("runtime", "try-links")
+
+
 LIST = Act(
     method="GET",
     path=_config_path,
@@ -1048,6 +1122,19 @@ IDENTITY = Act(
     path=_info_path,
     answers=RuntimeInfo,
     render=_printed(_identity_block),
+)
+
+# A try link, issued for whoever runs `info` (#613). The one act in this
+# grammar that writes running state from a command that otherwise only
+# reads: each run is a new link, which is the point of printing one. Its
+# refusal is a line of the answer rather than the end of the command.
+TRY_LINK = Act(
+    method="POST",
+    path=_try_links_path,
+    answers=TryLink,
+    render=_printed(_try_link_block),
+    completes=_situated_link,
+    declined=_try_link_declined,
 )
 
 

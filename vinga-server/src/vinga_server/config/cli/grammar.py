@@ -44,6 +44,7 @@ from .deployment import (
     IMPORT,
     LIST,
     SHOW_ALL,
+    TRY_LINK,
     _contacted,
 )
 from .devices import (
@@ -2289,15 +2290,22 @@ COMMANDS: tuple[Command, ...] = (
     # was asked for is one thing, and the API answers it as two
     # resources because identity is the running server's and the counts
     # are the store's.
+    #
+    # And a try link between the two, since #613: a new one each run,
+    # which a browser opens to join as a device bound to the default
+    # agent. Its own act because the API answers it as an action of the
+    # running server, and where it cannot be issued the reason stands in
+    # its place rather than ending the command.
     Command(
         words=("info",),
-        does=(IDENTITY, COUNTS),
+        does=(IDENTITY, TRY_LINK, COUNTS),
         opens=_contacted,
         declare=_plain,
         help=(
             "what deployment this is: the API this CLI reached, the running server's "
-            "version and revision, the URL to type into a device's captive portal, and "
-            "how much of each kind is configured"
+            "version and revision, the URL to type into a device's captive portal, a "
+            "new try link a browser opens to join as a device, and how much of each "
+            "kind is configured"
         ),
     ),
     # The one write that carries the whole configuration. Its own row

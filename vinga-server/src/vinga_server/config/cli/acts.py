@@ -30,7 +30,16 @@ from vinga_server.config.loader import ConfigError
 
 from .answers import Output, _understood, encoded
 from .invocation import Invocation
-from .reach import _NOTHING, READ_TIMEOUT_S, UNRECOGNIZED_ANSWER, Reached, _call, narrated
+from .reach import (
+    _NOTHING,
+    READ_TIMEOUT_S,
+    UNRECOGNIZED_ANSWER,
+    Address,
+    Reached,
+    Refused,
+    _call,
+    narrated,
+)
 
 # The three things a body can fail to be, said in the words each act has
 # always said them in. Which one an act meets is a fact of the act, so it
@@ -122,6 +131,25 @@ class Act:
     # What is printed, given the answer.
     render: Callable[[Any], None]
 
+    # What this client adds to the answer before it is printed, from the
+    # address this invocation reached, for the one act whose answer
+    # leaves part of itself to the client: a try link names no origin
+    # when the server has none a browser can use, and the client's own
+    # API target can supply one (#613, D5c). The renderer stays a
+    # function of what it is handed, which is the answer completed here.
+    # The machine arm encodes the answer as the API sent it: a program
+    # reading it has the same two facts to decide with.
+    completes: Callable[[Any, Address], Any] | None = None
+
+    # What is printed instead when the API refuses this act, for the one
+    # act whose refusal is a line of the command's answer rather than
+    # its end: `info`'s try link, which a deployment with no default
+    # agent yet cannot issue and which must not stop `info` saying the
+    # rest. Handed the refusal's sentence, which is this API's own and
+    # this client's remedy. Only a refusal this API wrote is taken here;
+    # anything else ends the command as it ends every other.
+    declined: Callable[[str], None] | None = None
+
     def read(self, answer: object) -> Any:
         """One answer, read as the shape this act says it is sent.
 
@@ -208,7 +236,8 @@ def _act(args: Invocation, act: Act, reached: Reached, output: Output = Output.H
             query=query,
         )
     if output is Output.HUMAN:
-        act.render(act.read(answer))
+        read = act.read(answer)
+        act.render(read if act.completes is None else act.completes(read, reached.address))
         return
     print(encoded(act.answers, answer, act.refusal, output), end="")
     # Flushed before the renderer runs, for the reason the renderers
@@ -226,7 +255,9 @@ def _performed(args: Invocation, acts: "tuple[Act, ...]", reached: Reached) -> N
 
     Stopping is what makes a sequence honest about what ran: a refused
     read never reaches the second read behind it, because the refusal is
-    the whole answer.
+    the whole answer. The one exception is an act that says what to
+    print instead (`Act.declined`), whose refusal by this API is a line
+    of the answer: it is printed there and the sequence goes on.
 
     The refusal is raised outside the handler that caught it, the way
     every boundary in this module raises: an exception raised while
@@ -236,6 +267,7 @@ def _performed(args: Invocation, acts: "tuple[Act, ...]", reached: Reached) -> N
     """
     problem: str | None = None
     for act in acts:
+        declined: str | None = None
         try:
             # The default said out loud, because this is where a format
             # a command asked for would be handed on and there is no
@@ -243,8 +275,19 @@ def _performed(args: Invocation, acts: "tuple[Act, ...]", reached: Reached) -> N
             # for a person.
             _act(args, act, reached, Output.HUMAN)
             continue
+        except Refused as refused:
+            if act.declined is None:
+                problem = str(refused)
+            else:
+                declined = str(refused)
         except ConfigError as refused:
             problem = str(refused)
+        if declined is not None and act.declined is not None:
+            # Printed outside the handler, for the reason the raise
+            # below is: nothing printed or raised here carries the
+            # refusal it answers.
+            act.declined(declined)
+            continue
         break
     if problem is not None:
         raise ConfigError(problem)

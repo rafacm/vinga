@@ -864,6 +864,18 @@ def _refused_stream(response: httpx.Response, address: Address) -> None:
     _answer(response, address)
 
 
+class Refused(ConfigError):
+    """A refusal this API wrote: a validated problem body, relayed as
+    its sentence and this client's remedy.
+
+    Its own type for the one caller that answers a refusal differently
+    from every other failure: an act whose refusal is a line of the
+    command's answer rather than the end of the command (`Act.declined`).
+    A transport failure, an unreadable answer and a page a proxy wrote
+    are not this, so they end the command wherever they happen.
+    """
+
+
 def _answer(response: httpx.Response, address: Address) -> object:
     """What the API said, or a sentence about why it cannot be read.
 
@@ -887,7 +899,9 @@ def _answer(response: httpx.Response, address: Address) -> object:
             raise ConfigError(_unreadable(response, address))
         return payload
     detail = _refusal(response, payload)
-    raise ConfigError(detail if detail is not None else _unreadable(response, address))
+    if detail is not None:
+        raise Refused(detail)
+    raise ConfigError(_unreadable(response, address))
 
 
 # What this client says to do about a state the API states
