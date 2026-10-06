@@ -985,6 +985,21 @@ in a real room is stated as unchecked on any computer.
    branch, the filtered output held no `/try/#` and the label line,
    and an unfiltered run in the same session held exactly one link
    (`.logs/m4-try-step-info-filtered.log`).
+
+   PR #627's review widened it: the same output carries the onboarding
+   URL, whose path is the onboarding key, so the filter is now
+   `grep -v -e '/try/#' -e '/x/'` in all three commands, and section 1
+   says what each dropped line is and what the labels left behind
+   still say. The exact checkout form of the command was run against a
+   scratch server with onboarding keyed and again keyless (device
+   authentication off): in both, no line carried `/x/`, the URL or the
+   key, the try link's label still ended in a colon, and the revision,
+   the onboarding label and the counts were still there
+   (`.logs/r1-keyed-info-filtered.log`,
+   `.logs/r1-keyless-info-filtered.log`, the summaries in
+   `.logs/r1-*-summary.log`). The image's form, the same pipe on the
+   host side of `docker compose exec -T`, was not run: no compose
+   deployment was available.
 3. **The project README's documentation list** is not in the plan's
    footprint. Its `devices/` line said "a guide per board"; it now
    names the browser client's guide too. The hardware table is
