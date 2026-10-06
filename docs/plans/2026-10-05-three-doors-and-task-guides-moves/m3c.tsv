@@ -7,7 +7,7 @@
 # Applying a change without a restart
 77	docs/run/configuration.md	kinds=procedure,explanation	edited=3,5,6,7,9,11
 # Configuration: the two halves, the CLI, import, when a change applies, the environment
-410	1-18	docs/run/configuration.md	kinds=procedure,explanation,contract	edited=1,3,4,5,6,8,9,10,11,12,15,18
+410	1-18	docs/run/configuration.md	kinds=procedure,explanation,contract	edited=1,3,4,5,6,7,8,9,10,11,12,15,18
 # Configuration: the database keys and the unreachable-database refusal
 410	19-24	docs/run/database.md	kinds=explanation,contract	edited=23
 # The configuration API (D8 route listings and shapes, D8a request)
