@@ -855,7 +855,7 @@ the worktree's `.logs/`:
   proves as well.
 - `python3 scripts/check_doc_links.py .`: `checked 333 files, 0 failures`
 - `python3 scripts/fold_changelog.py check .`: `checked 1 fragments, 0 failures`
-- `uv run pytest tests/census -q`, last, after this section: CENSUS_LINE
+- `uv run pytest tests/census -q`, last, after this section: `66 passed in 29.62s`, neither manifest moved
 
 Not verified here: the image variant of the lane and the CI job's
 real timing (CI's), the page in any engine but Chromium, and the
