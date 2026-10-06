@@ -486,3 +486,75 @@ the worktree's `.logs/`:
 Not verified here: the image and the smoke lane (CI's), and the page
 in any engine but Chromium. The lane that loads the page from the
 installed wheel is M3's.
+
+### PR review round
+
+Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.1, read-only sandbox, runtime 7m16s, at commit a12215c4 ([the round](https://github.com/rafacm/vinga/pull/625#issuecomment-6012061191)). The fixes are by anthropic/claude-opus-5-5, thinking high, M2's own implementer.
+
+1. **P1: a doubled slash on `/try/redeem` redirected with the query in
+   `Location`.** Probed before fixing, it was application-wide:
+   `/healthz//?s=1` and `/try//?s=1` answered the same 307. M1's PR
+   round had registered every HTTP route in both spellings and its
+   inventory enforces that, so nothing relies on the redirect any more.
+   *Resolution:* the main application is built with
+   `redirect_slashes=False`, as the configuration API already was; a
+   new inventory case asks every HTTP route from the app's own table
+   with a doubled slash and a sentinel query and asserts no 3xx, no
+   `Location` and the sentinel absent, which failed with a 307 on every
+   route first. A websocket case pins that the device path is refused,
+   not redirected, which held before the change too (`640678de`).
+2. **P1: a path-prefixed `server.public_url` broke the page.** The
+   module reference and the redeem were root-relative and bypassed a
+   prefix such as `https://example/vinga`. *Resolution:* every URL the
+   page uses is relative to the page; the redeem answers
+   `onboarding_path` relative to the deployment root (`x/<key>/`), and
+   the page resolves it against its base and stores the resulting path,
+   prefix included, which is what M3's check-in and websocket read.
+   `tests/unit/test_browser_prefix.py` runs the app behind an ASGI shim
+   that strips `/vinga`, as such a proxy would; all four of its cases
+   failed first. `vinga info`'s link already kept the prefix, and a CLI
+   case now pins it. Chromium behind the same shim requested everything
+   under `/vinga/` (`47524e68`).
+3. **P2: the `Origin` fallback ignored the scheme.** *Resolution:* the
+   fallback is gone; a redemption is admitted on
+   `Sec-Fetch-Site: same-origin` alone, and a missing header gets the
+   same fixed 403 and spends nothing. Every engine that can run the
+   client (WebCodecs Opus) sends fetch metadata. Deviation 6 above is
+   amended to match (`77976175`).
+4. **P2: the no-leak tests left out the streams and exception chains.**
+   *Resolution:* `capfd` reads both streams across issuance and
+   redemption (a pin: it passed as the code stood); planted failures
+   carrying the token found two real escapes, a `RuntimeError` from the
+   store write leaving `redeem`, and an issuance failure after minting
+   that relayed its detail or left the link live. `redeem` now contains
+   every failure of the write, and the issuer works out the origin
+   before minting and withdraws the link if the answer cannot be built,
+   raising a fixed error the API answers as a sanitized 500
+   (`5a4aa513`).
+
+Raised by the implementer while fixing 4, and taken: containing every
+failure made a spent link that bound nothing silent. One WARNING now
+says so, naming only the failure's class through
+`class_names.failure_name`, with its own sentence for the case where
+every drawn MAC was taken; no record carries the token, the MAC or the
+failure's message (`77fab7d0`).
+
+Every mutation of the round was killed: `print(token)` in the redeem,
+a raw write at issuance, narrowed containment, the link not withdrawn,
+a missing fetch-metadata header admitted, the `Origin` fallback
+restored, each root-relative URL, the warning dropped, given the
+message, the exception or the MAC.
+
+Verification after the round, from the worktree's `.logs/`:
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run pytest tests/unit -q -n auto --dist loadfile`:
+  `8348 passed, 19 skipped in 975.99s (0:16:15)`
+- `uv run pytest tests/integration -q -n auto --dist loadfile`, after
+  findings 1 to 4: `354 passed in 242.63s (0:04:02)`; the warning
+  commit touched only the module and its unit tests
+- The eight generated documents current; link check `0 failures`
+- `uv run pytest tests/census -q`, last, after this section: `66 passed in 38.71s`
+
+Not verified: a real reverse proxy in front of the prefix case (an ASGI
+shim stood in for one), and engines other than Chromium.
