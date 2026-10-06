@@ -404,6 +404,21 @@ ALREADY_COVERED = (
     "its own, bind it by its MAC"
 )
 
+# What enrolling a device refuses with (#613, D5b). The first is the
+# collision a freshly minted MAC can meet, and its caller draws again
+# rather than reading it, so it names no address; the second is the
+# default agent having been cleared since the caller decided to enroll.
+# Neither names a command, for the reason the two above name none.
+ALREADY_ENROLLED = (
+    "devices: a device with this MAC is already configured, so no new device was "
+    "created there. Nothing was changed."
+)
+
+NOTHING_TO_ENROLL_ONTO = (
+    "devices: no default agent is set, so a new device has no agent to be bound to. "
+    "Nothing was created."
+)
+
 # What a device write refuses with when the name or the id it would
 # leave is one another record already holds.
 #
@@ -1002,6 +1017,33 @@ class ConfigStore:
         """
         return self._device_write(_device_change(mac, list(agents)), unconfigured=True)
 
+    def enroll_device(self, mac: str, name: str) -> BoundDevice:
+        """Create one device, bound to the default agent and named, in
+        one transaction, or refuse with nothing written.
+
+        What a try link does with the browser that redeems it (#613,
+        D5b). The link is spent by then, so the write is all or nothing:
+        a binding and a name used to be two writes, and a failure
+        between them left a device bound under the wrong name with
+        nothing left to retry it from. Here both are staged onto one
+        record and persisted together.
+
+        Refused rather than merged when the MAC already has a row, with
+        `DeviceAlreadyBoundError`, because the caller minted that MAC
+        and draws another rather than adopting somebody else's device;
+        every other refusal is a plain `ConfigError`. The default agent
+        is read inside the transaction, so one cleared since the caller
+        decided to enroll refuses here rather than binding a device to
+        nothing. The agent is written by name, the way an operator's
+        bind is: a default agent changed later moves the devices nobody
+        bound, and this one is bound.
+        """
+        canonical = _mac(mac)
+        return self._device_write(
+            _DeviceBinding(mac=canonical, name=_device_name(canonical, name)),
+            enrolling=True,
+        )
+
     def rename_device(self, mac: str, name: str) -> BoundDevice:
         """Give one device another name, or refuse.
 
@@ -1219,6 +1261,7 @@ class ConfigStore:
         *,
         existing: bool = False,
         unconfigured: bool = False,
+        enrolling: bool = False,
         identified: str | None = None,
     ) -> BoundDevice:
         """Every device write, run through the phases every other write
@@ -1236,7 +1279,9 @@ class ConfigStore:
         refuses a MAC with no record, because renaming or relocating
         something that is not there is a request that addressed nothing;
         `unconfigured` is the activation code's condition, refusing a
-        device the configuration has already spoken about.
+        device the configuration has already spoken about. `enrolling`
+        is a try link's: no row may exist, a default agent must, and the
+        binding is to that agent, read here under the lock.
 
         `identified` is the third way in, and it is an ADDRESS rather
         than a condition: the binding arrives with no MAC on it and the
@@ -1266,6 +1311,12 @@ class ConfigStore:
                     )
                 if domain.default_agent is not None:
                     raise DeviceAlreadyBoundError(ALREADY_COVERED)
+            if enrolling:
+                if stored is not None:
+                    raise DeviceAlreadyBoundError(ALREADY_ENROLLED)
+                if domain.default_agent is None:
+                    raise ConfigError(NOTHING_TO_ENROLL_ONTO)
+                binding = replace(binding, agents=(domain.default_agent,))
             held = _names_held(domain)
             staged = _stage_device(domain, binding)
             _refuse_unresolved(domain)
