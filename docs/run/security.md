@@ -57,13 +57,28 @@ database of its own, which `VINGA_DB_NAME` is enough to give it.
 
 **The master key is generated once and escrowed.** Set
 `VINGA_MASTER_KEY` wherever the deployment keeps its environment
-secrets, alongside `VINGA_AUTH_SECRET`, generated straight into that
-file so it is neither printed to the terminal nor expanded by the
-shell:
+secrets, alongside `VINGA_AUTH_SECRET`, generated so it is neither
+printed to the terminal nor expanded by the shell. The server image's
+own Python generates it, since that is the one Python certain to carry
+the `cryptography` package; the key goes to a private temporary file
+first and reaches the env file only when generating it succeeded, so a
+failure leaves that file as it was and prints one sentence rather than
+a traceback:
 
 ```bash
-touch vinga.env && chmod 600 vinga.env
-{ printf 'VINGA_MASTER_KEY='; python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"; } >> vinga.env
+# The image your deployment runs; any vinga-server tag carries the
+# same Python.
+IMAGE=ghcr.io/rafacm/vinga-server:latest
+key=$(mktemp)
+if docker run --rm --entrypoint python "$IMAGE" -c \
+    'from cryptography.fernet import Fernet; print("VINGA_MASTER_KEY=" + Fernet.generate_key().decode())' \
+    > "$key" 2>/dev/null; then
+  touch vinga.env && chmod 600 vinga.env && cat "$key" >> vinga.env \
+    && echo "VINGA_MASTER_KEY added to vinga.env"
+else
+  echo "the key could not be generated; vinga.env is unchanged"
+fi
+rm -f "$key"
 ```
 
 It is only needed once a credential is stored encrypted; a deployment

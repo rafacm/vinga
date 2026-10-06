@@ -175,9 +175,12 @@ by reading what was written.
   into a file only the person can read. The person runs it. The check
   is `vinga info` answering once the server is up.
 - **The master key**, needed only when a credential is stored
-  encrypted: [The master key](security.md#the-master-key) generates it
-  into the deployment's env file (Getting Started's is `.env`, where
-  that page writes `vinga.env`), and the server is restarted to read
+  encrypted: hand over the block under
+  [The master key](security.md#the-master-key) as it stands, with
+  `vinga.env` replaced by the deployment's env file (Getting Started's
+  is `.env`). It generates the key with the server image's own Python,
+  so it needs nothing installed on the host, and it changes the file
+  only when generating succeeded. The server is then restarted to read
   it. The check is the `secret set` below being accepted.
 - **A vendor's key.** [The key](llm.md#the-key) gives the two forms,
   and the person chooses: a line they type in an editor into the env
