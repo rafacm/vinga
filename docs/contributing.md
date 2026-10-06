@@ -3,9 +3,12 @@
 At the end of this page you will have a checkout that runs the server
 from source against a local Postgres, and you will know the four lanes
 a change is exercised in before it ships: the unit and integration
-lanes CI runs on every change, the opt-in local lane that holds a real
-conversation on local engines, and the smoke lane that holds one with
-a running container.
+lanes, which CI runs on a change that touches the server, its
+references or its deployment files (a documentation-only change runs
+the documentation workflow instead, and which paths run which workflow
+is the CI paragraph under [`AGENTS.md`'s Commands](../AGENTS.md#commands)),
+the opt-in local lane that holds a real conversation on local engines,
+and the smoke lane that holds one with a running container.
 
 The workflow every change follows (branches, commits, plans and their
 records, the changelog fragment) and the design and writing
