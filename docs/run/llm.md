@@ -153,17 +153,27 @@ vinga agent set assistant -f - < assistant.yaml
 vinga apply
 ```
 
-Nothing written is serving until `vinga apply`, and an apply refuses,
-with nothing changed, when an entry an agent references will not build:
-a missing required option, a key variable the server's environment does
-not hold, a `reach` its type does not take, or a reach outside the data
-boundary. What a refused apply leaves behind is the write itself, still
-stored, and **the next start boots from what is stored**: put the write
-back, or fix it and apply, before the server restarts, or it will
-refuse to start with the same sentence. What an apply does not do is
-call the model, so an endpoint that is wrong or unreachable passes it
-and fails the first turn instead. When an apply takes effect and what
-it rebuilds is
+A mistake is caught at one of two moments, and what it leaves behind
+differs.
+
+**At the write.** `vinga provider set` checks the fragment against
+what its type takes before anything is stored: an `openai_compatible`
+entry without `base_url` or `model` is refused there, and so is an
+agent naming an entry that does not exist. A refused write stores
+nothing; correct it and write again.
+
+**At the apply.** Nothing written is serving until `vinga apply`, and
+what can only be judged by building the entry inside the running
+server is judged there: a key variable the server's environment does
+not hold, a `reach` on a type that knows its own, a reach outside the
+data boundary. The apply refuses with nothing running changed, but the
+write it refused is still stored, and **the next start boots from what
+is stored**: put the write back, or fix it and apply, before the server
+restarts, or it will refuse to start with the same sentence.
+
+What neither moment does is call the model, so an endpoint that is
+wrong or unreachable passes both and fails the first turn instead.
+When an apply takes effect and what it rebuilds is
 [Applying a change without a restart](configuration.md#applying-a-change-without-a-restart).
 
 ## Local runners
