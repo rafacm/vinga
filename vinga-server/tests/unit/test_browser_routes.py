@@ -12,6 +12,7 @@ of it is mounted with the alias and never without it.
 import re
 import uuid
 from importlib.resources import files
+from urllib.parse import urljoin
 
 import pytest
 from fastapi import FastAPI
@@ -24,6 +25,7 @@ from tests.support.registry import booted, store_at
 from vinga_server.app import create_app
 from vinga_server.browser import (
     ALLOWLIST,
+    PAGE_PATH,
     STATIC_PATH,
     TRY_IDENTITY_UNAVAILABLE,
     TRY_LINK_NEEDED,
@@ -37,7 +39,9 @@ from vinga_server.onboarding.browser import CLIENT_ID_NAMESPACE
 
 AUTH_SECRET_ENV = "VINGA_AUTH_SECRET"
 
-MODULE = re.compile(r'src="(/try/static/([0-9a-f]+)/page\.js)"')
+# The module as the page names it: relative to the page, which every
+# caller here fetched at `/try/`.
+MODULE = re.compile(r'src="(static/([0-9a-f]+)/page\.js)"')
 
 
 @pytest.fixture(autouse=True)
@@ -50,9 +54,11 @@ def short_path(client: TestClient) -> str:
 
 
 def module_path(page: str) -> str:
+    """The module's path, resolved against the page at `/try/` the way a
+    browser resolves it."""
     match = MODULE.search(page)
     assert match is not None, page
-    return match.group(1)
+    return urljoin(PAGE_PATH, match.group(1))
 
 
 def packaged(name: str) -> bytes:

@@ -112,7 +112,7 @@ def test_the_token_is_answered_by_the_issuance_alone(
         assert redeemed.status_code == 200
         body = redeemed.json()
         checked = client.post(
-            body["onboarding_path"],
+            "/" + body["onboarding_path"],
             json={"board": {"type": "vinga-browser"}},
             headers={"Device-Id": body["mac"], "Client-Id": body["client_id"]},
         )
