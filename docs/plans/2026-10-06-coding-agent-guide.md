@@ -170,6 +170,20 @@ A comment on #610 and on #613 names the line each must add, so the
 follow-up is recorded where the work will happen, not only here. #611
 stays open for M2 regardless.
 
+**D9. Steps the person runs, and Getting Started's secrets made safe
+first.** The guide sends a coding agent through Getting Started, so a
+leak in a linked step is a leak in the guide. Two kinds of step are
+person-run handoffs, named as such on the page: generating or entering
+a secret, and writing the board's NVS, whose CSV carries the Wi-Fi
+password (`README.md` L276 onward). For those the agent hands the
+person the step and waits; it does not run them and never reads the
+files they write. And Getting Started's secret generation, which today
+expands secrets in the shell (`README.md` L115 onward, the follow-up
+#609 recorded), is rewritten in this PR to the 0600 pipe form
+`docs/run/security.md` documents, so the step the person runs is safe
+too. The D8a-style grep runs over every page the guide links, not only
+over the guide, and the record lists its hits.
+
 ## Module layout and design footprint
 
 One page: a person's coding agent stops having to infer how to run vinga
@@ -223,6 +237,8 @@ Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    *Resolution:* Accepted in part. D8 names the owners: #610 adds the three-stage line and #613 the `/try/` handoff, each in the change that builds the thing, and a comment on each issue records it there. The index is resolved rather than deferred: `AGENTS.md`, merged with #609, makes `docs/run/README.md` the one list a procedure joins, so the guide links it instead of keeping a second list that must agree with the first.
 
 2. **P1: Following Getting Started can put credentials in the coding agent's transcript.** Evidence: plan, D2 and D6 (`docs/plans/2026-10-06-coding-agent-guide.md:96`) directs the coding agent through Getting Started while promising it never receives a secret. The linked README (`README.md:115`) generates secrets through shell expansion, and its NVS recipe (`README.md:276`) places a Wi-Fi password in a command the agent might run. The plan should identify those steps as person-run handoffs and provide safe, editor-based instructions before directing a coding agent through them. A grep over the new page alone cannot catch leaks in linked steps.
+
+   *Resolution:* Accepted. D9 marks two kinds of step as person-run handoffs (secrets, and the NVS write carrying the Wi-Fi password) that the agent hands over and never runs or reads; Getting Started's shell-expanding secret generation is rewritten in this PR to the 0600 pipe form; and the credential grep runs over every page the guide links.
 
 3. **P1: `apply` can install changes the person never requested.** Evidence: plan, D3–D4 (`docs/plans/2026-10-06-coding-agent-guide.md:108`) promises to change only what was requested, then runs `vinga apply`; configuration.md (`docs/run/configuration.md:220`) says `apply` installs the stored snapshot and points to `vinga diff` for *everything* pending. The plan should require a diff before writing and immediately before applying. If unrelated changes are pending, the agent must show them and seek the person's decision rather than install them.
 
