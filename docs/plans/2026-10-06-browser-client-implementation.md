@@ -957,7 +957,7 @@ changed.
 The device guide follows the board guides' house style: every section
 says where its facts come from, **checked in the browser lane**, **read
 from the page's code**, or **not checked at all**. What it claims
-checked is what M3's four lane cases assert; everything else is marked
+checked is what M3's five lane cases assert, after its review round; everything else is marked
 as read from `browser/static/` or as unchecked, and echo cancellation
 in a real room is stated as unchecked on any computer.
 

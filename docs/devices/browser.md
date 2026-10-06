@@ -47,8 +47,19 @@ and which address they name, is in
 
 **By pairing with a code.** Opened with no try link, the page asks for
 the onboarding URL: the address `vinga info` prints for a board's
-captive portal, which whoever runs the server can give you. Paste it,
-press Join, then press Start. The page checks in and shows a six-digit
+captive portal, which whoever runs the server can give you. Paste the
+whole URL, press Join, then press Start. The page takes only a URL
+naming the server it was itself opened from: one naming another
+server, or a bare path with no server in it, is refused before
+anything is sent, since the URL's key belongs to that server alone,
+and the page says:
+
+> That is not this server's onboarding address: paste the whole URL
+> its operator gave you, and open this page at the address it names if
+> it names another address than this one.
+
+So open the page at the address the onboarding URL names, then paste
+it. The page checks in and shows a six-digit
 code with the words "Tell the person who runs this server this code,
 so they can connect this browser"; once they claim it
 (`vinga device pending claim <code> <agent>`), the conversation starts
@@ -70,11 +81,16 @@ Checked in the browser lane:
 | End | Ends the conversation. |
 | Start again | Shown once a conversation has ended, for whatever reason. Checks in afresh and starts a new conversation. |
 
-Read from the page's code: the browser asks permission for the
-microphone the first time Start opens it, and if it is refused the
-page says so and offers Start again. There is no wake word. Nothing is
-listening before Start: the microphone is opened only once the server
-has admitted the browser, and released when the conversation ends.
+The browser asks permission for the microphone the first time Start
+opens it. When the microphone cannot start, the page says "This page
+cannot use the microphone. Allow it for this site and press Start
+again.", stops every capture it was handed, and offers Start again;
+the lane checks this with a microphone whose setup fails after the
+browser granted it, and a refused permission takes the same path in
+the page's code. There is no wake word. Read from the page's code:
+nothing is listening before Start, the microphone is opened only once
+the server has admitted the browser, and it is released when the
+conversation ends.
 
 ## Listening, and interrupting a reply
 
@@ -146,7 +162,8 @@ already knows them. Phrasings are examples; anything equivalent works.
 - **"Set the volume to 40."** Sets the volume the page plays replies at,
   from 0 to 100. It acts on the page alone, on top of the computer's
   own volume. Checked in the browser lane: the server discovers both
-  controls, and a call to this one changes the volume the page shows.
+  controls, and a call to this one changes both the volume the page
+  shows and the gain its speaker applies.
 
 The volume starts at 70 each time the page is loaded and is not kept
 across a reload. Nothing a browser cannot honestly do (a screen's
@@ -203,11 +220,14 @@ one once storage is allowed.
 Chromium alone, and only headless: the browser lane runs HeadlessChrome
 153 (153.0.8010.12), the one Playwright 1.63's own container image
 carries, against a server installed from the same build that ships.
-Its microphone is a sound file, so it has never heard a room. Four
-conversations in it, on every change to the server: realtime, with a
-sentence that cuts into a reply, Interrupt, End and the idle ending;
-auto mode; the server discovering and calling the page's two
-controls; and a browser pairing by its code. The same Chromium has
+Its microphone is a sound file, so it has never heard a room. Five
+cases in it, on every change to the server: realtime, with a sentence
+that cuts into a reply, Interrupt, End and the idle ending; auto mode,
+listening again only once a reply has finished playing; the server
+discovering and calling the page's two controls; a browser pairing by
+its code, after refusing an onboarding URL from another server and a
+bare path; and a microphone that fails to start, which the page
+releases. The same Chromium has
 also joined through a try link printed by `vinga info` and held a
 conversation outside the lane.
 
