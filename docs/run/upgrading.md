@@ -17,6 +17,10 @@ It runs the way it ran the first time, under
 [Providing the database](database.md#the-configuration-database-in-a-deployment),
 with the same service file and password file.
 
+**Issue try links again after the restart.** A try link lives in the
+running server's memory, so a restart, an upgrade included, ends every
+one not yet opened; run `vinga info` for a fresh one.
+
 ## Which build is running
 
 `version` is the package version and has read `0.1.0` since the package

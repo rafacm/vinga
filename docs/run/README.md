@@ -25,8 +25,9 @@ Changing the server rather than running it is
   server is told where it is, and reading the conversation record as
   `vinga_ro`.
 - [Exposing a deployment](exposing-a-deployment.md): one port for
-  everything, what a reverse proxy has to get right, and what happens
-  to the configuration API at the edge.
+  everything, what a reverse proxy has to get right (the onboarding key
+  kept out of its log, the browser page on a secure context), and what
+  happens to the configuration API at the edge.
 - [Setting limits and probes](limits-and-probes.md): how many
   conversations one server holds and for how long, how a shutdown
   drains, and which probe an orchestrator restarts on and which it
@@ -87,8 +88,8 @@ Changing the server rather than running it is
   the filled pause a slow reply plays, the fixed phrase a failed one
   says, and what each costs at a start and an apply.
 - [Onboarding a device](onboarding-a-device.md): the short URL a board
-  is given, checking what answers there, and binding the board by the
-  code it shows.
+  is given, checking what answers there, binding the board by the code
+  it shows, and the try link that binds a browser.
 
 ## Observing
 

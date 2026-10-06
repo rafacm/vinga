@@ -225,7 +225,12 @@ hint at it. The URL to type comes from `vinga-server config ota-url`,
 on your own terminal, or from `GET /api/runtime/info` behind the API's
 token. The derived key is a deployment-scoped path segment rather than
 a per-device credential, and that trade is deliberate and recorded.
-No device token is printed anywhere either.
+No device token is printed anywhere either. A try link's token is
+printed in one place, by `vinga info` on your own terminal, and answered
+by one request, the API's `POST /api/runtime/try-links` behind its
+token; it is spent by the first browser that opens the link, and is
+gone after ten minutes or a restart, whichever comes first
+([Onboarding a device](onboarding-a-device.md#a-browser-by-a-try-link)).
 
 The WebSocket path never moves: the token is what protects it.
 
@@ -233,8 +238,13 @@ The WebSocket path never moves: the token is what protects it.
 
 **Nothing else is exposed.** `/x/<key>/`, `/xiaozhi/ota/` (or wherever
 you put it), each with an `activate` beneath it that a waiting board
-polls, `/xiaozhi/v1/`, `/healthz`, `/readyz`, and the configuration API under
-`/api/`, which answers 401 to anything not carrying its bearer token. FastAPI's
+polls, `/x/<key>/try-identity`, where a browser with no try link asks
+for an identity, `/xiaozhi/v1/`, `/healthz`, `/readyz`, the browser page
+at `/try/` with its modules under `/try/static/`, which are static and
+secret-free, `/try/redeem`, which spends a try link's single-use token
+and answers only a request from the page's own origin, and the
+configuration API under `/api/`, which answers 401 to anything not
+carrying its bearer token. FastAPI's
 `/docs`, `/redoc`, and `/openapi.json` are turned off on both
 applications, and `server.ota_path` refuses a path under `/api/`: the
 OTA route is registered before the API is mounted, so it would be found
