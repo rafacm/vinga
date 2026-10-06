@@ -250,6 +250,7 @@ historical  vinga provider secret
 historical  vinga provider secret frobnicate
 historical  vinga provider secret set
 historical  vinga provider secret set llm
+historical  vinga provider secret set llm claude
 historical  vinga provider secret set llm claude token
 historical  vinga provider set
 historical  vinga provider set asr whisper
