@@ -63,7 +63,9 @@ what this conversation is currently keeping, then the remembered facts
 under the heading they have always had, then what is known about the
 device. Each of those says its own rank in its heading, because the
 model is the one reader that cannot see where a line came from, and a
-scope holding nothing contributes no block at all. Blocks are
+scope holding nothing contributes no block, with one exception: an
+agent that may remember and has nothing saved in any scope is sent a
+`memory` block saying nothing is saved yet. Blocks are
 separated by blank lines. One
 documented order beats a per-deployment permutation, and it is what lets
 a later feature compose against a known base.
