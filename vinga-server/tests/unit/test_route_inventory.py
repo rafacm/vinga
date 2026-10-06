@@ -13,6 +13,8 @@ table says the onboarding key guards answers a wrong key with the stock
 refuses a request with no bearer token.
 """
 
+from collections import Counter
+
 import pytest
 from fastapi.routing import iter_route_contexts
 from fastapi.testclient import TestClient
@@ -59,24 +61,27 @@ EXPECTED = {
 }
 
 
-def served(app) -> set[tuple[str, str, str]]:
+def served(app) -> Counter[tuple[str, str, str]]:
     """Every (kind, path, method) the application routes, flattened
-    through every included router by FastAPI's own iterator."""
-    table: set[tuple[str, str, str]] = set()
+    through every included router by FastAPI's own iterator, with how
+    many times each is registered. Counted rather than collected into a
+    set, which would fold a path spelled twice into one entry and keep
+    the inventory green over it."""
+    table: Counter[tuple[str, str, str]] = Counter()
     for context in iter_route_contexts(app.routes):
         route = context.original_route
         kind = type(route).__name__
         path = context.path or getattr(route, "path", "")
         if kind == "APIRoute":
-            table |= {("http", path, method) for method in context.methods or ()}
+            table.update(("http", path, method) for method in context.methods or ())
         elif kind == "APIWebSocketRoute":
-            table.add(("websocket", path, "-"))
+            table[("websocket", path, "-")] += 1
         elif kind == "Mount":
-            table.add(("mount", path, "-"))
+            table[("mount", path, "-")] += 1
         elif kind == "Route":
-            table.add(("asgi", path, "-"))
+            table[("asgi", path, "-")] += 1
         else:
-            table.add((kind, path, "-"))
+            table[(kind, path, "-")] += 1
     return table
 
 
@@ -89,8 +94,10 @@ def client():
 def test_every_route_is_named_with_what_guards_it(client: TestClient) -> None:
     table = served(client.app)
 
-    unnamed = table - set(EXPECTED)
-    gone = set(EXPECTED) - table
+    twice = sorted(route for route, count in table.items() if count > 1)
+    unnamed = set(table) - set(EXPECTED)
+    gone = set(EXPECTED) - set(table)
+    assert not twice, f"routes registered more than once: {twice}"
     assert not unnamed, f"routes nobody has said who may reach: {sorted(unnamed)}"
     assert not gone, f"routes named here that the app no longer serves: {sorted(gone)}"
 
