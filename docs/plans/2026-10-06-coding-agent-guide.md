@@ -194,3 +194,25 @@ Getting Started), `AGENTS.md` (one line), and
 
 - [ ] **M1: the guide.** Decisions 1 to 9 and D1 to D7. One PR; it
   leaves #611 open for M2.
+
+## Plan review round
+
+Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, read-only sandbox, runtime 3m16s, at commit ab35cb23, plan blob 458f726e.
+
+---
+
+1. **P1: M1 omits settled issue requirements.** Evidence: plan, D5 and decision 8 (`docs/plans/2026-10-06-coding-agent-guide.md:80`) replaces the guide's one-line-per-guide index with a link and excludes both Getting Started's three stages and the `/try/` handoff. The pasted issue requires all three in M1. The plan should sequence M1 after #610 and #613, or name explicit follow-up work and leave M1 incomplete until those requirements land.
+
+2. **P1: Following Getting Started can put credentials in the coding agent's transcript.** Evidence: plan, D2 and D6 (`docs/plans/2026-10-06-coding-agent-guide.md:96`) directs the coding agent through Getting Started while promising it never receives a secret. The linked README (`README.md:115`) generates secrets through shell expansion, and its NVS recipe (`README.md:276`) places a Wi-Fi password in a command the agent might run. The plan should identify those steps as person-run handoffs and provide safe, editor-based instructions before directing a coding agent through them. A grep over the new page alone cannot catch leaks in linked steps.
+
+3. **P1: `apply` can install changes the person never requested.** Evidence: plan, D3–D4 (`docs/plans/2026-10-06-coding-agent-guide.md:108`) promises to change only what was requested, then runs `vinga apply`; configuration.md (`docs/run/configuration.md:220`) says `apply` installs the stored snapshot and points to `vinga diff` for *everything* pending. The plan should require a diff before writing and immediately before applying. If unrelated changes are pending, the agent must show them and seek the person's decision rather than install them.
+
+4. **P2: Revision-pinned reading still executes `main` artifacts.** Evidence: plan, D1 (`docs/plans/2026-10-06-coding-agent-guide.md:87`) pins pages to the running revision, but the linked Getting Started (`README.md:94`) downloads Compose and provisioning files from `main` and installs the CLI from `main` (`README.md:152`). The plan should pin those artifacts and any workstation CLI installation to the same revision, or use the CLI shipped in the running image.
+
+5. **P2: The version rule has no safe answer when the guide cannot be found.** Evidence: plan, D1 (`docs/plans/2026-10-06-coding-agent-guide.md:87`) sends an `unknown` build to `main` and assumes a `-dirty` build's tree is available. A running revision from before this guide lands has no page at the prescribed URL. The plan should specify how to handle an absent page or inaccessible dirty tree, and avoid presenting `main` instructions as instructions for an unidentified install.
+
+6. **P2: The simulator step is not available on every documented path.** Evidence: plan, D4 and D7 (`docs/plans/2026-10-06-coding-agent-guide.md:120`) treats `vinga simulator run` and an OTA URL from `vinga info` as unconditional. A workstation CLI needs the `sim` extra (`docs/reference/cli.md:164`), while onboarding can be disabled (`vinga-server/src/vinga_server/config/cli/deployment.py:790`), in which case `info` prints no URL. The plan should give the installed-client prerequisite and a person-controlled path for deployments using the legacy OTA URL. Its smoke test should exercise the workstation CLI, not only the worktree environment.
+
+7. **P2: The proposed event check can miss the event it claims to confirm.** Evidence: plan, D4 (`docs/plans/2026-10-06-coding-agent-guide.md:120`) checks a board's check-in with `vinga events tail`; logs-and-traces.md (`docs/run/logs-and-traces.md:168`) says the stream retains nothing and reconnects at the present. The plan should start the tail before the simulator or board action, or use a retained record where recording is enabled. Verification should assert the expected `ota_check` and `session_open` events, not merely run the command.
+
+**Verdict: not ready.** The P1 scope, secret-handling, and apply behavior need amendments before implementation.
