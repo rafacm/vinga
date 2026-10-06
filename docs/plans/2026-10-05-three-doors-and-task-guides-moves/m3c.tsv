@@ -1,0 +1,22 @@
+# M3c: where each move unit of vinga-server/README.md went, read against
+# the README at the branch base, 34308ea5 (M3b's tip).
+# Run from the repository root:
+#   git show 34308ea5:vinga-server/README.md > old.md
+#   python3 scripts/audit_doc_move.py old.md vinga-server/README.md <this file>
+# Columns, tab-separated: LINE [FIRST-LAST] DESTINATION [kinds=] [edited=].
+# Applying a change without a restart
+77	docs/run/configuration.md	kinds=procedure,explanation	edited=3,5,6,7,9,11
+# Configuration: the two halves, the CLI, import, when a change applies, the environment
+410	1-18	docs/run/configuration.md	kinds=procedure,explanation,contract	edited=1,3,4,5,6,8,9,10,11,12,15,18
+# Configuration: the database keys and the unreachable-database refusal
+410	19-24	docs/run/database.md	kinds=explanation,contract	edited=23
+# The configuration API (D8 route listings and shapes, D8a request)
+625	docs/run/configuration-api.md	kinds=procedure,explanation,contract	edited=1,2,5,6,7,8,9,10,11,12,13,14,15,16,17,18,22,23,24
+# Secrets
+862	docs/run/security.md	kinds=procedure,explanation	edited=3,5,7
+# Security: its heading (the guide's title says it), the section, the
+# local_only note (D13: the 2026-09-12 changelog entry carries it), memory
+902	1-1	DROP
+902	2-30	docs/run/security.md	kinds=procedure,explanation,contract	edited=2,3,6,7,13,15,17,20,26,30
+902	31-31	DROP
+902	32-32	docs/run/memory.md	kinds=explanation	edited=32
