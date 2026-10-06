@@ -29,8 +29,7 @@ The documentation changes with the code, so read the version the
 person's server was built from: never a newer one, and never your
 memory of one. Each page this one links is read at that revision too,
 when you reach the step that links it. Ask the server which build it
-is. `/healthz` needs no
-token:
+is; `/healthz` needs no token:
 
 ```bash
 curl -s http://192.168.1.10:8003/healthz
@@ -61,9 +60,9 @@ where each form comes from):
   `HEAD`, after confirming that `git rev-parse --short HEAD` in it is
   the hash after `-g`; when it is not, the server is running other code
   than the checkout holds, so say so and ask. If you cannot reach the
-  checkout, take the hash (after `-g`,
-  where there is one) and read at it on the checkout's remote only
-  after confirming the commit exists there: for this repository,
+  checkout, take the hash (after `-g`, where there is one) and read at
+  it on the checkout's remote only after confirming the commit exists
+  there: for this repository,
   `https://github.com/rafacm/vinga/commit/<hash>` answers 200 rather
   than 404. A fork's commit is on the fork's remote, not on this one.
 - **A `-dirty` suffix you cannot see the tree behind.** The running
@@ -304,10 +303,9 @@ refused stays stored, so the next start refuses the same way. Some
 refusals name the entry and the rule. One that does not, from
 `vinga apply` or from `vinga diff`, which refuses the same store the
 same way, is answered by `vinga check`, which reads the store as a boot
-would and names both.
-It needs the server's half of the package, so run it in the
-container (`docker compose exec -T vinga vinga check`) or from a
-checkout. A fresh store with agents and no device bound needs a
+would and names both. It needs the server's half of the package, so run
+it in the container (`docker compose exec -T vinga vinga check`) or from
+a checkout. A fresh store with agents and no device bound needs a
 `default_agent`, and that is the refusal you are most likely to meet
 first.
 
@@ -363,14 +361,14 @@ each event carries is the [event reference](../reference/events.md),
 and when each fires is [Reading logs and traces](logs-and-traces.md).
 
 **When the reply is the fallback phrase or nothing**, the stream says
-which stage failed:
-`provider_failed` names the entry and the kind of error, `llm_retry` is
-a stalled model being asked again, `reply_fallback` is the fixed phrase
-said instead of a reply, and `sentence_withheld` is a model writing a
-tool call into its speech. The guide for that stage says what each
-means for it. Where the deployment records conversations, which is off
-by default ([Recording conversations](conversation-store.md)), the
-record keeps what the stream did not:
+which stage failed: `provider_failed` names the entry and the kind of
+error, `llm_retry` is a stalled model being asked again,
+`reply_fallback` is the fixed phrase said instead of a reply, and
+`sentence_withheld` is a model writing a tool call into its speech. The
+guide for that stage says what each means for it. Where the deployment
+records conversations, which is off by default
+([Recording conversations](conversation-store.md)), the record keeps
+what the stream did not:
 
 ```bash
 vinga session list
