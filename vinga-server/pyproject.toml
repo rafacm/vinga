@@ -211,6 +211,18 @@ dev = [
     "ruff>=0.9",
     "xiaozhi-sdk>=0.5.1",
 ]
+# The browser lane's runner (#613), and nothing else: Playwright drives
+# the page and pytest holds the cases. Not a default group, because the
+# lane runs inside Playwright's own container, whose browser build and
+# system libraries match exactly one Playwright release. The pin is
+# exact for that reason, and the image the lane names carries the same
+# version (`tests/browser/run.sh`, the CI job); move both together. The
+# server under test is not installed from here: the lane builds the
+# wheel and installs it into an environment of its own.
+browser = [
+    "playwright==1.63.0",
+    "pytest>=8.3",
+]
 
 [build-system]
 requires = ["hatchling"]
