@@ -1012,7 +1012,7 @@ Pages are this plan's modules; the reader is the caller.
   tests, the check, the two steps;
   then `direction.md`; then `concepts.md` section by section; then the
   glossary; then the index.
-- [ ] **M3a: the task-guide directory and the deployment guides.**
+- [x] **[M3a: the task-guide directory and the deployment guides](2026-10-05-three-doors-and-task-guides-implementation.md#m3a-the-task-guide-directory-and-the-deployment-guides)** (PR TBD).
   `docs/run/README.md`, `running-in-a-container.md`, `database.md`,
   `backups.md`, `upgrading.md` (D13), the master key into `security.md`,
   "an edit is stored" into `configuration.md`, `exposing-a-deployment.md`,
