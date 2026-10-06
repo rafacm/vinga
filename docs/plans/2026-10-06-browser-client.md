@@ -374,12 +374,18 @@ fields it may appear in. **Device metadata**: the browser's MAC and
 client id, which are bounded identifiers a board's events already carry
 (`ota_check` names the MAC and the client id, the session events name
 the MAC), and which the browser's may carry in exactly those fields and
-no others. **Secrets**: the device token and the try token, which reach
-no log record, event field, exception text, API body beyond the one
-issuing them, or accepted subprotocol, in either log format; sentinel
-tests plant credential-shaped values for both and assert their absence
-everywhere. D7's sentence that nothing the page stores reaches a log is
-replaced by this classification.
+no others. **Secrets**: the device token and the try token. The device token
+appears in exactly the places a board's does (the OTA reply's body,
+which hands it to its owner) plus the inbound `vinga.token.*`
+subprotocol value, which is read and dropped. The try token appears in
+exactly two: the issuance response to the operator's authenticated
+request, and the inbound body of `POST /try/redeem`. Neither is logged,
+retained beyond its expiry, echoed, returned by any other route, carried
+in an accepted subprotocol, or written to any event field or exception
+text, in either log format; sentinel tests plant credential-shaped
+values for both and assert their absence everywhere else. D7's sentence
+that nothing the page stores reaches a log is replaced by this
+classification.
 
 **D8. #301 and #305.** #305 is unchanged: the CLI simulator stays the
 operator's probe. #301 is recommended, in a comment on it, to shrink to
@@ -455,9 +461,10 @@ The seam is the existing one: the browser is a device behind
 
 ## Standing lenses
 
-- **No-leak**: the subprotocol token, the try token and the identity
-  never reach a log, an event, an exception text or an API body beyond
-  the one that issues them; sentinel tests as above.
+- **No-leak**: D7a's two classes. The identity is bounded device
+  metadata, allowed exactly in the fields a board's identity uses; the
+  device token and the try token are secrets, allowed only where D7a
+  lists; sentinel tests as above.
 - **Pin before reshaping**: `refusal_reason`'s header path is pinned by
   its existing tests, which must pass byte-unchanged with the
   subprotocol path added.
@@ -577,6 +584,8 @@ Reviewed 2026-10-06 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.0
    *Resolution:* Accepted. Q3b: when the OTA reply says `access: open`, the page omits `vinga.token.*` and keeps the version, MAC and client-id values, and the subprotocol path behaves as the header path does with auth off; browser sessions are tested with auth on and off.
 
 4. **P2: The amended no-leak rules still contradict the redeem flow and each other.** Evidence: D7a says secrets reach no API body beyond the issuing one (lines 345-354 (`docs/plans/2026-10-06-browser-client.md:345`)), yet the try token must reach `POST /try/redeem` in its request body (line 292 (`docs/plans/2026-10-06-browser-client.md:292`)). It also permits browser MAC/client ID in ordinary device event fields, while the standing lens still says identity never reaches a log or event (lines 431-433 (`docs/plans/2026-10-06-browser-client.md:431`)). The plan should explicitly allow the try token only in the issuance response and the inbound redeem body, neither logged, retained, echoed, or returned; it should replace the standing-lens sentence with D7a's metadata-versus-secret classification.
+
+   *Resolution:* Accepted. D7a now lists exactly where each secret may appear: the try token in the issuance response and the inbound redeem body only, the device token in the OTA reply and the inbound subprotocol only, neither logged, retained, echoed or returned elsewhere; the standing no-leak lens now states D7a's two classes instead of the old sentence.
 
 5. **P2: Serving every browser asset below `/x/<key>/` leaks the onboarding secret to normal proxy logs unless the deployment contract changes.** Evidence: D2 makes both the page and every module/worklet request contain the onboarding key (lines 213-220 (`docs/plans/2026-10-06-browser-client.md:213`)). The security guide classifies that key as sensitive and says neither onboarding path segment is written to a log (security.md (`docs/run/security.md:188`)). Uvicorn's disabled access log does not control a reverse proxy. The plan should require proxy redaction or suppression for the full `/x/<key>/...` route family, including request targets and `Referer`, and document that requirement in the exposure guide.
 
