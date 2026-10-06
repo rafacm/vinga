@@ -216,8 +216,8 @@ are never committed or redistributed.
 [`xiaozhi-sdk`](https://pypi.org/project/xiaozhi-sdk/) is a Python
 implementation of the device side of the protocol, published on PyPI, and
 vinga uses it as a device simulator to drive the server end to end
-without a board on the desk (see the testing section of
-[`vinga-server/README.md`](../vinga-server/README.md)). It is a
+without a board on the desk (see the Stack section of
+[`contributing.md`](contributing.md#stack)). It is a
 development dependency only. It brings `opuslib`, which is unmaintained
 and compiles with an `is not 0` identity comparison, which is why
 `pyproject.toml` filters that one `SyntaxWarning` in a test suite that
