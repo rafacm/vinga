@@ -1296,3 +1296,70 @@ On agentpi, from the worktree root unless noted:
 - Not run: `uv run ruff check .` and the unit lane, since M3c changes
   no code and no test; the integration lane, since it adds no
   migration.
+
+### PR review round
+
+Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, read-only sandbox, runtime 5m09s, at commit 83cff064 ([the round](https://github.com/rafacm/vinga/pull/620#issuecomment-6007091996)).
+
+1. **P1: secrets generated through a shell expansion.**
+   `configuration-api.md` and `security.md` generated the API token and
+   the device-auth secret as `VAR=$(openssl rand -hex 32)`, which
+   `set -x` writes to stderr expanded, against the guides' own reason
+   for keeping a token out of command lines.
+   *Resolution:* the grep for `$(openssl` and `$(python` under
+   `docs/run/`, untruncated (`.logs/m3c-fix1-before.txt`), found
+   exactly those two; both, and the master key's Fernet block, which
+   printed the key to the terminal, now append to a secrets file made
+   mode 600 first, a literal `printf` giving the name and the
+   generator's own output the value
+   (`{ printf 'VINGA_API_SECRET='; openssl rand -hex 32; } >> vinga.env`),
+   so nothing is expanded. Under `bash -x` the file is mode 600, holds
+   both lines, and neither value is in the trace
+   (`.logs/m3c-fix1-xtrace.txt`). The grep after has no hit
+   (`.logs/m3c-fix1-after.txt`). Declared edits: row 4 paragraphs 3
+   and 4, row 5 paragraph 6 (the Fernet block, which the audit had
+   been matching against M3a's copy, as noted above; it is now edited
+   in both places, since it is one block), row 7 paragraph 8
+   (`8218cf25`).
+   Follow-up, outside `docs/run/` and left alone as the round asked
+   (`.logs/m3c-fix1-outside.txt`, outside the dated records): the root
+   `README.md` L125 and L134, `docs/deployment.md` L317 and L318,
+   `deploy/k8s/secret.yaml.example` L16 and L17,
+   `vinga-server/config.example.yaml` L127 and L186,
+   `vinga-server/config.deploy.example.yaml` L100, and two boot
+   refusals that print the same pattern as their fix,
+   `vinga-server/src/vinga_server/auth.py` L89 and
+   `config/api.py` L1193.
+2. **P2: an exec shell was said to know the mounted file.** The client
+   guide said exec into the container supplies the token and the
+   address; the entrypoint exports `VINGA_CONFIG` to the server process
+   only, so a `docker exec` shell falls back to port 8003 and
+   `VINGA_API_SECRET` whatever the mounted file sets.
+   *Resolution:* `configuration-api.md` says so and shows the exec
+   command naming the file (`docker exec -e
+   VINGA_CONFIG=/config/config.yaml ...`, or `--config` after
+   `config`); `configuration.md` and `running-in-a-container.md`, which
+   made the same claim (the second in M3a's text, outside M3c's units),
+   say it in a sentence and link it. Declared edit: row 4 paragraph 21
+   (`446b8bd0`). This closes the discovery above about the port
+   fallback, as far as the guides go.
+3. **P2: the import example named a checkout's path.**
+   `configuration.md` recommends a separately installed client, then
+   ran `vinga import -f examples/presets/cloud-stack.yaml`, which
+   exists only under a checkout's `vinga-server/`.
+   *Resolution:* the example fetches the preset with `curl -fsSLO`
+   from the raw URL form the root README's quick start uses (it
+   answers 200, `.logs/m3c-fix3-preset-url.txt`), imports the local
+   file, and says that from a checkout the path is under
+   `vinga-server/`. Declared edit: row 2 paragraph 7 (`c66010b8`).
+
+After the fixes, against `git show origin/main:vinga-server/README.md`
+(byte-identical to the base used above), the audit exits 0:
+
+```text
+9 units, 102 paragraphs moved, 58 declared edited, 2 declared dropped, 0 kept in the page, 0 findings
+```
+
+The link check reports `checked 318 files, 0 failures` and the Run and
+Use check `checked 29 Run and Use pages, 0 findings`; the census ran
+last, and its outcome is in the hand-back.
