@@ -469,9 +469,12 @@ be a browser.
   page (D2), the unbound start request (D4), the route-table inventory
   test, and the integration handshake test. A server change a reviewer
   can read alone.
-- [ ] **M2: the try link.** The token store (D5, D6), the API route,
-  `vinga info`'s line, `GET /try/<token>` with binding and the address
-  bar cleared, its tests, and the onboarding and exposure guides.
+- [ ] **M2: the try link.** The token store with its atomic claim (D5,
+  D5d, D6), the API route and its no-default-agent refusal (D5a),
+  `vinga info`'s line and its origin rule (D5c), the inert `GET /try/`
+  page that reads the token from the fragment and clears it, the
+  same-origin `POST /try/redeem` that binds and names in one transaction
+  (D5b), their tests, and the onboarding and exposure guides.
 - [ ] **M3: the client and its lane.** The modules and worklets (D3),
   realtime and the auto fallback (Q4), the ending (D9), the 60 ms frame
   measured first, the browser lane and its CI job (Q5).
@@ -535,6 +538,8 @@ Reviewed 2026-10-06 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.0
 ---
 
 1. **P1: M2 still reintroduces the rejected URL-token GET flow.** Evidence: D5 requires `GET /try/` with a fragment token to be inert and redemption by `POST /try/redeem` (plan lines 277-298 (`docs/plans/2026-10-06-browser-client.md:277`)), but M2 still says "`GET /try/<token>` with binding" (line 473 (`docs/plans/2026-10-06-browser-client.md:473`)). That would again leak the token in proxy logs and let previews consume it. The milestone must instead name inert `GET /try/`, fragment clearing, and same-origin `POST /try/redeem`; remove every `/try/<token>` spelling.
+
+   *Resolution:* Accepted. M2's item now names the inert `GET /try/` page, the fragment read and cleared, and the same-origin `POST /try/redeem`; no `/try/<token>` spelling remains outside the recorded findings.
 
 2. **P1: Single-use redemption has no atomicity requirement or concurrent test.** Evidence: D5 describes an in-process token record with a `used` flag (lines 277-295 (`docs/plans/2026-10-06-browser-client.md:277`)), while D5b makes each redemption mint and bind a device (lines 310-318 (`docs/plans/2026-10-06-browser-client.md:310`)). Two simultaneous POSTs can both observe an unused token unless the token-store operation claims it atomically before any await or database work. The plan should require a linearizable `claim(token)` operation, with one winner only, and a parallel-redemption test proving one binding and one fixed refusal.
 
