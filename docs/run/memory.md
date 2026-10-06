@@ -35,8 +35,9 @@ happen in one transaction under the schema's own writer lock, so two
 conversations talking to the same agent at once cannot lose each other's
 fact and no reply ever reads a memory that is over its cap. There is
 nothing to switch on: the schema is migrated at every boot the way the
-record's is, and an agent that has been told nothing gets no memory
-block. There is something to switch off, and it is an agent's own
+record's is, and an agent that may remember and has been told nothing
+is sent a short memory block saying nothing is saved yet, under the
+same framing sentence a full one carries. There is something to switch off, and it is an agent's own
 `memory` section, below.
 
 **An agent that is dictated to wants its own endpointer.** Telling an
