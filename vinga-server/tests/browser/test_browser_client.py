@@ -1,10 +1,12 @@
 """The browser client, driven end to end (#613, Q5, Q5a, Q5b, D3a, D4, D9).
 
-Four cases, one Chromium. Each is a fresh browser profile, so each is a
-new device: three are bound by a fresh try link, and the fourth starts
-from the onboarding URL and pairs by its code. All of them speak
-through the same fake microphone loop (`lane.py` says what it is and
-why its timing is what it is).
+Five cases, one Chromium. Each is a fresh browser profile, so each is a
+new device: four are bound by a fresh try link, and one starts from the
+onboarding URL and pairs by its code. All of them speak through the
+same fake microphone loop (`lane.py` says what it is and why its timing
+is what it is), and every page runs `instrument.js` first, which
+records from outside the client what it did with the browser's own
+APIs.
 
 What a case asserts it observes from outside the page wherever it can:
 the server's own events by name, the server's log, the API's record of

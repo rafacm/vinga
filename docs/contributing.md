@@ -219,7 +219,8 @@ holds four whole conversations with it: one in realtime with a
 barge-in, an interruption and the idle timeout's ending; one with echo
 cancellation unavailable, in auto mode; one in which the server
 discovers the page's device tools and calls one; and one in which a
-browser with no link pairs by its six-digit code. The microphone is a
+browser with no link pairs by its six-digit code. A fifth case fails
+the microphone's setup and checks that the capture is released. The microphone is a
 fake capture device playing a sentence the simulator ships
 ([`tests/browser/speech.wav`](../vinga-server/tests/browser/speech.wav),
 written by `tests/browser/make_speech.py`), and what the lane asserts
@@ -253,9 +254,11 @@ docker run --rm --network "$net" --ipc=host \
 ```
 
 Arguments after `run.sh` are pytest's (`-k auto`, `-x`). A failing
-case prints what the page and the server were saying; set
-`VINGA_BROWSER_KEEP_LOG` to a path under a mounted directory to keep
-the server's whole log as well. The lane writes nothing into the
+case prints what the page and the server were saying, with every token
+the lane issued or saw, and anything shaped like one, replaced by
+`[redacted]`; set `VINGA_BROWSER_KEEP_LOG` to a path under a mounted
+directory to keep the server's whole log as well, redacted the same
+way. The lane writes nothing into the
 checkout, and nothing under `tests/browser/` is collected unless the
 lane is run this way, so a bare `pytest` stays safe.
 
