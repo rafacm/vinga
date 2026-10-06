@@ -63,7 +63,7 @@ EXPECTED_INDEXES = {
     "ix_conversation_milestones_conversation",
 }
 
-HEAD = "1011_events_cite_the_reference"
+HEAD = "1012_device_name_names_browsers"
 
 
 def _tables(engine, schema_name: str) -> set[str]:

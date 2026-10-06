@@ -82,7 +82,7 @@ def test_the_baseline_carries_the_old_comment(at_the_baseline: DatabaseConfig) -
 
 
 def test_the_upgrade_names_the_generated_reference(at_the_baseline: DatabaseConfig) -> None:
-    upgrade_to(at_the_baseline.name, CONVERSATIONS_CHAIN, "head")
+    upgrade_to(at_the_baseline.name, CONVERSATIONS_CHAIN, REVISION)
 
     assert _comment(at_the_baseline) == NEW_COMMENT
     assert _comment(at_the_baseline) == schema.events.c.name.comment
@@ -90,7 +90,7 @@ def test_the_upgrade_names_the_generated_reference(at_the_baseline: DatabaseConf
 
 
 def test_the_downgrade_puts_the_old_comment_back(at_the_baseline: DatabaseConfig) -> None:
-    upgrade_to(at_the_baseline.name, CONVERSATIONS_CHAIN, "head")
+    upgrade_to(at_the_baseline.name, CONVERSATIONS_CHAIN, REVISION)
     downgrade_to(at_the_baseline, CONVERSATIONS_CHAIN, BASELINE)
 
     assert _comment(at_the_baseline) == OLD_COMMENT
