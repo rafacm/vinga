@@ -176,8 +176,9 @@ Opening it binds that browser to the default agent before it says a
 word: the server creates a device named `Browser <its MAC>` (a MAC the
 server makes up, which no board can have), the page keeps the identity
 in the browser's own storage, and `vinga list` shows it among the
-devices beside the boards. The page's conversation client is not built
-yet, so today opening the link binds the browser and stops there.
+devices beside the boards. Pressing Start on the page then asks for
+the microphone and holds a conversation with that agent, as a board
+would.
 
 The link is a credential, and it is short-lived on purpose. It works
 once: a second browser opening the same link is told it cannot be

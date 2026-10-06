@@ -1,14 +1,16 @@
 # Contributing to vinga
 
 At the end of this page you will have a checkout that runs the server
-from source against a local Postgres, and you will know the four lanes
+from source against a local Postgres, and you will know the five lanes
 a change is exercised in before it ships: the unit and integration
 lanes, which CI runs on a change that touches the server, its
 references or its deployment files (a documentation-only change runs
 the documentation workflow instead, and which paths run which workflow
 is the CI paragraph under [`AGENTS.md`'s Commands](../AGENTS.md#commands)),
 the opt-in local lane that holds a real conversation on local engines,
-and the smoke lane that holds one with a running container.
+the smoke lane that holds one with a running container, and the
+browser lane that holds three with the browser client in headless
+Chromium.
 
 The workflow every change follows (branches, commits, plans and their
 records, the changelog fragment) and the design and writing
@@ -208,3 +210,51 @@ The secret has to match the one the server under test was started with:
 the lane verifies the token it is issued, and that needs the signing key.
 It skips without `VINGA_SMOKE_OTA_URL`, so a bare `pytest` stays safe,
 and it works against any reachable server, not only a container.
+
+### The browser lane: the page in Chromium
+
+The browser client is JavaScript the server ships, and no Python test
+runs it, so a fifth lane loads the real page in headless Chromium and
+holds three whole conversations with it: one in realtime with a
+barge-in, an interruption and the idle timeout's ending; one with echo
+cancellation unavailable, in auto mode; and one in which the server
+discovers the page's device tools and calls one. The microphone is a
+fake capture device playing a sentence the simulator ships
+([`tests/browser/speech.wav`](../vinga-server/tests/browser/speech.wav),
+written by `tests/browser/make_speech.py`), and what the lane asserts
+it reads from outside the page where it can: the server's events and
+log, the websocket frames Chromium saw, and the device record. That
+the reply reached the speaker is the one thing only the page knows,
+and it says so only when its address carries the lane's switch.
+
+It serves the page from what ships rather than from the checkout:
+[`tests/browser/run.sh`](../vinga-server/tests/browser/run.sh) builds
+the wheel, installs it into an environment of its own constrained to
+the lockfile, starts the server from that install on a database of
+its own, and runs the cases. It runs inside Playwright's own image, at
+the version the `browser` dependency group locks, because the browser
+build and the system libraries it needs come with that image; it needs
+no Node toolchain and installs nothing on your machine. CI runs it on
+every server-workflow event, once against the wheel and once against
+the image it built.
+
+```bash
+# From vinga-server/, with the development database up. The container
+# joins the network compose made for it, as the smoke lane's do, and
+# names the database service. The volume keeps uv's cache between runs.
+net=$(docker compose config --format json | jq -r '.networks.default.name')
+docker run --rm --network "$net" --ipc=host \
+  -e VINGA_DB_HOST=postgres \
+  -v "$PWD:/work" -w /work \
+  -v vinga-browser-uv:/root/.cache/uv \
+  mcr.microsoft.com/playwright/python:v1.63.0-noble \
+  sh tests/browser/run.sh
+```
+
+Arguments after `run.sh` are pytest's (`-k auto`, `-x`). A failing
+case prints what the page and the server were saying; set
+`VINGA_BROWSER_KEEP_LOG` to a path under a mounted directory to keep
+the server's whole log as well. The lane writes nothing into the
+checkout, and nothing under `tests/browser/` is collected unless the
+lane is run this way, so a bare `pytest` stays safe.
+
