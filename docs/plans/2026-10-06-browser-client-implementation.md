@@ -248,3 +248,226 @@ Verification after the round, from the worktree's `.logs/`:
   workers. Recorded as a follow-up candidate.
 - `uv run pytest tests/integration -q`, serially: `354 passed in 632.85s (0:10:32)`
 - `uv run pytest tests/census -q`, last: `66 passed in 30.01s`
+
+## M2: the try link
+
+**Attribution:** anthropic/claude-opus-5-5, thinking high; Claude Code 2.1.291; 2026-10-06.
+
+### What landed
+
+| Decision | Where | Commit |
+| --- | --- | --- |
+| D5, D5d, D6, D6a: the token store, single use, expiring, bounded | `onboarding/try_links.py` (`TryLinks`), the bounds in `onboarding/__init__.py` (`TRY_LINK_TTL_S`, `TRY_LINK_CAPACITY`, `TRY_LINK_MINTS`), `config/loader.py` (`TryLinkRefusedError`), `tests/unit/test_try_links.py` | `Hold try links in memory, single use and expiring` |
+| D5b: bind and name in one transaction | `config/store.py` (`enroll_device`, an `enrolling` condition on `_device_write`), `tests/unit/test_store_enroll_device.py` | `Create a browser's device bound and named at once` |
+| D5, D5a, D5c (the server's half), D6b: issuance | `onboarding/try_links.py` (`Issuer`, `link_origin`), `config/api.py` (`POST /runtime/try-links`), `config/responses.py` (`TryLink`, `RefusalReason.NO_DEFAULT_AGENT`), two description files, `composition.py` and `app.py` (one `TryLinks` shared by the API and the page), `docs/reference/api-openapi.json` (regenerated), `tests/unit/test_try_link_issue.py` | `Issue a try link from the configuration API` |
+| D5, D5b, D5d, D5e: the inert page and the redemption | `browser/router.py` (`POST /try/redeem`, `same_origin`), `onboarding/try_links.py` (`redeem`), `browser/static/page.js` and `index.html`, the route inventory, `tests/unit/test_try_link_redeem.py` | `Redeem a try link from the page` |
+| D5c (the CLI's half): `vinga info`'s line | `config/cli/deployment.py` (`TRY_LINK`), `config/cli/acts.py` (`Act.completes`, `Act.declined`), `config/cli/reach.py` (`Refused`, the `no-default-agent` remedy), `config/cli/grammar.py`, `docs/reference/cli.md` (regenerated), `tests/unit/test_config_cli_try_link.py` | `Print a try link in vinga info` |
+| D7a: the try token's two homes | `tests/unit/test_try_link_no_leak.py` | `Hold a try link's token to its two homes` |
+| D2a, D5e, the guides | `docs/run/onboarding-a-device.md`, `exposing-a-deployment.md`, `upgrading.md`, `security.md`, `README.md` | `Document the try link and the edge rules it needs` |
+| Changelog, this section | `changelog.d/613-try-link.md` | this section's commit |
+
+### Design footprint
+
+What `try_links.py`'s callers stop having to know: when a token
+expires, that a spent one is removed rather than flagged, that expired
+ones are pruned at every issue and claim, how many may be held, what a
+token is made of, and that the claim is one step; when a link may be
+issued at all and in which order the four refusals are asked; which
+origin a link may name; and what a redemption writes, including the
+redraw of a taken MAC and its bound. The API route is four lines (no
+runtime, read the default agent, `issuer.issue`, `no-store`); the
+redeem route asks the origin, reads the body and hands both to
+`redeem`. Neither knows a lifetime, a bound, a name format or a MAC
+rule. The store learned one condition (`enrolling`) on the device
+write path every device write already takes, rather than a sixth path.
+
+### Deviations from the plan
+
+1. **The server's refusal does not name `vinga default-agent set`; the
+   CLI does.** D5a asks for "a fixed sentence naming `vinga
+   default-agent set`". A sentence composed on the server must not
+   name a command (#386: the server neither ships nor versions the
+   client grammar), so the API's 409 says the state in words and
+   carries a new reason token, `no-default-agent`, and the CLI's
+   `REMEDIES` appends "Set one with `vinga default-agent set <name>`".
+   What `vinga info` prints in the link's place is therefore the
+   sentence D5a describes. The token is declared at its one decision
+   site (`Issuer.issue`) and is in the remedy table, whose coverage
+   test holds the two sets equal.
+2. **Issuance also refuses on a server with no store behind it.** Not
+   in the plan. A server composed from a configuration handed to it
+   reads its bindings from that snapshot, so a browser a link wrote
+   into the store would not be bound by anything the server reads.
+   `SnapshotOnlyError` (409) with a sentence of its own, asked after
+   onboarding and before the default agent. Production servers always
+   compose from the store; this is the test lane's and an embedded
+   caller's state.
+3. **A spent token is removed, not flagged.** D5 describes "a used
+   flag". Removing the record at the claim is the same answer to every
+   caller (spent and unknown are already one refusal) and leaves no
+   spent bearer material in memory, which D6a wants anyway.
+4. **The claim takes a lock as well as having no await.** D5d's
+   argument is the single event loop. The issuing API route is a plain
+   `def`, like every route that reads the store, so it runs on a
+   worker thread while redemptions claim on the loop; the store's
+   `threading.Lock` is what makes issue, prune and claim atomic against
+   each other there. The claim itself is still made on the loop with
+   nothing between check and removal.
+5. **`vinga info` prints the link between the onboarding URL and the
+   counts, and its refusal does not fail the command.** The plan says
+   "prints that sentence where the link would be". Two new `Act` fields
+   carry it: `completes` (the CLI's origin half, which needs the
+   address the invocation reached, without making the renderer read
+   anything but its argument) and `declined` (print an API refusal in
+   place and go on). Only a refusal this API wrote is declined: `reach`
+   now raises `Refused`, a `ConfigError` subclass, for a validated
+   problem body, and a transport failure still ends `info`. The
+   loopback origin keeps the API target's scheme and port (an `https`
+   loopback terminator stays `https`) and names `localhost`.
+6. **Same-origin is `Sec-Fetch-Site`, else `Origin` against `Host`.**
+   The plan says "same-origin" without a mechanism. The browser's fetch
+   metadata decides alone when present; a browser that sends none is
+   judged by `Origin`'s authority against the `Host` it reached
+   (authority only, because a TLS-terminating proxy hands the server
+   `http`); a request with neither is refused. Origin and body are both
+   checked before the claim, so a refused request spends nothing. The
+   body is read up to 1 KiB.
+7. **The redeem refusal is 403 `{"error": ...}`**, the body shape M1's
+   mint uses, one sentence for every way of not redeeming, `no-store`.
+
+### Resolutions
+
+- **D6's constants:** ten minutes, 32 live links, 3 mints per
+  redemption, in `onboarding/__init__.py` beside the activation
+  ceremony's bounds and read through the package, the rule that file
+  states. No configuration key; the plan review did not ask for one.
+- **What the redeem answers:** `mac`, `client_id` and
+  `onboarding_path` (`/x/<key>/`, or `/x/` keyless), `no-store`, with
+  `Referrer-Policy: no-referrer` and `nosniff` on either answer.
+- **The default agent read for issuance** is the store's, in the
+  request: the store is what a redemption's transaction reads, so the
+  two cannot disagree about which default exists. The redemption reads
+  no bindings at all, only the store inside its own write transaction,
+  so the coordinator's rule from M1's review round (an unreadable
+  bindings answer must never bind) holds by construction: a store that
+  cannot be read refuses the write.
+- **`link_origin` accepts a loopback IP literal** as well as
+  `localhost` (`http://127.0.0.1`, `http://[::1]`), since browsers
+  treat all three as secure contexts.
+
+### Discoveries
+
+- **A redundant expiry check hid behind the prune.** The first claim
+  pruned expired records and then also compared the expiry; the
+  mutation that removed the comparison survived, because the prune
+  always ran first and the comparison could never be reached. The
+  comparison is gone and expiry is the prune alone, which the
+  mutations of the prune now kill (three tests each).
+- **The network concurrency case reaches its condition about half the
+  time.** Eight redemptions against a real uvicorn killed the
+  check-await-mark mutation on 5 of 10 runs: whether the requests
+  overlap within one loop iteration is up to the network. The
+  deterministic case (`gather` over `redeem` itself, every claim made
+  before any write returns) killed it on 10 of 10, so it is the one
+  that pins D5d; the network case stays as the end-to-end shape and
+  passed 25 of 25 unmutated.
+- **`info`'s determinism test made a claim the link breaks.** Two runs
+  against one state are no longer byte-identical, by design. The test
+  now asserts exactly one line differs and that it is the link.
+- **With no runtime, the try-link 503 is logged as "unreadable stored
+  state".** The API's error event for a 5xx names `NoRuntimeError`
+  that way; it is pre-existing behavior of every runtime route's 503
+  and is only visible in the CLI suite's runner, which builds the API
+  without a server. Not changed here; a follow-up candidate.
+- **M1's review-round rebase:** both conflicts were additive (M1's
+  `TRY_IDENTITY_UNAVAILABLE` beside M2's redeem names); the redeem
+  routes go through `spellings()` and pass the inventory's new count
+  and both-spellings checks.
+
+### Tests first, and the mutations
+
+Each test file was written before the code it pins and run to a
+failure first (an `ImportError` or `AttributeError` on the missing
+name, logs `m2-*-first-fail.log`), except `test_try_link_issue.py`,
+which was written before the route but first run after it; its
+falsification is the mutation set below, the first of which removes
+the route (12 of its tests fail). One run each unless stated; every line is in the
+worktree's `.logs/mutations-m2.log`.
+
+| Guard | Mutation | Killed by |
+| --- | --- | --- |
+| Single use | `get` instead of `pop` | `test_an_issued_token_is_claimed_exactly_once`, `test_a_spent_token_is_gone_from_the_store`, `test_a_claim_frees_capacity` |
+| Expiry | prune removed from the claim; `<` for `<=` | `test_a_token_expires_after_ten_minutes` and two more; five tests |
+| Removal, not refusal (D6a) | prune removed from the issue | `test_expired_records_are_removed_by_the_next_issue`, `test_expiry_frees_capacity` |
+| Capacity | the bound removed | `test_a_mint_past_the_capacity_is_refused_and_holds_nothing_more` |
+| Honest seams | `os.urandom`, `time.time`, 16 bytes | the two default pins; three token-size tests |
+| Not a string | the guard removed | the unhashable cases |
+| D5b one transaction | bind then rename; merge an existing MAC; no default check; wrong refusal type | `test_a_name_that_cannot_be_given_leaves_no_device_behind` and three more; one each |
+| D5a | the default-agent refusal removed; its reason token dropped | `test_with_no_default_agent_nothing_is_issued_and_the_state_is_named`, `test_the_default_agent_is_read_as_it_stands_now` |
+| D6b, snapshot, no runtime, `no-store` | each removed | one test each |
+| D5c server half | any scheme accepted; the listen address guessed | the secure-context cases; `test_a_link_is_issued_into_the_page_s_fragment` |
+| D5d atomic claim | check, `await asyncio.sleep(0)`, then claim | `test_of_redemptions_started_together_exactly_one_binds` 10 of 10; `test_of_concurrent_redemptions_exactly_one_binds` 5 of 10 (see Discoveries) |
+| Same origin | removed; checked after the claim; no `Origin` fallback; `Origin` before fetch metadata | eight origin cases; `test_an_origin_naming_the_host_reached_is_the_page_s_own`; the `cross-site` plus matching `Origin` case |
+| Body | the 1 KiB bound removed; any object accepted | `test_a_long_body_is_not_read_to_its_end`; two body cases |
+| Redemption | no claim; a collision gives up; draws unbounded; a non-collision redrawn; `no-store` dropped; wrong onboarding path | fifteen tests; `test_a_minted_mac_that_is_taken_is_drawn_again`; `test_the_draws_are_bounded`; `test_a_refusal_that_is_not_a_collision_is_not_drawn_again`; one each |
+| D5c CLI half | no completion; any target local; CLI overrides the server; the address guessed; link on stderr | one to seven tests each |
+| In place | refusal ends `info`; any failure declined | the three in-place cases and 23 existing `info` cases; `test_a_try_link_request_that_never_got_an_answer_still_ends_info` |
+| D7a | a debug line; an echo in the refusal; the unparsed body logged; an echo on success | the no-leak cases, one to three each |
+
+Survivors, both reported and resolved: the expiry comparison (unreachable,
+removed; see Discoveries) and `except ConfigError: continue` in
+`redeem`, which survived because a default agent cleared since issuance
+refuses every draw alike, so redrawing three times ends in the same
+`None` with nothing written. The driver did reach the condition; the
+outcome only differed in work done, so
+`test_a_refusal_that_is_not_a_collision_is_not_drawn_again` now counts
+the draws, and it kills the mutation. Seven `cli-*` entries in the log
+are marked void: zsh passed the two test paths as one argument and no
+test ran; the `-2` reruns are the real ones.
+
+### Verification
+
+Run on agentpi (four cores), each line quoted from the log written in
+the worktree's `.logs/`:
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run pytest tests/unit -q -n auto --dist loadfile`:
+  `2 failed, 8328 passed, 19 skipped in 961.39s (0:16:01)`. The two
+  are `test_logs.py`'s uvicorn cases, the interaction with
+  `test_drain.py` M1's review round recorded: alone `27 passed`, after
+  `test_drain.py` in one process `2 failed, 50 passed`
+  (`m2-test-logs-alone.log`, `m2-test-logs-after-drain.log`). Not this
+  milestone's; it also happens on `main`.
+- `uv run pytest tests/integration -q -n auto --dist loadfile`:
+  `354 passed in 217.50s (0:03:37)`
+- The eight generated-document checks the server workflow runs, each
+  regenerated to a scratch directory and compared: all current
+  (`m2-drift.log`). `api-openapi.json` and `cli.md` were regenerated
+  in their commits.
+- The wheel built with `uv build --wheel` carries both new description
+  files, `try_links.py`, `page.js` and `index.html`
+  (`m2-wheel-contents.log`).
+- `page.js` parses as an ES module under Node 22 (`m2-page-js-check.log`).
+- **A real browser, once, by hand** (`m2-manual-browser-check.log`):
+  a server booted from the checkout on a scratch store with a default
+  agent, `vinga info` against it (exit 0, empty stderr, one link
+  naming `http://localhost:18093`), and the link opened in Chromium
+  from the cached `mcr.microsoft.com/playwright/python:v1.63.0-noble`
+  image. After load the address was `http://localhost:18093/try/` with
+  the token gone, the page said it was bound and stored `mac`,
+  `client_id` and `onboarding_path`; going back in history reached
+  `about:blank`, not the token; a second browser page opening the same
+  link got the fixed refusal; the store held `Browser <mac>` bound to
+  `assistant`; the server's log did not contain the token.
+- `python3 scripts/check_doc_links.py .`: `checked 333 files, 0 failures`
+- `uv run pytest tests/census -q`, last, after this section:
+  `66 passed in 28.96s`.
+  Both manifests were regenerated by their generators: the spellings
+  gain `vinga default-agent set` (the remedy's spelling, quoted in the
+  guides), and the reach-ins gain one `_call` site in
+  `test_config_cli_try_link.py`, the transport-failure injection the
+  `info` suite already makes the same way.
+
+Not verified here: the image and the smoke lane (CI's), and the page
+in any engine but Chromium. The lane that loads the page from the
+installed wheel is M3's.
