@@ -57,10 +57,13 @@ database of its own, which `VINGA_DB_NAME` is enough to give it.
 
 **The master key is generated once and escrowed.** Set
 `VINGA_MASTER_KEY` wherever the deployment keeps its environment
-secrets, alongside `VINGA_AUTH_SECRET`:
+secrets, alongside `VINGA_AUTH_SECRET`, generated straight into that
+file so it is neither printed to the terminal nor expanded by the
+shell:
 
 ```bash
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+touch vinga.env && chmod 600 vinga.env
+{ printf 'VINGA_MASTER_KEY='; python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"; } >> vinga.env
 ```
 
 It is only needed once a credential is stored encrypted; a deployment
@@ -134,10 +137,13 @@ supported topology is one server process (see
 
 The secret comes from the environment, never from the config file:
 `VINGA_AUTH_SECRET` by default, or whichever variable
-`server.auth.secret_env` names.
+`server.auth.secret_env` names. Generate it into the deployment's
+secrets file the way the API's token is, so the shell never expands
+it:
 
 ```bash
-VINGA_AUTH_SECRET=$(openssl rand -hex 32)
+touch vinga.env && chmod 600 vinga.env
+{ printf 'VINGA_AUTH_SECRET='; openssl rand -hex 32; } >> vinga.env
 ```
 
 Generate it once and keep it. Changing the secret invalidates the token

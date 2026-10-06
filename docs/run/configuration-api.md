@@ -27,14 +27,17 @@ switched off by forgetting a key is a surface that ships unprotected.
 The token is the value of the environment variable
 `server.api.secret_env` names, `VINGA_API_SECRET` by default, and a
 server started without it refuses to boot, naming the variable and the
-fix:
+fix. Generate it once, straight into the file the deployment keeps its
+environment secrets in, readable by its owner alone (here `vinga.env`,
+which `docker run --env-file` or a compose `env_file:` reads), so the
+value is never expanded by the shell, where tracing would print it:
 
 ```bash
-VINGA_API_SECRET=$(openssl rand -hex 32)
+touch vinga.env && chmod 600 vinga.env
+{ printf 'VINGA_API_SECRET='; openssl rand -hex 32; } >> vinga.env
 ```
 
-Generate it once and keep it where the deployment keeps its other
-environment secrets. A request with no token, or with the wrong one, is
+A request with no token, or with the wrong one, is
 answered 401 whichever path it asked for, whether or not that path is a
 route: only an authenticated caller gets to learn which routes exist.
 One request, for the shape of them, with the token in a curl
