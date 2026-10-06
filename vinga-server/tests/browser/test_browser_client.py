@@ -211,10 +211,12 @@ def frames_while_speaking(wire: list[tuple[str, ...]]) -> list[int]:
 
 def assert_no_leak(server: Server, visit: Visit) -> None:
     """D7a: neither the try token nor the device token reaches the
-    server's log, the page's console, its document, its storage or its
-    address."""
+    server's log, the page's console, its document, its storage, its
+    address, the URL of any request it made or of any socket it opened.
+    The device token goes in a subprotocol, which is not a URL."""
     secrets = [secret for secret in (visit.try_token, *visit.device_tokens) if secret]
     assert visit.device_tokens, "the lane saw no device token to look for"
+    assert visit.requests and visit.sockets, "the lane saw no request or socket to look at"
     log = server.log_text()
     console = "\n".join(visit.console)
     document = visit.page.content()
@@ -225,6 +227,8 @@ def assert_no_leak(server: Server, visit: Visit) -> None:
         "the page's document": document,
         "the page's storage": storage,
         "the page's address": visit.page.url,
+        "a request's URL": "\n".join(visit.requests),
+        "a socket's URL": "\n".join(visit.sockets),
     }
     # Said by place and never by value: a failure here is a credential
     # in the open, and the report of it must not be one more.
