@@ -15,8 +15,9 @@ declaration that IS its emission: what a generator would have restated
 is what a caller constructs.
 
 That is what makes this the place field and token facts belong. The
-README's event table used to carry them in prose nothing checked, which
-reads as checked and is not; it is a name-and-when index now, and every
+event table, in the server README then and in the logs and traces task
+guide now, used to carry them in prose nothing checked, which reads as
+checked and is not; it is a name-and-when index now, and every
 kind, token set, syntax and bound is here, where a wrong claim turns a
 lane red.
 
@@ -86,7 +87,7 @@ PROSE_WIDTH = 78
 # The documents this one points at, relative to the committed copy at
 # docs/reference/events.md. Printed as written when the same document
 # goes to stdout.
-LOGGING_SECTION = "../../vinga-server/README.md#logging"
+LOGGING_SECTION = "../run/logs-and-traces.md#logging"
 OBSERVABILITY_ADR = "../adr/2026-08-04-json-logs-are-the-observability-surface.md"
 CONTENT_ADR = "../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md"
 CONVERSATIONS_REFERENCE = "conversations-schema.md"
@@ -220,9 +221,9 @@ def reference() -> str:
         ),
         "",
         *_paragraph(
-            f"The [README's Logging section]({LOGGING_SECTION}) "
-            f"is the human overview, with one line per event saying when it "
-            f"fires."
+            f"The [Logging section]({LOGGING_SECTION}) of the logs and traces "
+            f"guide is the human overview, with one line per event saying when "
+            f"it fires."
         ),
         "",
         "## How to read it",

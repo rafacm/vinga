@@ -644,7 +644,7 @@ delivery incident rather than a policy difference.
 
 The direct Langfuse path remains supported independently of the Collector.
 Its exact v4 endpoint, URL-encoded Basic Authorization value and ingestion
-header are in [Exporting traces](../vinga-server/README.md#exporting-traces).
+header are in [Exporting traces](run/logs-and-traces.md#exporting-traces).
 
 ## Verifying a deployment
 
