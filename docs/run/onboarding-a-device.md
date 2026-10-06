@@ -157,6 +157,54 @@ mismatches is the sign of a typo or a rotation; the URL to compare
 against is what `vinga-server config ota-url` prints on your own
 terminal.
 
+## A browser, by a try link
+
+A browser can be a device too: the server serves a page at `/try/`
+that joins the deployment the way a board does, checking in at the
+short URL and talking over the same WebSocket. What a board gets from
+its captive portal and a claimed code, a browser gets from one link,
+which `vinga info` prints each time it runs:
+
+```console
+$ vinga info
+...
+try link (opens this deployment in a browser, once, within ten minutes):
+http://localhost:8003/try/#Xq3b...
+```
+
+Opening it binds that browser to the default agent before it says a
+word: the server creates a device named `Browser <its MAC>` (a MAC the
+server makes up, which no board can have), the page keeps the identity
+in the browser's own storage, and `vinga list` shows it among the
+devices beside the boards. The page's conversation client is not built
+yet, so today opening the link binds the browser and stops there.
+
+The link is a credential, and it is short-lived on purpose. It works
+once: a second browser opening the same link is told it cannot be
+used. It expires ten minutes after it was printed if nobody opens it,
+and a restart of the server, an upgrade included, ends every link not
+yet opened, so after one run `vinga info` again for a fresh link. The
+token is the part after `#`, which a browser never sends to any server
+or proxy, so opening the link puts it in no access log; a link preview
+or a scanner fetching the URL gets the page and spends nothing. Only
+the page's own script reads it, clears it from the address bar, and
+hands it back to the server once.
+
+Which address the link names follows from where a browser's
+microphone works, which is a secure context: an `https://` origin or
+`localhost`. When `server.public_url` is an `https://` origin (or a
+loopback one), the link names it. Otherwise `vinga info` names
+`localhost` on the port it reached the API on, when it reached it on
+this machine, and prints no link at all when it did not, asking for an
+`https://` `server.public_url` instead. It never names the listen
+address.
+
+`vinga info` prints a sentence in the link's place, and carries on,
+when the server will not issue one: with no default agent set (set one
+with `vinga default-agent set <name>`, since a link binds to it), with
+`server.onboarding.enabled` off, and while as many links are waiting to
+be opened as the server holds.
+
 **The WebSocket URL** is derived from the address the device reached
 the OTA endpoint on, so a LAN deployment needs no extra configuration.
 Set `server.websocket_url` when the server sits behind a proxy or a

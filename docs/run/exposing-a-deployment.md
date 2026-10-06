@@ -37,8 +37,8 @@ What it costs:
 
 ### Behind a reverse proxy
 
-One port and two paths means a proxy in front has to treat those paths
-differently. Four things to get right:
+One port and several paths means a proxy in front has to treat those
+paths differently. What to get right:
 
 - **Set `server.websocket_url` explicitly, or trust the proxy.** The
   derived URL is wrong behind a proxy that terminates TLS: uvicorn only
@@ -70,6 +70,31 @@ differently. Four things to get right:
   path. A proxy that buffers, or that does not pass `Upgrade` and
   `Connection` through, either breaks the handshake or adds latency to every
   spoken reply.
+- **Keep the onboarding key out of the proxy's log.** This is a rule,
+  not advice. Every route under `/x/` carries the onboarding key in its
+  path: a board's and a browser's check-in at `/x/<key>/`, the
+  activation poll at `/x/<key>/activate`, and the identity a browser
+  without a try link asks for at `/x/<key>/try-identity`. The key
+  stands in front of the endpoint that issues device tokens, and the
+  server itself writes it to no log, so a proxy that logs request
+  targets has to redact or suppress the path of every `/x/` request
+  before it logs. Check it at the edge once it is configured: make one
+  request to `/x/<key>/` through the proxy, then search the proxy's own
+  log for the key, and expect no match.
+- **Do not log the credential headers either.** A board presents its
+  device token in `Authorization`, and a browser presents the same
+  token as a `Sec-WebSocket-Protocol` value, since that is the one
+  header a page can set on a WebSocket. A proxy that logs request
+  headers wholesale logs both. The try link's own token is not among
+  them: it travels in the URL's fragment, which a browser sends to no
+  server, so no proxy sees it.
+- **Serve the browser page over a secure context.** A browser grants a
+  page its microphone only on an `https://` origin or on `localhost`,
+  so a deployment that browsers reach from another machine needs TLS in
+  front, and `server.public_url` set to that `https://` origin: it is
+  the origin the try link `vinga info` prints names. Without it the
+  link names `localhost`, which is right only for a browser on the
+  server's own machine.
 - **Restarts end conversations.** Every open WebSocket dies with the
   process, and the OTA endpoint shares that process, so neither can be
   restarted without the other. The server drains on SIGTERM (see
@@ -91,9 +116,10 @@ routing that port outward routes the admin surface with it unless it is
 told otherwise. Three answers, in the order they are worth reaching for:
 
 - **Do not route it externally at all.** The device endpoints are the
-  only two that need to be reachable from outside, so route
-  `/xiaozhi/ota/` and `/xiaozhi/v1/` and let `/api/` be reachable only
-  from inside. Configure it by exec into the running container, or by
+  only ones that need to be reachable from outside, so route
+  `/xiaozhi/ota/` (or wherever `server.ota_path` puts it), the short
+  path `/x/`, `/xiaozhi/v1/`, and the browser page under `/try/`, and
+  let `/api/` be reachable only from inside. Configure it by exec into the running container, or by
   forwarding the port to your own machine for the length of a session.
   This is the default worth defending: the surface with the most
   authority is the one nothing outside can address.
