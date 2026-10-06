@@ -9,13 +9,20 @@ versioned modules, and the identity an unbound browser starts from.
 """
 
 from .assets import ALLOWLIST, PAGE_PATH, STATIC_PATH, Assets
-from .router import TRY_IDENTITY_SEGMENT, TRY_LINK_NEEDED, build_router, try_identity
+from .router import (
+    TRY_IDENTITY_SEGMENT,
+    TRY_IDENTITY_UNAVAILABLE,
+    TRY_LINK_NEEDED,
+    build_router,
+    try_identity,
+)
 
 __all__ = [
     "ALLOWLIST",
     "PAGE_PATH",
     "STATIC_PATH",
     "TRY_IDENTITY_SEGMENT",
+    "TRY_IDENTITY_UNAVAILABLE",
     "TRY_LINK_NEEDED",
     "Assets",
     "build_router",

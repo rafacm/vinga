@@ -20,10 +20,12 @@ from fastapi.testclient import TestClient
 from tests.support.checkin import SYSTEM_INFO, unbound_config
 from tests.support.configs import config_with_agent, load_config_from_data
 from tests.support.leaks import chain
+from tests.support.registry import booted, store_at
 from vinga_server.app import create_app
 from vinga_server.browser import (
     ALLOWLIST,
     STATIC_PATH,
+    TRY_IDENTITY_UNAVAILABLE,
     TRY_LINK_NEEDED,
     Assets,
     build_router,
@@ -324,6 +326,56 @@ def test_with_a_default_agent_the_mint_refuses_and_admits_nothing() -> None:
     assert refused.json() == {"error": TRY_LINK_NEEDED}
     assert refused.headers["cache-control"] == "no-store"
     assert pending == ()
+
+
+# Carried by the failing read, so a refusal that repeated anything of the
+# failure would carry it too.
+READ_FAILURE = "sk-test-browser-mint-read-failure-never-a-real-credential"
+
+
+def _failing_read(*_: object) -> None:
+    raise RuntimeError(f"disk I/O error near {READ_FAILURE}")
+
+
+@pytest.mark.parametrize("stored_default", [False, True])
+def test_a_mint_that_cannot_read_the_bindings_refuses_until_it_can(
+    monkeypatch: pytest.MonkeyPatch, stored_default: bool
+) -> None:
+    """D4a asks whether a fresh MAC would be admitted unbound, and when
+    the database cannot be read the answer comes from the served
+    configuration, which says nothing of a default agent set after it
+    was loaded. So an empty answer from there is refused, in fixed words
+    a retry can outlive, rather than read as "nobody would admit it".
+
+    The server boots with no default agent; one is then set in the
+    database (or not), the read fails, and the same request is made
+    again once it recovers: a mint with nothing set, the try-link
+    refusal with one."""
+    with TestClient(create_app(booted(), from_store=True)) as client:
+        if stored_default:
+            with store_at() as store:
+                store.set_default_agent("assistant")
+        path = f"{short_path(client)}try-identity"
+
+        with monkeypatch.context() as failing:
+            failing.setattr("vinga_server.device.bindings.read_live_binding", _failing_read)
+            refused = client.post(path)
+        recovered = client.post(path)
+        pending = client.app.state.composition.pending.listing()
+
+    assert refused.status_code == 503
+    assert refused.json() == {"error": TRY_IDENTITY_UNAVAILABLE}
+    assert refused.headers["cache-control"] == "no-store"
+    assert READ_FAILURE not in refused.text
+    assert all(READ_FAILURE not in value for value in refused.headers.values())
+    assert pending == ()
+
+    if stored_default:
+        assert recovered.status_code == 409
+        assert recovered.json() == {"error": TRY_LINK_NEEDED}
+    else:
+        assert recovered.status_code == 200
+        assert set(recovered.json()) == {"mac", "client_id"}
 
 
 @pytest.mark.parametrize("wrong", ["AAAAAAAA", "aaaaaaab", "nonsense-key"])
