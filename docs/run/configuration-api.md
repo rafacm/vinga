@@ -229,10 +229,20 @@ deployment's own use of the API. It finds the server in this order:
 
 The token is the value of the variable `server.api.secret_env` names,
 read from that same file, and a missing one is a sentence naming the
-variable before any request is sent. On a deployment both fall out for
-free: exec into the running container, and the token variable and the
-loopback address are already in the environment. That is the intended
-way to run these commands.
+variable before any request is sent. On a deployment both fall out of
+the running container, which is the intended way to run these
+commands, with one thing to say on the way in: the image names its
+mounted file to the server process alone, so a shell started with
+`docker exec` reads no file and falls back to the defaults, port 8003
+and `VINGA_API_SECRET`. That is enough where the mounted file changes
+neither. Where it sets `server.port` or `server.api.secret_env`, name
+the file in the exec command:
+
+```bash
+docker exec -e VINGA_CONFIG=/config/config.yaml vinga vinga-server config list
+```
+
+`--config /config/config.yaml` after `config` does the same.
 
 The token grants everything the API can do, so the client refuses a
 plain `http://` connection to a host that is not a loopback address

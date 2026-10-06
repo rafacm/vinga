@@ -54,7 +54,11 @@ the token in `VINGA_API_SECRET`. The image ships the same client under
 the server's own entry point, so a shell inside a running container
 reaches it with the token already in its environment and the loopback
 address as the client's default, which is the alternative for a
-deployment that does not route its API outward.
+deployment that does not route its API outward. A mounted file that
+moves the port or renames the token's variable is not read by that
+shell unless the exec command names it, which
+[the command-line client](configuration-api.md#the-command-line-client)
+shows.
 [`docs/reference/cli.md`](../reference/cli.md) is the CLI's own
 page: installing it, reaching a server, rebuilding one, and every
 command's help.
