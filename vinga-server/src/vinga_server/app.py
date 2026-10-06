@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from vinga_server import __version__, logs, onboarding, ota, ws
+from vinga_server import __version__, browser, logs, onboarding, ota, ws
 from vinga_server.auth import build_device_auth
 from vinga_server.build_info import revision
 from vinga_server.capture import CaptureStore, DeviceFacts, sweep_upload_staging
@@ -1352,6 +1352,11 @@ def create_app(
     if config.server.onboarding.enabled:
         key = onboarding.onboarding_key(config.server)
         app.include_router(ota.build_alias_router(key))
+        # And the browser client beside it (#613): its keyless page, its
+        # modules, and the identity an unbound browser asks the alias
+        # for. Mounted with the alias and never without it, because a
+        # browser checks in there exactly as a board does.
+        app.include_router(browser.build_router(key))
     app.include_router(ws.router)
 
     # Mounted last, so the device-facing routes are what this app is

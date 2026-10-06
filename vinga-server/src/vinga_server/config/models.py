@@ -180,6 +180,12 @@ API_MOUNT_PATH = "/api"
 # collide with the onboarding router.
 ONBOARDING_MOUNT_PATH = "/x"
 
+# Where the browser client's page and modules are served (#613): /try/
+# and everything under it, mounted with the onboarding route. Here for
+# the same reason as the two above: an OTA path under it would be
+# registered first and answer the page's own requests.
+BROWSER_MOUNT_PATH = "/try"
+
 # The two health probes, and where they are served. Here for the reason
 # the two paths above are here: `ota_path`'s validator has to reserve
 # them. They are registered before the OTA router, and each answers both
@@ -1300,12 +1306,13 @@ class ServerConfig(BaseModel):
         default="/xiaozhi/ota/",
         description=(
             "Where the OTA endpoint is served, or null to unmount it. It must "
-            f"start and end with `/`, and four places are reserved: "
+            f"start and end with `/`, and five places are reserved: "
             f"`{API_MOUNT_PATH}/` and anything under it, where the OTA route would "
             f"be found before the configuration API is mounted and would answer a "
             f"request its token gate never saw; `{ONBOARDING_MOUNT_PATH}/` and "
             f"anything under it, which serves this same endpoint at "
-            f"`{ONBOARDING_MOUNT_PATH}/<key>/`; and the health probes "
+            f"`{ONBOARDING_MOUNT_PATH}/<key>/`; `{BROWSER_MOUNT_PATH}/` and anything "
+            f"under it, where the browser client is served; and the health probes "
             f"`{HEALTH_PATH}` and `{READY_PATH}`, which are registered first and "
             f"each answer both spellings of their own path, so an OTA endpoint "
             f"served at either would never be reached. It is the token issuer, so "
@@ -1569,6 +1576,13 @@ class ServerConfig(BaseModel):
                 f"which serves the same endpoint at {ONBOARDING_MOUNT_PATH}/<key>/, so "
                 f"the OTA endpoint cannot also be served there or anywhere under it. "
                 f"Serve it somewhere else, for example /xiaozhi/ota/"
+            )
+        if path.startswith(f"{BROWSER_MOUNT_PATH}/"):
+            raise ValueError(
+                f"{BROWSER_MOUNT_PATH}/ is reserved for the browser client, which is "
+                f"served there whenever onboarding is on, so the OTA endpoint cannot "
+                f"also be served there or anywhere under it. Serve it somewhere else, "
+                f"for example /xiaozhi/ota/"
             )
         if path.rstrip("/") in PROBE_PATHS:
             # Named rather than quoted, like the two above, even though
