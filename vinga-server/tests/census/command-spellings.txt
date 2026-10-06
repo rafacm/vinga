@@ -357,6 +357,7 @@ respell  vinga conversation
 respell  vinga conversation delete
 respell  vinga conversation list
 respell  vinga conversation show
+respell  vinga default-agent set
 respell  vinga default-agent set assistant
 respell  vinga device bind
 respell  vinga device pending

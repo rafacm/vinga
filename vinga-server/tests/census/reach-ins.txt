@@ -98,6 +98,7 @@ tests/unit/test_config_cli_transport.py  _NOTHING  2
 tests/unit/test_config_cli_transport.py  _answer  1
 tests/unit/test_config_cli_transport.py  _permitted  5
 tests/unit/test_config_cli_transport.py  _sent  2
+tests/unit/test_config_cli_try_link.py  _call  1
 tests/unit/test_config_cli_untransportable.py  _act  1
 tests/unit/test_config_reload.py  _apply_listing  2
 tests/unit/test_config_reload.py  _filler  3
