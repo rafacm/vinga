@@ -68,7 +68,7 @@ from vinga_server.config.loader import (
     SnapshotOnlyError,
     TryLinkRefusedError,
 )
-from vinga_server.config.models import BROWSER_MOUNT_PATH, ServerConfig
+from vinga_server.config.models import BROWSER_MOUNT_PATH, ServerConfig, browser_device_name
 from vinga_server.config.responses import RefusalReason, TryLink
 
 from .browser import BrowserIdentity, Randomness, mint
@@ -80,11 +80,6 @@ if TYPE_CHECKING:
 # recommends for a token that has to resist guessing: the link is
 # public-facing for ten minutes and answers anyone who holds it.
 TOKEN_BYTES = 32
-
-# What a browser is named when a try link binds it. The full MAC, which
-# is unique per row, so the name is too; and the word a listing reads it
-# by, so an operator tells a browser from a board at a glance.
-BROWSER_NAME = "Browser {mac}"
 
 # The refusals at issuance, each a state of the deployment rather than a
 # fault in the request, and each fixed. None of them names a command:
@@ -292,11 +287,6 @@ class Issuer:
         return answer
 
 
-def browser_name(mac: str) -> str:
-    """The name a browser bound by a try link is given."""
-    return BROWSER_NAME.format(mac=mac)
-
-
 async def redeem(
     links: TryLinks,
     token: object,
@@ -324,7 +314,9 @@ async def redeem(
         identity = mint(randomness)
         failed: str | None = None
         try:
-            await asyncio.to_thread(store.enroll_device, identity.mac, browser_name(identity.mac))
+            await asyncio.to_thread(
+                store.enroll_device, identity.mac, browser_device_name(identity.mac)
+            )
         except DeviceAlreadyBoundError:
             continue
         except Exception as exc:

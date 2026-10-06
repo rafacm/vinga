@@ -3641,16 +3641,38 @@ def mint_device_id() -> str:
     return uuid.uuid4().hex
 
 
-def default_device_name(mac: str) -> str:
-    """What a device record is called when nobody has named it.
+# The words a name this server mints for a device starts with, one per
+# way a device comes to be bound: a board bound by an operator (or by a
+# claim) is a `Device`, and a browser a try link binds is a `Browser`,
+# so an operator tells the two apart at a glance in a listing. The one
+# home of both spellings: the names below are built from these, and so
+# is what reads a name as one nobody chose, so the two cannot drift.
+BOARD_NAME_WORD = "Device"
+BROWSER_NAME_WORD = "Browser"
+MINTED_NAME_WORDS = (BOARD_NAME_WORD, BROWSER_NAME_WORD)
 
-    The FULL MAC and not a tail of it. The leading octets are the vendor
+
+def _minted_device_name(word: str, mac: str) -> str:
+    """One minted name: the word, then the FULL MAC.
+
+    The full MAC and not a tail of it. The leading octets are the vendor
     OUI and a fleet shares them, so a truncated default would collide on
     real hardware, and the collision would surface inside a migration
     backfilling a `NOT NULL UNIQUE` column, which is the worst place for
     it. The full MAC is unique by construction, because `mac` is.
     """
-    return f"Device {mac}"
+    return f"{word} {mac}"
+
+
+def default_device_name(mac: str) -> str:
+    """What a board's record is called when nobody has named it."""
+    return _minted_device_name(BOARD_NAME_WORD, mac)
+
+
+def browser_device_name(mac: str) -> str:
+    """What a browser a try link binds is called (#613, D5b), until
+    somebody names it."""
+    return _minted_device_name(BROWSER_NAME_WORD, mac)
 
 
 # What a written name has to look like to be the default one, as the
