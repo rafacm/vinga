@@ -1096,7 +1096,8 @@ jobs:
   # headless Chromium from the built wheel's own install, holding four
   # whole conversations with it (realtime with a barge-in and the idle
   # ending, auto when echo cancellation is unavailable, the device
-  # tools, and an unbound browser pairing by its code). `tests/browser/run.sh` is the whole of it, here and locally:
+  # tools, and an unbound browser pairing by its code), and checking
+  # that a microphone whose setup fails is released. `tests/browser/run.sh` is the whole of it, here and locally:
   # it builds the wheel, installs it constrained to the lockfile, and
   # runs the cases against the server it starts from that install. The
   # image job runs the same cases a second time against the image it
