@@ -1033,7 +1033,7 @@ Pages are this plan's modules; the reader is the caller.
 - [x] **[M3c: configuration and security](2026-10-05-three-doors-and-task-guides-implementation.md#m3c-configuration-and-security)** ([PR #620](https://github.com/rafacm/vinga/pull/620)). `configuration-api.md`, the
   rest of `configuration.md` and `security.md`, and the M3c rows'
   additions to `database.md`, `upgrading.md` and `memory.md`.
-- [x] **[M3d: conversation behavior, observability, and the README's end state](2026-10-05-three-doors-and-task-guides-implementation.md#m3d-conversation-behavior-observability-and-the-readmes-end-state)** (PR TBD). `turn-taking.md`, `slow-and-failed-replies.md`, the withheld
+- [x] **[M3d: conversation behavior, observability, and the README's end state](2026-10-05-three-doors-and-task-guides-implementation.md#m3d-conversation-behavior-observability-and-the-readmes-end-state)** ([PR #621](https://github.com/rafacm/vinga/pull/621)). `turn-taking.md`, `slow-and-failed-replies.md`, the withheld
   tool call into `system-overview.md`, `logs-and-traces.md`,
   `capturing-a-session.md`, `conversation-cost.md`,
   `conversation-store.md`, `docs/contributing.md`, the README per D9,
