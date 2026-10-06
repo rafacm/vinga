@@ -64,7 +64,7 @@ function sleep(ms) {
 // again after each burst so the code on screen is always one the
 // server still holds. `onCode` is told every code there is to show;
 // what resolves is the first check-in that admits this browser.
-export async function waitForClaim(identity, reply, onCode, cancelled) {
+export async function waitForClaim(identity, reply, onCode) {
   let current = reply;
   for (;;) {
     if (current.access !== "denied") {
@@ -77,9 +77,6 @@ export async function waitForClaim(identity, reply, onCode, cancelled) {
     }
     for (let poll = 0; poll < POLLS_PER_CHECK_IN; poll += 1) {
       await sleep(POLL_MS);
-      if (cancelled()) {
-        return null;
-      }
       if (current.activation) {
         const polled = await fetch(urls.onboarding(identity.onboardingPath, "activate"), {
           method: "POST",
