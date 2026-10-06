@@ -47,16 +47,21 @@ response, the redeeming browser's request body, and nothing else (D7a).
 """
 
 import base64
+import ipaddress
 import secrets
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 # The bounds are read through the package at the moment a decision needs
 # one, the rule `pending` states: a suite moves them on the name they
 # live on, and a name imported from the package would be a snapshot.
 import vinga_server.onboarding as onboarding
-from vinga_server.config.loader import TryLinkRefusedError
+from vinga_server.config.loader import SnapshotOnlyError, TryLinkRefusedError
+from vinga_server.config.models import BROWSER_MOUNT_PATH, ServerConfig
+from vinga_server.config.responses import RefusalReason, TryLink
 
 from .browser import Randomness
 
@@ -65,11 +70,32 @@ from .browser import Randomness
 # public-facing for ten minutes and answers anyone who holds it.
 TOKEN_BYTES = 32
 
-# The refusal at issuance a full store answers, fixed.
+# The refusals at issuance, each a state of the deployment rather than a
+# fault in the request, and each fixed. None of them names a command:
+# the client that prints one owns the grammar and names what to type,
+# from the token the second one carries (`RefusalReason`).
+ONBOARDING_OFF = (
+    "device onboarding is off (server.onboarding.enabled is false), so this server "
+    "serves no browser page and no short path for a browser to check in at, and a try "
+    "link would open nothing. Nothing was issued."
+)
+
+NO_DEFAULT_AGENT = (
+    "no default agent is set, so a browser opening a try link would have no agent to be "
+    "bound to. Nothing was issued."
+)
+
 CAPACITY_REACHED = (
     f"as many try links as this server holds are already waiting to be opened, so no "
     f"more are issued until one is opened or expires; each lasts "
     f"{int(onboarding.TRY_LINK_TTL_S // 60)} minutes. Nothing was issued."
+)
+
+SNAPSHOT_ONLY = (
+    "this server serves a configuration it was given rather than one it read from a "
+    "store, so a browser bound by a try link would be written to a store this server "
+    "does not read its devices from. Nothing was issued, and making the request again "
+    "will not help; a server started from a store issues them."
 )
 
 Clock = Callable[[], float]
@@ -145,3 +171,67 @@ class TryLinks:
             if not isinstance(token, str):
                 return False
             return self._live.pop(token, None) is not None
+
+
+def link_origin(server: ServerConfig) -> str | None:
+    """The origin a try link names, when this server's configuration
+    states one that opens a secure context, and None otherwise.
+
+    `server.public_url` and nothing else: it is the name a deployment
+    goes by, and a browser's microphone needs a secure context, which is
+    `https://` or a loopback host. Not the origin `websocket_url` implies
+    and never the listen address, which `public_origin` would fall back
+    to and which is a guess (D5c). None leaves the origin to the client,
+    which knows the one thing this server cannot: the address it reached
+    the API on.
+    """
+    if server.public_url is None:
+        return None
+    parts = urlsplit(server.public_url)
+    if parts.scheme == "https":
+        return server.public_url
+    return server.public_url if _loopback(parts.hostname) else None
+
+
+def _loopback(host: str | None) -> bool:
+    if host is None:
+        return False
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+@dataclass(frozen=True)
+class Issuer:
+    """What the configuration API calls to issue a link, and everything
+    it decides with: the store of live links, the server section this
+    process booted with, and whether a store stands behind the world it
+    serves. Composed by the composition root, so the API learns none of
+    it."""
+
+    links: TryLinks
+    server: ServerConfig
+    snapshot_only: bool
+
+    def issue(self, default_agent: str | None) -> TryLink:
+        """A link, or the refusal of the first state that rules one out.
+
+        `default_agent` is what the store says now, read by the caller in
+        the request that asked: the one fact here that moves while the
+        process runs.
+        """
+        if not self.server.onboarding.enabled:
+            raise TryLinkRefusedError(ONBOARDING_OFF)
+        if self.snapshot_only:
+            raise SnapshotOnlyError(SNAPSHOT_ONLY)
+        if default_agent is None:
+            raise TryLinkRefusedError(NO_DEFAULT_AGENT, reason=RefusalReason.NO_DEFAULT_AGENT)
+        token = self.links.issue()
+        return TryLink(
+            origin=link_origin(self.server),
+            page=f"{BROWSER_MOUNT_PATH}/#{token}",
+            lifetime_s=int(onboarding.TRY_LINK_TTL_S),
+        )

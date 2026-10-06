@@ -94,6 +94,7 @@ from vinga_server.config.loader import (
     RunningConfigMovedError,
     SnapshotOnlyError,
     StorageError,
+    TryLinkRefusedError,
     UnknownEntityError,
 )
 from vinga_server.config.models import (
@@ -140,6 +141,7 @@ from vinga_server.config.responses import (
     SecretValue,
     ServableAgents,
     StoredSecretLocation,
+    TryLink,
     request_body,
 )
 from vinga_server.config.secrets import MASK, SecretLocation, load_keys, provider_identity
@@ -186,6 +188,7 @@ from vinga_server.memory import api as memory
 # constraint holds by construction.
 from vinga_server.onboarding.pending import PendingDevice as PendingRecord
 from vinga_server.onboarding.pending import PendingDevices
+from vinga_server.onboarding.try_links import Issuer
 
 events = ServerEvents(__name__)
 
@@ -351,6 +354,13 @@ REFUSAL_STATUS: dict[type[ConfigError], int] = {
     # And the same again for the device record's own occupied
     # destination: a name another board already answers to, folded.
     DeviceNameConflictError: 409,
+    # And a try link that was not issued, because the deployment is in a
+    # state where opening one could not bind a browser: onboarding off,
+    # no default agent, or as many links waiting as the store holds.
+    # Nothing was changed, which is the whole of what the status says;
+    # the second clears when a default agent is set and the third as
+    # links are opened or expire, and the sentence says which it is.
+    TryLinkRefusedError: 409,
     StorageError: 500,
     NoRuntimeError: 503,
     # The seventh is an ordinary 422 with a type of its own, which is what
@@ -667,6 +677,16 @@ _NO_RUNTIME_DIFF_DESCRIPTION = _description("no-runtime-diff")
 # invented would be a claim about a server that is not there.
 _NO_RUNTIME_INFO_DESCRIPTION = _description("no-runtime-info")
 
+# And the try link's two (#613). Its 409 is none of the states the
+# shared sentence lists: it is the deployment, not the database, that
+# refuses, and two of its causes do not clear by being retried. Its 503
+# is an action's rather than a read's, for the reason the reload's is:
+# there is no running server to hold a link, so there is nothing a
+# browser could redeem one against.
+_TRY_LINK_REFUSED_DESCRIPTION = _description("try-link-refused")
+
+_NO_RUNTIME_TRY_LINK_DESCRIPTION = _description("no-runtime-try-link")
+
 # The rename's two, and both are about what a caller should DO next,
 # which is the half a shared sentence gets wrong here.
 #
@@ -698,6 +718,12 @@ _RENAME_REFUSED_DESCRIPTION = _description("rename-refused")
 # What the caller is told, which is not the shared sentence, for the
 # reason the diff's is not. Nothing of the deployment is named: what is
 # missing is the server, not something the caller asked for wrongly.
+_NO_RUNTIME_TRY_LINK = (
+    "this API has no running server around it, so there is nothing to hold a try link "
+    "and nothing a browser could redeem one against. A deployment reaches this action "
+    "on its server's own port."
+)
+
 _NO_RUNTIME_INFO = (
     "this API has no running server around it, so there is no deployment for it to "
     "describe. The version, the revision and the onboarding URL are facts of a running "
@@ -964,6 +990,11 @@ class ApiRuntime:
     # than the constant read at the route, so a test injects a short one
     # instead of waiting out the default.
     keepalive_s: float = KEEPALIVE_S
+    # What issues a try link (#613): the store of live links this
+    # server redeems against, with what it decides by. None for an
+    # application built without a server around it, which would issue a
+    # link nothing could ever redeem, so the route refuses instead.
+    try_links: Issuer | None = None
 
 
 def build_api(
@@ -979,6 +1010,7 @@ def build_api(
     identity: RuntimeInfo | None = None,
     live: LiveEvents | None = None,
     keepalive_s: float = KEEPALIVE_S,
+    try_links: Issuer | None = None,
 ) -> FastAPI:
     """The sub-application the server mounts: the routes, gated.
 
@@ -1065,6 +1097,7 @@ def build_api(
         identity,
         live,
         keepalive_s,
+        try_links=try_links,
     )
     # A lifespan of its own, which runs only when this application is the
     # top-level one: it opens the configuration database and installs the
@@ -1097,6 +1130,7 @@ def build_api_runtime(
     live: LiveEvents | None = None,
     keepalive_s: float = KEEPALIVE_S,
     memory_erased: Callable[[], None] | None = None,
+    try_links: Issuer | None = None,
 ) -> ApiRuntime:
     """What a request to this application resolves out of the server
     around it, assembled.
@@ -1146,6 +1180,7 @@ def build_api_runtime(
         identity=identity,
         live=live,
         keepalive_s=keepalive_s,
+        try_links=try_links,
     )
 
 
@@ -1350,6 +1385,17 @@ def _identity(request: Request) -> RuntimeInfo | None:
 
 
 IdentityDep = Annotated[RuntimeInfo | None, Depends(_identity)]
+
+
+def _try_links(request: Request) -> Issuer | None:
+    """What issues a try link, or None for an application built without
+    a server around it. Taken from the application for the reason the
+    store is."""
+    runtime: ApiRuntime = request.app.state.api_runtime
+    return runtime.try_links
+
+
+TryLinkDep = Annotated[Issuer | None, Depends(_try_links)]
 def _live(request: Request) -> LiveEvents | None:
     """Everyone watching the running server's events, or None for an
     application built without one. Taken from the application for the
@@ -1712,6 +1758,61 @@ def _runtime(api: FastAPI) -> None:
         response.headers["cache-control"] = NO_STORE
         return identity
 
+    @api.post(
+        "/runtime/try-links",
+        response_model=TryLink,
+        responses=_problems(
+            401,
+            409,
+            500,
+            503,
+            instead={
+                409: _TRY_LINK_REFUSED_DESCRIPTION,
+                503: _NO_RUNTIME_TRY_LINK_DESCRIPTION,
+            },
+        ),
+    )
+    def issue_try_link(issuer: TryLinkDep, store: StoreDep, response: Response) -> TryLink:
+        """Issue a try link: a page a browser opens to join this
+        deployment as a device, bound to the default agent before its
+        first word.
+
+        The answer carries a credential, and this is the one response
+        that does. `page` is the browser page's path with a token in its
+        fragment, `/try/#<token>`; whichever browser opens the link
+        first redeems the token, and it is spent by that. Unopened, it
+        expires after `lifetime_s` seconds, and a restart of this server
+        ends it sooner, since links are held in the server's memory and
+        nowhere else. A fragment is never sent to any server and never
+        put in a `Referer`, so opening the link puts the token in no
+        access log on the way; this response carries `Cache-Control:
+        no-store` so that nothing between the two ends keeps it either.
+
+        `origin` is `server.public_url` when that opens a secure context
+        in a browser, which is what a microphone needs, and null
+        otherwise: this server never names its listen address or a
+        guess. A client that reached this API on a loopback address can
+        name that host's own origin instead, which is what `vinga info`
+        does.
+
+        Each request is a new link. One is refused (409), with nothing
+        issued, while device onboarding is off, while this server serves
+        a configuration no store describes, while no default agent is
+        set, and while as many links are waiting as the server holds.
+        """
+        # The docstring is this endpoint's description in the committed
+        # document, so what belongs to the handler is said here. A plain
+        # `def`, like every route that reads the store, so it runs on a
+        # worker thread; the store of links takes its own lock for
+        # exactly that reason. The default agent is read here, in the
+        # request that asked, because it is the one fact the decision
+        # needs that moves while the process runs.
+        if issuer is None:
+            raise NoRuntimeError(_NO_RUNTIME_TRY_LINK)
+        link = issuer.issue(store.read_default_agent())
+        response.headers["cache-control"] = NO_STORE
+        return link
+
     @api.get(
         "/runtime/mcp-servers",
         response_model=dict[str, McpServerStatus],
@@ -1831,8 +1932,8 @@ def _runtime(api: FastAPI) -> None:
     ) -> ConfigReloadResult:
         """Apply the stored configuration to this running server.
 
-        The one action in this namespace, and the one way a stored
-        change reaches a running server. What it applies is the whole
+        The one action in this namespace that applies configuration,
+        and the one way a stored change reaches a running server. What it applies is the whole
         domain half: the provider entries and the MCP entries with the
         secrets stored on them, the
         agents' effective `mcp` grant lists, the shared prompt

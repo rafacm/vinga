@@ -1,0 +1,1 @@
+This application has no running server around it, so there is nothing to hold a try link and nothing a browser could redeem one against. A link issued here would be a token no server would ever accept.

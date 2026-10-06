@@ -1021,6 +1021,42 @@ class RuntimeInfo(BaseModel):
         return self
 
 
+class TryLink(BaseModel):
+    """A try link: what a browser opens to join this deployment as a
+    device bound to its default agent.
+
+    It carries a credential, a token that binds whichever browser
+    redeems it first. The token sits in the page's fragment, which a
+    browser sends to no server and puts in no `Referer`, so opening the
+    link puts it in no log on the way; this answer is the one response
+    that carries it, sent to the operator who asked and to nobody else,
+    under `Cache-Control: no-store`.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    origin: str | None = Field(
+        description=(
+            "The origin the link names, which is `server.public_url` when that opens a "
+            "secure context in a browser (an `https://` origin, or a loopback host), and "
+            "null otherwise. A browser's microphone needs a secure context, so this "
+            "server never names the listen address or a guessed one; null leaves the "
+            "origin to the client, which knows the address it reached this API on."
+        )
+    )
+    page: str = Field(
+        description=(
+            "The browser page's path with the token in its fragment, `/try/#<token>`, "
+            "to be appended to the origin. The token is a credential: it is spent by "
+            "the first browser that opens the link and expires unopened after "
+            "`lifetime_s`, and a restart of this server ends it early."
+        )
+    )
+    lifetime_s: int = Field(
+        description="How many seconds the link stands unopened from when it was issued."
+    )
+
+
 class DefaultAgent(BaseModel):
     """The agent an unbound device reaches."""
 
@@ -1123,7 +1159,7 @@ PROBLEM_TITLES: dict[int, str] = {
 class RefusalReason(StrEnum):
     """Which of a handful of states a refusal is in, as a closed token.
 
-    Six of them, one per refusal whose next step is a command rather
+    Seven of them, one per refusal whose next step is a command rather
     than a correction to what was sent, because those are the refusals
     a sentence composed here could only answer by naming a command it
     does not own.
@@ -1139,13 +1175,15 @@ class RefusalReason(StrEnum):
     `provider-missing` and `mcp-server-missing` are a stored secret
     written to a holder that is not there, and they are two states
     rather than one because the remedy names the holder's own noun.
+    `no-default-agent` is a try link asked of a deployment with no
+    default agent, which a browser opening it could not be bound to.
 
     How to read one: map a token you know to a sentence of your own
     grammar, and quote `detail` for one you do not. A token this
     vocabulary gains later arrives at an older client as a state it
     cannot name, which is not a state to guess at, and `detail` is
     already the whole of what was refused. The member is absent from
-    every refusal in none of these six states, so nothing else about
+    every refusal in none of these seven states, so nothing else about
     this API's refusals changed when it was added.
     """
 
@@ -1155,6 +1193,7 @@ class RefusalReason(StrEnum):
     DEVICE_ALREADY_BOUND = "device-already-bound"
     PROVIDER_MISSING = "provider-missing"
     MCP_SERVER_MISSING = "mcp-server-missing"
+    NO_DEFAULT_AGENT = "no-default-agent"
 
 
 class Problem(BaseModel):

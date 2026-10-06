@@ -181,6 +181,9 @@ def test_the_document_describes_every_route_the_api_serves() -> None:
         # this API answers to a read: the onboarding URL's last segment
         # is a key derived from the device-auth secret.
         "/runtime/info": ["get"],
+        # And the one action that answers a credential: a try link,
+        # whose token binds the browser that opens it (#613).
+        "/runtime/try-links": ["post"],
         "/runtime/agents/{name}/prompt": ["get"],
         "/runtime/mcp-servers": ["get"],
         # The one route in this document that does not answer and end:

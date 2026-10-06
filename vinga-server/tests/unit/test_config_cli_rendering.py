@@ -2238,6 +2238,10 @@ REMEDY_SENTENCES: dict[RefusalReason, str] = {
     ),
     RefusalReason.PROVIDER_MISSING: "Create it first with `vinga provider set`.",
     RefusalReason.MCP_SERVER_MISSING: "Create it first with `vinga mcp-server set`.",
+    RefusalReason.NO_DEFAULT_AGENT: (
+        "Set one with `vinga default-agent set <name>`, and a browser opening a link is "
+        "bound to that agent."
+    ),
 }
 
 
