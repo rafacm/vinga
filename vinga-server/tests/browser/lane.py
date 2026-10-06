@@ -27,9 +27,11 @@ SPEECH = Path(__file__).with_name("speech.wav")
 
 # How long a realtime session may sit quiet before the server hangs up.
 # Short, so the lane meets the ending (D9) within one loop of the
-# microphone. The lane starts its own server with it, and CI starts the
-# image it runs against with the same value.
-IDLE_TIMEOUT_S = 2
+# microphone, and longer than the first sentence takes to end as an
+# utterance (about 2.4 s after the microphone opens), since the count
+# starts when the page asks to listen. The lane starts its own server
+# with it, and CI starts the image it runs against with the same value.
+IDLE_TIMEOUT_S = 3
 
 # The microphone's loop: the sentence, GAP_S of silence, the sentence
 # again, TAIL_S of silence. Read with the reply's length beside it
@@ -43,7 +45,7 @@ IDLE_TIMEOUT_S = 2
 # sentence heard, a reply the microphone is closed for, and the loop's
 # next sentence heard once it opens again.
 GAP_S = 1.0
-TAIL_S = 7.0
+TAIL_S = 9.0
 
 # How long the mock voice speaks per character: "You said hello." is
 # fifteen, so a reply sounds for three seconds.
