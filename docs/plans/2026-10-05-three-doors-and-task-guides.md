@@ -1030,7 +1030,7 @@ Pages are this plan's modules; the reader is the caller.
 - [x] **[M3b: providers, tools, memory and prompts](2026-10-05-three-doors-and-task-guides-implementation.md#m3b-providers-tools-memory-and-prompts)** ([PR #619](https://github.com/rafacm/vinga/pull/619)). `providers.md`,
   `speech-recognition.md`, `voices.md` (the three option tables per D8),
   `tools-and-mcp.md`, `memory.md`, `agents-and-prompts.md`.
-- [ ] **M3c: configuration and security.** `configuration-api.md`, the
+- [x] **[M3c: configuration and security](2026-10-05-three-doors-and-task-guides-implementation.md#m3c-configuration-and-security)** (PR TBD). `configuration-api.md`, the
   rest of `configuration.md` and `security.md`, and the M3c rows'
   additions to `database.md`, `upgrading.md` and `memory.md`.
 - [ ] **M3d: conversation behavior, observability, and the README's end

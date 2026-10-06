@@ -1027,3 +1027,272 @@ example alongside the seven from the first hand-back. No code or test
 changed in this round, so ruff and the unit lane were not rerun; the
 link check, the Run and Use check, the fragment check and the census
 were.
+
+## M3c: configuration and security
+
+**Attribution:** anthropic/claude-opus-5-5, thinking high; Claude Code 2.1.289; 2026-10-06.
+
+### What landed
+
+| Decision | Where | Commit |
+| --- | --- | --- |
+| Memory is stored on the host and read out to the model | `docs/run/memory.md` | `Move where memory travels into the memory guide` |
+| D13: the `server.local_only` note dropped, its 2026-09-12 changelog entry linked | `docs/run/upgrading.md` | `Link the local_only upgrade note in the changelog` |
+| Secrets and Security; the four Security links M3b left retargeted | `docs/run/security.md`, `providers.md`, `speech-recognition.md`, `voices.md` | `Move secrets and security to the security guide` |
+| The configuration API; D8's route listings and shapes; D8a's request | `docs/run/configuration-api.md` (new), `exposing-a-deployment.md`, `vinga-server/examples/README.md` | `Move the configuration API to a guide of its own` |
+| The database keys and the unreachable-database refusal | `docs/run/database.md` | `Move how the server finds its database to a guide` |
+| Configuration (the two halves) and Applying a change without a restart; the root README's `#applying-a-change-without-a-restart` | `docs/run/configuration.md`, `README.md` | `Move the two halves and applying to the config guide` |
+| The index, the Run door's and the root README's descriptions of the server README | `docs/run/README.md`, `docs/README.md`, `README.md` | `List the configuration and security guides` |
+| Statements corrected against the code (below) | the five guides | `Correct what the moved guides claimed about the code` |
+| The mapping | `docs/plans/2026-10-05-three-doors-and-task-guides-moves/m3c.tsv` | `Record where M3c's move units went` |
+| D12 | `changelog.d/609-configuration-guides.md` | `Add the changelog fragment for the configuration guides` |
+
+Each move commit retargeted every inbound link and by-name pointer to
+what it moved, so the link checker passed after each one. The moves
+ran bottom up (memory, the release note, security, the API, the
+database keys, then the Configuration heading itself), so no commit
+left a subsection under a heading it did not belong to. The README went
+from 2,117 lines to 1,231 (887 removed, 1 changed: the "On this page"
+pointer to `docs/run/`, which now names configuring and securing).
+
+The audit against the README at this branch's base (`34308ea5`, M3b's
+tip), exit 0 (`.logs/m3c-audit.txt` in the implementer's worktree):
+
+```text
+9 units, 102 paragraphs moved, 52 declared edited, 2 declared dropped, 0 kept in the page, 0 findings
+```
+
+The 52 declared edits, by mapping row and paragraph, and what each
+became:
+
+- Row 1 (Applying a change) 3: the console sample listed `house` both
+  as an added agent and as one whose prompt changed, which one apply
+  cannot report, and left out the failure-phrase outcome every agent
+  has; the `agents` lines go and `failure phrase kept` joins the
+  fillers. 5: the cli.md link, and the two limits on "deliberately not
+  where" (below). 6: which boundary sets the client words itself. 7:
+  "the sections for the kinds a later release will apply are named
+  rather than missing" dropped, since every section is filled (D8c).
+  9: six filler outcomes, not three. 11: renaming moves memory.
+- Row 2 (the two halves) 1: the heading `Configuration` becomes `The
+  two halves`, since on a page titled Configuring a deployment it said
+  nothing. 3, 5, 6, 8, 9, 11, 12: links made relative to the guide
+  (the two references, the example files, the presets, the onboarding
+  and recovery guides); 4, 5, 10, 15, 18 also carry corrections
+  (below).
+- Row 3 (the database) 23: `config check` is the command that does
+  read the database.
+- Row 4 (the configuration API) 1: the heading becomes `The contract
+  and the token`, under the guide's own title. 2: the link, and CI
+  diffs rather than regenerates. 5 and 6: D8a, below. 7: the first
+  listing's lead-in becomes the sentence naming the noun families,
+  linking the OpenAPI document as the one list of routes. 8, 10, 13:
+  the three listings, removed (D8). 9 and 12: their lead-ins name the
+  namespace each listing stood for. 11 and 14: "the first", "the
+  second" and "the third" of a removed listing name each route; 11's
+  links made relative and the apply link pointed at the guide; 14
+  loses the page size's bounds and the page's shape to the OpenAPI
+  document (D8), names the erasure routes, and links the README's
+  conversation store, still there until M3d. 15, 16, 22: corrections.
+  17: the answer's shape becomes a link (D8). 18: the refusal's members
+  and its status list become links (D8), keeping the sentences that
+  explain them. 23, 24: links.
+- Row 5 (Secrets) 3: correction. 5: "Generate one with:" and its code
+  block become a link to the master key section, which M3a gave the
+  same block. 7: "the rebuild above" names the recovery guide, plus a
+  correction.
+- Row 7 (Security) 2, 3, 7, 13, 15, 17, 26, 30: corrections. 6 and 20:
+  links made relative.
+- Row 9 (memory) 32: correction.
+
+The two declared drops are the Security heading (the guide's title
+says it, and five headings of the guide's own divide the section) and
+the `server.local_only` note (D13). The audit reports row 5 paragraph
+6, the Fernet key-generation block, as found verbatim: it is, once, in
+the master key section M3a moved, and no M3c unit claims that copy.
+The block in Secrets was removed rather than kept as a second copy on
+one page, and the audit cannot see that, which is why it is said here.
+
+Replaced blocks (D8's table rule): the three route listings, each a
+list whose every row is a route with its methods, now one link to
+`docs/reference/api-openapi.json` and one sentence naming the noun
+families (row 4, 7, 8, 10, 13). The page size's default and bound and
+the page shape (row 4, 14), a write's answer (17) and a refusal's
+members and status list (18) now link the same document. The hosts
+table stays: no reference states which host a provider type reaches.
+
+### Deviations from the plan
+
+- **Three route listings, not two.** D8 names "the configuration API's
+  two route listings"; the section held three (entity nouns, runtime,
+  the conversation record). All three were replaced. They had drifted:
+  between them they omitted prompt fragments, the pending devices,
+  agent and device renames, device replacement and location, the
+  whole-document write (`POST /api/apply`), `GET /api/runtime/info`,
+  `GET /api/runtime/events`, the metrics routes and the whole memory
+  namespace. The noun-family sentence names all of them.
+- **D8a's form is a curl configuration file, not `printf` on standard
+  input.** The orchestrator relayed M3b's review (#619, P1): the
+  builtin's expanded argument is still visible under `set -x`. The
+  guide has the reader create the file empty at mode 0600
+  (`install -m 600 /dev/null ~/.vinga-api.curl`), write the header
+  line in an editor, and name it with `curl -K`, so the token is never
+  expanded into any command line. Checked against a local listener:
+  the request carried the bearer header and the file stayed 0600
+  (`.logs/m3c-curl-config-file.txt`).
+- **Headings the README did not have.** Four in
+  `configuration-api.md` (the routes, reads and writes, refusals, the
+  command-line client), five in `security.md` (the outbound hosts,
+  device authentication, the OTA endpoint, what is exposed, the data
+  boundary), one each in `database.md` (How the server finds it) and
+  `memory.md` (Where what it keeps goes), above paragraphs that moved.
+  Two moved headings were renamed and one dropped, as declared above.
+- **`configuration.md` is retitled Configuring a deployment.** It now
+  holds the two halves, M3a's section and Applying a change, in that
+  order, and Changing the configuration described only the middle one.
+  No link pointed at the old title's anchor.
+- **The index opens Configuring with the two configuration guides**,
+  ahead of M3b's six, since the two halves are what every later guide
+  in that group writes into.
+- **Some within-page overlap is left.** The moved database paragraphs
+  restate what M3a's opening of `database.md` already says about the
+  password's default and `VINGA_DB_URL` being a secret, and the
+  Secrets refusal sentence what the master key section says about an
+  unopenable envelope. Both moved verbatim, each from a different
+  README section, and merging them is the rewriting the plan puts out
+  of scope.
+
+### Resolutions
+
+- **D13 for `server.local_only`.** The changelog carries the note
+  under 2026-09-12 ("The `egress` key on a provider or MCP entry
+  became `reach`", with the file-not-migrated sentence), so it is a
+  declared drop and `upgrading.md`'s Past releases list links that
+  date. No stop was needed.
+- **D8a's sweep.** At the base, two positions outside the dated
+  records: `vinga-server/README.md:657` (this milestone's, fixed) and
+  `changelog.d/609-provider-guides.md:3`, M3b's fragment quoting its
+  own `printf` form, which M3b's review round is changing. After:
+  that one position. The Langfuse form (README `:940` at the base) is
+  M3d's.
+
+### Discoveries
+
+- **Claims checked against the code.** 59 numbered claims across the
+  moved units, each read against the code it describes, with file and
+  line evidence (`.logs/m3c-claims.txt`). Thirty-one were wrong or
+  short and are corrected, every one of them an error that predates
+  this move (a thirty-second, the stale route listings, was replaced
+  under D8 instead); the security ones first:
+  - the onboarding key "is printed at startup and repeated in the log
+    line a wrong key produces": neither has been true since the PR #153
+    review (`onboarding/keys.py` `_log_mismatch` logs only the
+    attempt's length, and `onboarding/origin.py` `log_banner` names the
+    origin and whether a key guards it); the URL comes from
+    `vinga-server config ota-url` or `GET /api/runtime/info`;
+  - an unknown device under no default agent "is issued nothing and
+    turned away": with onboarding on, the default, it is shown an
+    activation code (`onboarding/unbound.py`);
+  - the key "nothing configures": `server.onboarding.key` pins one,
+    and `server.onboarding.enabled: false` unmounts `/x/`;
+  - the data boundary checks "run at boot, never at request time":
+    they also run at every apply (`config/reload.py`);
+  - every blocked stage waits out "its `timeout_s`": only the OpenAI
+    and ElevenLabs speech types carry one;
+  - the auth secret is `VINGA_AUTH_SECRET` only by default
+    (`server.auth.secret_env`); the LLM input export rides the
+    collector too;
+  - an unset `$VAR` fails the boot only for an entry some agent
+    references, and refuses an apply as well (`providers/world.py`,
+    `tools/mcp/manager.py`); a lost slot is handed back with
+    `secret clear`;
+  - a deployment that never recorded answers 404: it answers the empty
+    shapes, a contract change the code records (`conversations/api.py`);
+  - "no analysis endpoint": `/api/metrics` and `vinga metric` exist,
+    and live events stream at `/api/runtime/events`;
+  - three argument bodies: there are six (`secret`, `agents`, `name`,
+    `to`, `location`, `fact`); a 409 is not always retryable; CI diffs
+    the OpenAPI document; loopback is any `127.0.0.0/8` address;
+  - the apply sample, the filler outcomes, a refused provider build
+    naming its entry, `check` stopping at composition, the client's own
+    words, rename moving memory (twice), devices being records, the
+    container having no API address in its environment, `.env` searched
+    upward, the apply help naming the voice and not the clips, and
+    `config check` reading the database;
+  - memory "injected into the system prompt on every reply": it is read
+    when an agent starts speaking in a conversation and carried in every
+    reply after that (`runtime/prompt.py`).
+- **The OpenAPI document's own description is stale in two places**,
+  which a docs edit cannot fix: "the three bodies this document
+  describes as arguments" (there are six) and the agent diff's
+  breakdowns listed without `fallback`. Both come from the API
+  description in `config/api_descriptions/`, so fixing them is a code
+  change and a regeneration. Two code comments still describe kinds an
+  apply does not touch (`config/responses.py` around L325,
+  `config/cli/deployment.py` around L91), though every kind is applied.
+- **A shell in the container may not know the server's port.** The
+  entrypoint exports `VINGA_CONFIG` to the server process only, so a
+  `docker exec` shell's client falls back to port 8003 even where the
+  mounted file sets another. The guide now says the loopback address
+  is the client's default rather than in the environment; whether the
+  image should export it is a question for its owner.
+- **The hosts table omits the `mock` type**, registered for all four
+  stages and reaching nothing. Left out as a test double.
+- **The guide-to-README links still M3d's.** `configuration-api.md`
+  links The conversation store twice (the record namespaces and
+  Deleting on demand); M3b's Listening and barge-in and cost links are
+  unchanged.
+
+### Inventories
+
+Untruncated, positions only, under `.logs/` in the implementer's
+worktree.
+
+- Anchored links to M3c's anchors (`.logs/m3c-anchors-before.txt`,
+  `.logs/m3c-anchors-after.txt`): 8 lines before outside the server
+  README (the root README's apply link, the exposure guide's and the
+  examples README's API links, M3b's four Security links, and the
+  plan's own citation), the plan's citation alone after; the README's
+  own same-page links went with their units or with the page list.
+- Mentions of the server README outside the records
+  (`.logs/m3c-readme-mentions-before.txt`, `-after.txt`): 75 lines
+  before, 69 after. Eight lost theirs (the exposure guide's two lines,
+  M3b's four Security links, the root README's apply link and the
+  examples README's API link) and `configuration-api.md` gained two,
+  its links to the README's conversation store; the root README's
+  description of the server README was rewritten in place. Tests reading
+  the README (`.logs/m3c-tests-reading-readme.txt`): only
+  `test_event_docs.py`, whose section is M3d's. No code, test,
+  workflow, YAML or Dockerfile names an M3c section
+  (`.logs/m3c-code-readme-mentions.txt`).
+- D8a (`.logs/m3c-d8a-before.txt`, `.logs/m3c-d8a-after.txt`): above,
+  under Resolutions.
+- D8c over the five guides M3c writes into and `upgrading.md`
+  (`.logs/m3c-d8c-guides.txt`, dispositions in
+  `.logs/m3c-d8c-dispositions.txt`): 31 positions, none about vinga's
+  own future: 15 a guide's end state, 14 a present conditional or a
+  title naming one ("will not start", "will not build", "will not
+  decrypt"), 1 "not yet serving" describing a stored write, 1 "later"
+  in the sense of time. The one rewritten is the placeholder-sections
+  clause above.
+- Prose pointers (`.logs/m3c-prose-pointers.txt`): 7 `above`, `below`
+  or `this section` in the five guides, every one within its own page;
+  the one that crossed a page, Secrets' "the rebuild above", was
+  rewritten.
+
+### Verification
+
+On agentpi, from the worktree root unless noted:
+
+- `python3 scripts/check_doc_links.py .`: `checked 318 files, 0 failures`, exit 0.
+- `python3 scripts/check_run_use_pages.py .`: `checked 29 Run and Use pages, 0 findings`, exit 0 (`configuration-api.md` joined M3b's 28).
+- `python3 scripts/fold_changelog.py check .`: `checked 2 fragments, 0 failures`, exit 0.
+- `python3 scripts/audit_doc_move.py` over `m3c.tsv`: exit 0, quoted above.
+- The configuration API request's `curl -K` form, against a local
+  listener with a dummy token: the request carried the header.
+- `uv run pytest tests/census -q` from `vinga-server/`: run last,
+  after this section; its outcome is in the hand-back rather than
+  here.
+- Not run: `uv run ruff check .` and the unit lane, since M3c changes
+  no code and no test; the integration lane, since it adds no
+  migration.
