@@ -117,9 +117,7 @@ class Playback extends AudioWorkletProcessor {
       const head = this.queue[0];
       const take = Math.min(head.length - this.offset, output.length - written);
       for (let index = 0; index < take; index += 1) {
-        const value = head[this.offset + index] * this.gain;
-        output[written + index] = value;
-        this.sum += Math.abs(value);
+        output[written + index] = head[this.offset + index] * this.gain;
       }
       written += take;
       this.offset += take;
@@ -135,6 +133,12 @@ class Playback extends AudioWorkletProcessor {
       this.stop();
     }
     if (this.observe) {
+      // Summed from the output buffer itself, after it was filled, so
+      // what is counted is what this processor rendered and nothing
+      // it only meant to.
+      for (const value of output) {
+        this.sum += Math.abs(value);
+      }
       this.quanta += 1;
       if (this.quanta % REPORT_EVERY === 0) {
         this.port.postMessage({ type: "sum", sum: this.sum });
