@@ -29,7 +29,7 @@
 # Choosing an image
 3833	docs/run/running-in-a-container.md	kinds=explanation,procedure	edited=13
 # Onboarding a device
-3906	docs/run/onboarding-a-device.md	kinds=procedure,explanation	edited=16,17,29
+3906	docs/run/onboarding-a-device.md	kinds=procedure,explanation	edited=16,17,26,29
 # Transports (D8c)
 4074	docs/system-overview.md	kinds=explanation	edited=2,3
 # Ports and topology, with Behind a reverse proxy
