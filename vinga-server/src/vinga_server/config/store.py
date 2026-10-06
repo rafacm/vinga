@@ -84,6 +84,7 @@ from vinga_server.config.models import (
     is_valid_fragment_name,
     json_pointer,
     mint_device_id,
+    minted_device_names,
     normalize_device_bindings,
     normalize_mac,
     refusal_line,
@@ -328,10 +329,11 @@ class LiveDevice:
     than a field so that there is one answer computed in one place
     whichever read built the value. The rule is the configuration's:
     binding a board creates its record and calls it `Device <mac>` until
-    somebody names it, and that spelling is refused to every writer
-    whose own default it is not (`DEVICE_NAME_RESERVED`), so a name in
-    that shape is a placeholder this server minted rather than a name
-    anybody says out loud. Readers that want the row say `name`;
+    somebody names it, a try link calls the browser it binds
+    `Browser <mac>`, and both spellings are refused to every writer
+    whose own MAC they do not name (`DEVICE_NAME_RESERVED`), so a name
+    in either shape is a placeholder this server minted rather than a
+    name anybody says out loud. Readers that want the row say `name`;
     readers deciding whether to SAY it ask this first.
     """
 
@@ -466,9 +468,10 @@ DEVICE_TEXT_CREDENTIAL = (
 )
 
 DEVICE_NAME_RESERVED = (
-    "devices: names of the form `Device <mac>` are reserved for a board nobody has "
-    "named yet, which is what the server calls a device the moment it is bound, so a "
-    "write may not take that spelling for a device whose own MAC it is not. It is "
+    "devices: names of the form `Device <mac>` and `Browser <mac>` are reserved for a "
+    "device nobody has named yet, which is what the server calls a board or a browser "
+    "the moment it is bound, so a write may not take either spelling for a device "
+    "whose own MAC it is not. It is "
     "reserved rather than merely discouraged because the agent is told which device "
     "it is speaking through and says the name out loud: reading a MAC address back to "
     "somebody who asked which speaker they are talking to is what a placeholder is "
@@ -3740,25 +3743,38 @@ def _refuse_device_credential(what: str, value: str | None) -> None:
 
 
 def _refuse_reserved_name(mac: str, name: str | None) -> None:
-    """One submitted device name, refused if it takes the spelling the
-    server mints for a board nobody has named.
+    """One submitted device name, refused if it takes a spelling the
+    server mints for a device nobody has named: `Device <mac>` for a
+    board, `Browser <mac>` for a browser a try link bound.
 
     Asked of what a caller SENT and never of what a row holds, the rule
     `_refuse_device_credential` follows and for the same reason: a name
     written before this existed still reads and is still renameable.
 
-    A device's OWN default passes, and that exemption is what keeps an
-    export idempotent: a document exported from a store where a board
-    has never been named carries `Device <its mac>`, and applying it
-    back has to write the record it came from rather than refuse it. It
-    is also the honest way to spell "take the name back off this
-    device", which is otherwise not sayable at all.
+    A device's OWN minted names pass, exactly as spelled, and that
+    exemption is what keeps an export idempotent: a document exported
+    from a store where a board has never been named carries
+    `Device <its mac>`, one holding a browser carries `Browser <its
+    mac>`, and applying either back has to write the record it came
+    from rather than refuse it. It is also what lets the try link's
+    enroll write the browser's name through this same check, and the
+    honest way to spell "take the name back off this device", which is
+    otherwise not sayable at all.
+
+    Both of a device's spellings pass, not only the one it was minted
+    with, because nothing here can tell which that was: a document
+    carries a name and not how its device came to be bound, and asking
+    the address (a browser's is locally administered) would be a guess
+    about hardware rather than a rule about names. What that admits is
+    an operator calling a board `Browser <its own mac>`, which misleads
+    a listing and nobody in a room, since the name still reads as
+    nobody's and the agent still says nothing.
 
     The value is not passed to the sentence, the rule this file keeps
     about every device name: a name is free text an operator types on a
     command line.
     """
-    if name is not None and is_default_device_name(name) and name != default_device_name(mac):
+    if name is not None and is_default_device_name(name) and name not in minted_device_names(mac):
         raise ConfigError(DEVICE_NAME_RESERVED)
 
 

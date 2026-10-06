@@ -715,6 +715,21 @@ def test_a_board_nobody_has_named_is_not_introduced_by_its_placeholder() -> None
     )
 
 
+def test_a_browser_nobody_has_named_is_not_introduced_by_its_mac() -> None:
+    """The browser's placeholder is a MAC with a word in front of it,
+    the same as the board's, and is said no more than the board's."""
+    browser = LiveDevice(id="0" * 32, mac=MAC, name=f"Browser {MAC}", location="the hall")
+
+    assembled = prompt.with_scopes(
+        prompt.know_how("POET"),
+        PromptMemory(state="", agent="", device=""),
+        browser,
+        remembering=False,
+    )
+
+    assert assembled.text == "POET\n\nYou are speaking through a device in the hall."
+
+
 def test_a_board_nobody_has_named_still_says_where_it_is() -> None:
     """The two facts are separate, and so is the placeholder rule: a
     board somebody moved but nobody named is somewhere, and the reply
