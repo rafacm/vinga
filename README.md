@@ -60,7 +60,7 @@ Here is a path to get a [Waveshare ESP32-S3-Touch-LCD-1.54](https://www.waveshar
 
 **Step 0. Setup Ollama** 
 
-Any model [Ollama](https://ollama.com) serves works, and any endpoint that speaks the [OpenAI chat completions API](https://developers.openai.com/api/reference/chat-completions/overview) does too. This one is a good starting point: it answers fast enough for speech, and it is reliable at the tool calls the device exposes, which is what lets you ask the board to change its own volume or brightness.
+Any model [Ollama](https://ollama.com) serves works, and any endpoint that speaks the [OpenAI chat completions API](https://developers.openai.com/api/reference/chat-completions/overview) does too. This one is a good starting point: it answers fast enough for speech, and it is reliable at the tool calls the device exposes, which is what lets you ask the board to change its own volume or brightness. What a model has to do here, how this one compares with the local preset's, and pointing vinga at another runner or a vendor are in [Choosing the model an agent thinks with](docs/run/llm.md).
 
 ```bash
 ollama pull llama3.1:8b
@@ -316,7 +316,7 @@ When a turn does not go the way you expected, `vinga events` is the first place 
 
 The trial ran four engines on this machine, and each is one entry in the document from step 3. Take what you like and swap the rest. Changing one is editing that entry and importing it again, so a deployment can be all local, all vendor, or any mix. Every fragment below is a file you can pass to `vinga import -f`, and each carries the measured numbers behind its defaults as comments:
 
-- 🧠 **The model.** [`llm-openai-compatible.yaml`](vinga-server/examples/llm-openai-compatible.yaml) is any endpoint speaking the OpenAI chat completions API, which is another local runner (LM Studio, vLLM, `llama.cpp`) or a vendor, the difference being a `base_url` and a credential. [`llm-anthropic.yaml`](vinga-server/examples/llm-anthropic.yaml) is the one type that is not OpenAI-shaped. Whatever you choose has to support tool calls, or the board's own controls stop working.
+- 🧠 **The model.** [Choosing the model an agent thinks with](docs/run/llm.md) walks through each. [`llm-openai-compatible.yaml`](vinga-server/examples/llm-openai-compatible.yaml) is any endpoint speaking the OpenAI chat completions API, which is another local runner (LM Studio, vLLM, `llama.cpp`) or a vendor, the difference being a `base_url` and a credential. [`llm-anthropic.yaml`](vinga-server/examples/llm-anthropic.yaml) is the one type that is not OpenAI-shaped. Whatever you choose has to support tool calls, or the board's own controls stop working.
 - 👂 **What it hears with.** [`asr-openai.yaml`](vinga-server/examples/asr-openai.yaml) beside the local [`asr-faster-whisper.yaml`](vinga-server/examples/asr-faster-whisper.yaml).
 - 🗣️ **What it sounds like.** [`tts-elevenlabs.yaml`](vinga-server/examples/tts-elevenlabs.yaml) and [`tts-openai.yaml`](vinga-server/examples/tts-openai.yaml) beside the local [`tts-piper.yaml`](vinga-server/examples/tts-piper.yaml). Two agents that should sound different name two entries.
 - 🧰 **What it can do.** An MCP server gives an agent tools beyond the ones the board publishes: [`mcp-server-stdio.yaml`](vinga-server/examples/mcp-server-stdio.yaml) for a local process, [`mcp-server-streamable-http.yaml`](vinga-server/examples/mcp-server-streamable-http.yaml) for one over the network.
