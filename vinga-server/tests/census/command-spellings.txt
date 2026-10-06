@@ -125,6 +125,7 @@ historical  config agent set
 historical  config agent-defaults set
 historical  config apply
 historical  config bind-device
+historical  config check
 historical  config clear-default-agent
 historical  config clear-secret mcp-server
 historical  config clear-secret provider
@@ -236,6 +237,7 @@ historical  vinga memory list conversation
 historical  vinga memory list device
 historical  vinga memory set
 historical  vinga memory set agent poet
+historical  vinga metric
 historical  vinga metric latency
 historical  vinga metric list
 historical  vinga metric show
@@ -377,6 +379,7 @@ respell  vinga memory list conversation
 respell  vinga memory list device
 respell  vinga memory set
 respell  vinga memory set agent poet
+respell  vinga metric
 respell  vinga metric list
 respell  vinga metric show
 respell  vinga ota-url
