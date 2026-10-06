@@ -21,6 +21,7 @@ through the configuration API as `vinga info` issues it.
 
 import asyncio
 import json
+import logging
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -34,12 +35,20 @@ from tests.conftest import TEST_API_SECRET
 from tests.support.apps import entered_app
 from tests.support.checkin import SYSTEM_INFO
 from tests.support.deployment import served
+from tests.support.leaks import renderings
 from tests.support.registry import booted, store_at
 from vinga_server.app import create_app
 from vinga_server.browser import REDEEM_PATH, REDEEM_REFUSED
+from vinga_server.config.loader import StorageError
+from vinga_server.config.store import ConfigStore
 from vinga_server.onboarding import onboarding_key, onboarding_path
 from vinga_server.onboarding.browser import CLIENT_ID_NAMESPACE
-from vinga_server.onboarding.try_links import TryLinks, redeem
+from vinga_server.onboarding.try_links import (
+    SPENT_ALL_TAKEN,
+    SPENT_UNENROLLED,
+    TryLinks,
+    redeem,
+)
 
 ISSUE = "/api/runtime/try-links"
 BEARER = {"Authorization": f"Bearer {TEST_API_SECRET}"}
@@ -531,3 +540,94 @@ def test_of_concurrent_redemptions_exactly_one_binds() -> None:
 
     assert statuses == [200] + [403] * (CONTENDERS - 1)
     assert len(browsers()) == 1
+
+
+# --- a spent link that bound nothing is said, by its class only ------------
+
+PLANTED_TOKEN = "dHJ5LXNlbnRpbmVsLW5ldmVyLWEtcmVhbC10b2tlbiE"
+MINTED_MAC = "02:66:77:88:99:aa"
+TRY_LINKS_LOGGER = "vinga_server.onboarding.try_links"
+
+
+def warnings_of(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [
+        record
+        for record in caplog.records
+        if record.name == TRY_LINKS_LOGGER and record.levelno == logging.WARNING
+    ]
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        StorageError("the configuration database could not be written"),
+        RuntimeError(f"the layer below said {PLANTED_TOKEN} about {MINTED_MAC}"),
+    ],
+    ids=["StorageError", "RuntimeError-carrying-the-token"],
+)
+def test_a_spent_link_that_bound_nothing_is_logged_by_its_failure_class(
+    failure: Exception,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The token is spent and nothing was written, which the browser is
+    told and the operator would otherwise not be. One WARNING, a fixed
+    sentence and the failure's class as its one argument: never its
+    message, the token or the MAC."""
+
+    def failing(self: ConfigStore, mac: str, name: str) -> None:
+        raise failure
+
+    booted(default_agent="assistant")
+    monkeypatch.setattr(ConfigStore, "enroll_device", failing)
+    with store_at() as store, caplog.at_level(logging.DEBUG):
+        links = TryLinks(randomness=lambda length: b"try-sentinel-never-a-real-token!")
+        token = links.issue()
+        assert token == PLANTED_TOKEN
+        identity = asyncio.run(redeem(links, token, store, repeating(FREE)))
+
+    assert identity is None
+    (record,) = warnings_of(caplog)
+    assert record.msg == SPENT_UNENROLLED
+    assert record.args == (type(failure).__name__,)
+    assert record.exc_info is None
+    rendered = "\n".join(renderings(caplog))
+    assert token not in rendered
+    assert MINTED_MAC not in rendered
+    assert MINTED_MAC.replace(":", "") not in rendered
+    assert "the layer below said" not in rendered
+
+
+def test_a_spent_link_whose_every_draw_was_taken_is_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    booted(default_agent="assistant")
+    with store_at() as store, caplog.at_level(logging.DEBUG):
+        store.bind_device("02:11:22:33:44:55", ["assistant"])
+        links = TryLinks()
+        assert asyncio.run(redeem(links, links.issue(), store, repeating(TAKEN))) is None
+
+    (record,) = warnings_of(caplog)
+    assert record.msg == SPENT_ALL_TAKEN
+    assert record.args == ()
+    assert "02:11:22:33:44:55" not in "\n".join(renderings(caplog))
+
+
+def test_a_redraw_that_then_binds_logs_nothing(caplog: pytest.LogCaptureFixture) -> None:
+    booted(default_agent="assistant")
+    with store_at() as store, caplog.at_level(logging.DEBUG):
+        store.bind_device("02:11:22:33:44:55", ["assistant"])
+        links = TryLinks()
+        assert asyncio.run(redeem(links, links.issue(), store, repeating(TAKEN, FREE)))
+
+    assert warnings_of(caplog) == []
+
+
+def test_a_link_that_was_never_live_logs_nothing(caplog: pytest.LogCaptureFixture) -> None:
+    """An unknown, expired or spent token is a refusal a browser is
+    told; nothing was spent by it, so there is nothing to say."""
+    booted(default_agent="assistant")
+    with store_at() as store, caplog.at_level(logging.DEBUG):
+        assert asyncio.run(redeem(TryLinks(), "A" * 43, store)) is None
+
+    assert warnings_of(caplog) == []
