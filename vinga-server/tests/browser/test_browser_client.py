@@ -22,7 +22,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import pytest
-from lane import DIAGNOSTICS, LANE_AGENT, Server, redact
+from lane import DIAGNOSTICS, FAIL_WORKLETS, INSTRUMENT, LANE_AGENT, Server, redact
 from lane import wait_for as poll
 from playwright.sync_api import Browser, Page, WebSocket
 from playwright.sync_api import Error as PlaywrightError
@@ -105,7 +105,9 @@ class Visit:
         return self.page.locator("#status").inner_text()
 
 
-def open_link(browser: Browser, server: Server, switches: str, link: bool = True) -> Visit:
+def open_link(
+    browser: Browser, server: Server, switches: str, link: bool = True, init: str = ""
+) -> Visit:
     """A fresh try link, opened in a fresh browser profile; or, with
     `link` false, the page alone, as a person who was given only the
     onboarding URL opens it."""
@@ -115,6 +117,9 @@ def open_link(browser: Browser, server: Server, switches: str, link: bool = True
     else:
         path, token = "/try/", ""
     context = browser.new_context(permissions=["microphone"])
+    context.add_init_script(path=str(INSTRUMENT))
+    if init:
+        context.add_init_script(script=init)
     page = context.new_page()
     visit = Visit(page, token)
     page.on("console", lambda message: visit.console.append(message.text))
@@ -169,8 +174,8 @@ def visits(browser: Browser, server: Server) -> Iterator[Callable[..., Visit]]:
     with it that profile's microphone and socket, when the case ends."""
     opened: list[Visit] = []
 
-    def opener(switches: str, link: bool = True) -> Visit:
-        visit = open_link(browser, server, switches, link)
+    def opener(switches: str, link: bool = True, init: str = "") -> Visit:
+        visit = open_link(browser, server, switches, link, init)
         opened.append(visit)
         return visit
 
@@ -416,3 +421,23 @@ def test_an_unbound_browser_pairs_with_a_code(visits: Callable[..., Visit], serv
     page.locator("#end").click()
     visit.wait_for("the person's ending", lambda: visit.status() == ENDED_BY_PERSON)
     assert_no_leak(server, visit)
+
+
+def test_a_microphone_whose_setup_fails_is_released(
+    visits: Callable[..., Visit], server: Server
+) -> None:
+    """The capture is granted before the worklet that reads it is
+    loaded; when the loading fails, every track the page was handed is
+    stopped, so nothing goes on listening, and Start is offered again."""
+    server.seed(PLAIN_REPLY)
+    visit = visits("", init=FAIL_WORKLETS)
+    page = visit.page
+
+    page.locator("#start").click()
+    visit.wait_for("the failure", lambda: "cannot use the microphone" in visit.status())
+    states = page.evaluate(
+        "window.__lane.streams.flatMap((stream) => stream.getTracks()).map((t) => t.readyState)"
+    )
+    assert states, "the page was never handed a microphone"
+    assert states == ["ended"] * len(states), states
+    assert page.locator("#start").is_visible()

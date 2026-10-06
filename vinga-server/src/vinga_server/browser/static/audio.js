@@ -72,7 +72,15 @@ export class Microphone {
     const track = stream.getAudioTracks()[0];
     const reported = track.getSettings().echoCancellation === true;
     const microphone = new Microphone(stream, reported && !assumeNoEcho, onPacket);
-    await microphone.start();
+    try {
+      await microphone.start();
+    } catch (failure) {
+      // The capture was granted before the rest was built: whatever
+      // failed after it, stop every track, or the browser goes on
+      // listening for a microphone nothing will ever read.
+      microphone.close();
+      throw failure;
+    }
     return microphone;
   }
 
