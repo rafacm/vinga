@@ -68,13 +68,9 @@ What a particular release asked of an operator is in that release's
 between the build you run and the one you are moving to before you
 roll. The releases that moved the provisioning file or forced a step:
 
-- [2026-08-30](../../CHANGELOG.md#2026-08-30): the `memory` schema, a
-  third schema the provisioning file creates; memory scopes, which
-  rename a column and so need the running server stopped before the new
-  image starts; and the memory files a deployment kept on disk before,
-  which this release leaves where they are.
+- [2026-08-30](../../CHANGELOG.md#2026-08-30): memory moves into the
+  database, in a `memory` schema, and gains scopes.
 - [2026-08-28](../../CHANGELOG.md#2026-08-28): the conversation store's
-  schema renamed from `conversations` to `record`.
-- [2026-08-11](../../CHANGELOG.md#2026-08-11): the configuration API
-  always mounted and gated, so every deployment had to set its secret
-  before upgrading, then spelled `SAMTAL_API_SECRET`.
+  schema is renamed from `conversations` to `record`.
+- [2026-08-11](../../CHANGELOG.md#2026-08-11): the configuration API's
+  secret, then named `SAMTAL_API_SECRET`.
