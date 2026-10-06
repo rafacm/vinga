@@ -1405,61 +1405,61 @@ implementer's worktree):
 The 46 declared edits, by mapping row and paragraph, and what each
 became:
 
-- Row 2 (Development) 4: the `server` profile needs a `.env` with
+- Row 9 (Development) 4: the `server` profile needs a `.env` with
   `VINGA_API_SECRET`; 7: the integration lane's tier-closure tests may
   reach the package index; 9: the local lane's two other tests; 13:
   Ollama's `/v1` endpoint, and the database a skipping run still
   needs; 15: what the smoke lane checks; 16: the lane's own database;
   17: the smoke block (D8a, the database, "From vinga-server/").
-- Row 3 (Listening) 5: a failed confirmation is not an event, and a
+- Row 11 (Listening) 5: a failed confirmation is not an event, and a
   manual `listen stop` with `barge_in` off; 8: the glossary link made
   relative.
-- Row 4 (Masking) 2 and 3: the example edits the exported
+- Row 13 (Masking) 2 and 3: the example edits the exported
   `agent_defaults` entry and applies it, since `set` replaces the whole
   entry; 5: the example file's link.
-- Row 5 (When a reply fails) 2 and 3: the same for `fallback`; 6:
+- Row 14 (When a reply fails) 2 and 3: the same for `fallback`; 6:
   `vinga apply` spelled `vinga-server config apply`, and only fallback
   synthesis is bounded.
-- Row 6 (the withheld tool call) 4: "the fallback phrase above" links
+- Row 16 (the withheld tool call) 4: "the fallback phrase above" links
   the new guide; `unknown` when the keys fit two tools; the opt-in LLM
   export does carry the sentence.
-- Row 7 (Logging) 4: only event records carry `event`; 5: the
+- Row 18 (Logging) 4: only event records carry `event`; 5: the
   reference link made relative; 6: seven index rows (`replied`,
   `agent_said`, `tool_call`, `asr_prompt_echo`, `llm_input_exported`,
   `llm_input_export_failed`, `drain_started`); 7: which MCP lines name a
   tool by position; 12: the tail's clock is UTC; 14: the store is off
   by default, `ota_check_body` is not metadata, which tokens are never
   logged, and the ADR link on one line.
-- Row 8 (Exporting traces) 2: unsampled content is reported exported,
+- Row 19 (Exporting traces) 2: unsampled content is reported exported,
   not `no_trace`; 4: where a failure's words do go; 5: the two content
   switches, what else they export and that it outlives local erasure;
   6: what the 256 KiB limit drops and shares; 8: links made relative;
   9 and 10: the OTLP header built into an environment file through a
   pipe; 11: what the Collector strips and masks.
-- Row 9 (Capturing) 7 and 8: the manifest's four provider names and the
+- Row 21 (Capturing) 7 and 8: the manifest's four provider names and the
   per-turn clip directory; 11: about six hours, what pruning never
   takes, and the two events; 13: copying the clips off, and
   `export_audio` uploading the recording.
-- Row 10 (cost) 7: the server does hold a Langfuse key pair, and never
+- Row 23 (cost) 7: the server does hold a Langfuse key pair, and never
   writes a definition with it; 20: the model definition (D8a); 24:
   usage only on spans that reported it; 27: Piper reports characters.
-- Row 11 (the store) 4: the per-row column lists become a link to the
+- Row 26 (the store) 4: the per-row column lists become a link to the
   schema reference (D8), and the recap table is named; 9: a resumed
   conversation carries its tool calls' arguments and results, and the
   tools link made relative; 12: D8c, below, and the capture link; 14:
   a deleted thread takes its memory; 17: reading as `vinga_ro` links
   `database.md`'s Reading what was said rather than restating it.
-- Row 13 (the store, end) 20: `vinga metric`, `vinga session` and
+- Row 28 (the store, end) 20: `vinga metric`, `vinga session` and
   `vinga conversation` exist; 21: the dropped count is zero with
   `telemetry` off; 22: a turn can be lost after three failed writes.
 
-The two declared drops (row 12) are the `vinga_ro` psql block and its
+The two declared drops (row 27) are the `vinga_ro` psql block and its
 password paragraph, which `database.md`'s Reading what was said
 already carries; the one sentence it lacked ("A database provisioned
 without that file simply has no analyst role") moved into paragraph 17.
 
 Replaced blocks (D8's table rule): the conversation store's per-column
-lists of what each row holds (row 11, 4), now a link to
+lists of what each row holds (row 26, 4), now a link to
 `docs/reference/conversations-schema.md`. The event index table stays,
 as D8 says (it says when each event fires, which the reference does
 not), with seven rows corrected. The capture file table, the cost
@@ -1575,6 +1575,14 @@ a paragraph linking the reference sections for the keys it names.
   apply open (only the fallback's is capped, at 10 s); content attached
   to an unsampled turn is reported as exported though nothing is sent,
   and `reference_media` answers true on an unsampled trace.
+- **`ota_check_body` logs a board's check-in body unredacted**
+  (found by the PR review, finding 2). `ota/reply.py` serializes the
+  unauthenticated body with a size bound and nothing else, and
+  `tests/unit/test_event_descriptor_sanitization.py` shows it reaching
+  JSON logs and the live tail at DEBUG, so a credential a board sends
+  lands there. The guide now says so; redacting credential-shaped
+  values in the body is a code change for a follow-up issue, not this
+  milestone.
 - **The README's two CLI spellings.** It used `vinga ...` and
   `vinga-server config ...` side by side without introducing the
   first; both work. The guides keep what they moved, apart from the
@@ -1655,3 +1663,56 @@ On agentpi, from the worktree root unless noted:
   on the pull request because M3d touches `vinga-server/`. The smoke
   lane's documented commands were not run end to end; the `createdb`
   step was.
+
+### PR review round
+
+Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, read-only sandbox, runtime 6m33s, at commit e3952319 ([the round](https://github.com/rafacm/vinga/pull/621#issuecomment-6007643093)).
+
+1. **P1: the OTLP env file named the hosted Langfuse.** The block wrote
+   `cloud.langfuse.com` while the recording upload reads the operator's
+   `LANGFUSE_HOST` and has no default, so a self-hosted deployment would
+   have sent its traces and their Basic header to the hosted endpoint.
+   *Resolution:* the block sets `LANGFUSE_HOST` once (an address, no
+   secret) and writes it and the endpoint built from it into the env
+   file, and the prose says both paths must name one deployment. Run
+   with a self-hosted host and a dummy pair, the file named that host
+   twice, its header decoded to the pair, and its mode was 600
+   (`.logs/m3d-curl-config-file.txt`). Declared edit row 19, paragraphs
+   9 and 10, already declared (`9a8465c3`).
+2. **P1: "tokens are never logged" beside an unredacted
+   `ota_check_body`.** *Resolution:* the guide says what vinga itself
+   never logs, the device tokens it issues and the API bearer token (no
+   event field carries either, and `uvicorn.error` is held at WARNING
+   whatever `log_level` says, per `logs.py`), and in a paragraph of its
+   own that `ota_check_body` records a board's check-in body verbatim,
+   so anything a board puts in it, a credential included, reaches the
+   DEBUG log and `vinga events tail --level DEBUG`; keep DEBUG off
+   except while diagnosing. No code changed; the gap is under
+   Discoveries for a follow-up. Row 18, paragraph 14, already declared
+   (`f7149d57`).
+3. **P2: the smoke block fixed `net=vinga_default`.** Compose names the
+   network after the project directory. *Resolution:* the block reads
+   it with `docker compose config --format json | jq -r
+   '.networks.default.name'`, which printed
+   `609-m3d-observability-guides_default` from this worktree and
+   `vinga_default` from the main checkout, where `docker network ls`
+   lists it (`.logs/m3d-fix3-network.txt`). Row 9, paragraphs 16 and
+   17, already declared (`409c885d`).
+4. **P3: "CI runs on every change".** *Resolution:* the opening says
+   the lanes run on a change touching the server, its references or its
+   deployment files, that a documentation-only change runs the
+   documentation workflow, and links `AGENTS.md`'s Commands section for
+   which paths run which (`c44acf2b`).
+
+No new declared edits: every changed moved paragraph was already
+declared. The audit against `git show origin/main:vinga-server/README.md`
+(byte-identical to `83cff064`'s), exit 0:
+
+```text
+13 units, 132 paragraphs moved, 46 declared edited, 2 declared dropped, 0 kept in the page, 0 findings
+```
+
+The link check reports `checked 325 files, 0 failures` and the Run and Use check
+`checked 34 Run and Use pages, 0 findings`; the census ran last, and its outcome is in the hand-back. No
+code or test changed in this round, so ruff and the lanes were not
+rerun.
