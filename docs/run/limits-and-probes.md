@@ -108,7 +108,7 @@ logged as `llm_retry`; a second stall gives the round up as a
 `provider_failed` with `error: FirstTokenTimeout` and the session goes
 back to listening, so the worst a stalled provider can cost is one
 turn, and that turn says so out loud (see
-[When a reply fails](../../vinga-server/README.md#when-a-reply-fails))
+[When a reply fails](slow-and-failed-replies.md#when-a-reply-fails))
 rather than passing in silence. Only the
 wait for the stream to begin is bounded: a long reply that is already
 streaming runs to the end, a round that streams nothing but a tool call
