@@ -41,8 +41,9 @@ CLI: named `providers` per stage (`llm`, `asr`, `tts`, `vad`), named
 `mcp_servers`, named `prompt_fragments` holding the blocks of prompt
 text agents share, `agent_defaults` holding what every agent uses
 unless it says otherwise, `agents` combining a prompt with provider,
-fragment and MCP references, `devices` binding MAC addresses to agents,
-and `default_agent` for unknown devices.
+fragment and MCP references, `devices` holding a record per board by
+its MAC address (its name, where it stands, and the agents it is bound
+to), and `default_agent` for unknown devices.
 
 The CLI writes it through the configuration API on the running server,
 so these commands need one to be up, and an empty database is a valid
@@ -51,9 +52,9 @@ own, which is the ordinary way in: install it on whichever machine
 administers this deployment, name the API in `VINGA_API_URL` and carry
 the token in `VINGA_API_SECRET`. The image ships the same client under
 the server's own entry point, so a shell inside a running container
-reaches it with the token and the loopback address already in its
-environment, which is the alternative for a deployment that does not
-route its API outward.
+reaches it with the token already in its environment and the loopback
+address as the client's default, which is the alternative for a
+deployment that does not route its API outward.
 [`docs/reference/cli.md`](../reference/cli.md) is the CLI's own
 page: installing it, reaching a server, rebuilding one, and every
 command's help.
@@ -90,7 +91,8 @@ binds one by the code on its screen. That is
 [Onboarding a device](onboarding-a-device.md).
 
 The rules about a runnable server (every stage of every agent
-resolving, a default agent when nothing is bound) are checked at boot
+resolving, a default agent when agents exist and no device is bound)
+are checked at boot
 rather than at write time, so a half-built database is a legitimate
 state to be in and an illegitimate one to serve from.
 
@@ -140,14 +142,17 @@ change without a restart](#applying-a-change-without-a-restart). Those
 writes name `vinga-server config apply`, whose own help says the three
 moments a conversation already in progress meets an installed change
 at: the tools an agent may reach at its next utterance, its prompt text
-at its next activation, and the voice it speaks in and the clips it
-masks with at the next conversation. An agent the apply added is one a
+at its next activation, and the voice it speaks in at the next
+conversation. An agent the apply added is one a
 device can be bound to
 and reach at its next check-in; one it deleted is one no session can be
 opened as from the moment the request answers, while a conversation
 already talking as it finishes on the world it was built from. The one
 thing an agent carries that an apply does not move is its memory, which
-is keyed by its name, so the rows stay under the old name.
+is keyed by its name: deleting an agent and adding another under a new
+name leaves the rows under the old name, and moving them is
+`vinga agent rename`, which takes the agent's bindings, the default
+agent, its memory and its conversation threads in one transaction.
 
 **Device bindings are the other way, applied by being noticed.** A
 running server reads the devices table and the default agent as a device
@@ -171,8 +176,9 @@ rest are the ones `switch_agent` can reach.
 Every key of the file half can be overridden with a `VINGA_`-prefixed
 environment variable, nested keys joined with `__`:
 `VINGA_SERVER__PORT=9000`, `VINGA_SERVER__LOG_FORMAT=text`.
-Environment variables beat the YAML file, and a `.env` file in the
-directory the server is started from is read at startup (real
+Environment variables beat the YAML file, and a `.env` file, the first
+found searching upward from the directory the server is started in, is
+read at startup (real
 environment variables beat `.env` too). This layering matches container
 deployments: the YAML arrives as a mounted file, overrides and secrets
 as environment variables. The domain half has no environment layer: a
@@ -224,10 +230,9 @@ prompts:
   changed: house
 fillers:
   filled pause kept: house, kids
+  failure phrase kept: house, kids
 providers:
   engine kept: asr.ears, llm.local, tts.voice, vad.gate
-agents:
-  added: house
 
 home: connected since 2026-08-13T09:12:03.104213+00:00
   tools: home__turn_on_light, home__turn_off_light
@@ -253,10 +258,14 @@ field names are the API's and do not move: `POST
 **An apply that is refused** says that the stored configuration was
 refused and deliberately not where: a sentence composed over stored
 state can quote a value somebody wrote into the wrong field, so a
-reload's answer never carries one. Where is answered by
+reload's answer never carries one. The exception is a provider entry
+that will not build, or that `server.data_boundary` forbids, whose
+refusal names the entry and the rule. Otherwise where is answered by
 `vinga-server config check`, which reads the store the way a boot reads
 it and prints the sentence a server started on it would refuse with,
-naming the entry and the rule and no value. It runs on the server host,
+naming the entry and the rule and no value; it stops at composing the
+configuration, so what building a provider refuses on is the apply's
+own answer. It runs on the server host,
 serves nothing and writes no configuration, though it is not read-only:
 a boot's read migrates the store, and this is a boot's read.
 [`docs/reference/cli.md`](../reference/cli.md) is where it is
@@ -272,9 +281,10 @@ because nothing installs one until somebody asks. The boundary is what
 travels between the two halves, as a token: a server ships in an image
 and cannot know the grammar of the client somebody has installed beside
 it, so it states the boundary, and the client says the whole of it in
-its own words wherever it recognizes the set. A boundary the client
-cannot name, which is what one from a newer server arrives as, is
-answered with the server's sentence quoted instead.
+its own words wherever the set is one a command of its grammar
+crosses. Otherwise it quotes the server's sentence: a boundary only a
+device or a start crosses, and one from a newer server, both arrive
+that way.
 
 **What it applies** is the whole domain half, re-read from the
 configuration database: the `providers` entries and the `mcp_servers`
@@ -286,8 +296,7 @@ started, one whose fragment or whose stored secrets changed is stopped
 and rebuilt (so rotating a credential applies here too), one that is
 gone or no longer referenced is stopped, and an unchanged one keeps the
 connection it had, untouched. The MCP outcomes come back with the status
-document, so one command both applies and verifies, and the sections for
-the kinds a later release will apply are named rather than missing.
+document, so one command both applies and verifies.
 
 An entry whose `instructions` is all that changed keeps the connection
 it had (`unchanged` in the answer, a connection kept in the listing),
@@ -314,8 +323,10 @@ comparison that covered part of it would be a second rule about what a
 clip depends on. Synthesis is real work at the configured provider, and
 may be billed there, so an apply of a deployment with many masked agents
 costs what this says it does. The
-`fillers` section names each agent under one of three outcomes, and an
-agent whose synthesis failed is `disabled`: the apply installed, that
+`fillers` section names each agent under one of three outcomes for its
+filled pause and one of three for its failure phrase (spoken again,
+kept, or shown but not spoken), and an agent whose filled pause failed
+to synthesize is `disabled`: the apply installed, that
 agent runs with the mask off, and the next apply tries again. A
 text-to-speech hiccup never holds back a prompt fix.
 
@@ -340,7 +351,9 @@ while a conversation already talking as it finishes on the world it was
 built from and is served that world's prompt to the end. The `agents`
 section names both, and says whether `agent_defaults` moved. The one
 thing an agent carries that an apply does not move is its memory, which
-is keyed by its name, so the rows stay under the old name. The whole
+is keyed by its name, so deleting an agent and adding another leaves
+the rows under the old name; `vinga agent rename` is what moves them.
+The whole
 `server` section (including the configuration file itself) is
 start-time as it always was.
 

@@ -17,8 +17,12 @@ forms are supported:
 - **An environment reference**, which is the only form a fragment may
   carry: a provider names the variable holding its key (`api_key_env:
   ANTHROPIC_API_KEY`), an MCP server writes `$NAME` where the secret
-  goes, on its own or inside a larger value. The server reads the variable at startup and fails the boot when
-  it is unset, rather than failing every conversation later.
+  goes, on its own or inside a larger value. The server reads the
+  variable when it builds an entry some agent references, at startup
+  and again at every apply, and fails the boot (or refuses the apply)
+  when it is unset, rather than failing every conversation later. An
+  entry no agent references is not read, and neither is the variable of
+  a slot that holds a stored secret.
 - **A value encrypted in the database**, written with a noun's own
   `secret set`, which reads it from stdin (not echoed at a terminal) or
   from a named variable with `--from-env`, and never from an argument:
@@ -39,8 +43,10 @@ forms are supported:
   [Recovering a deployment that will not start](recovering-a-deployment.md): boot on
   an empty database and put the configuration back, entering each
   credential again under a key that works. A slot whose value is gone
-  for good is left to its environment reference by writing the entity
-  without the stored one.
+  for good is left to its environment reference by not entering it
+  again in that rebuild; on a running deployment, the noun's
+  `secret clear` removes a stored value and hands the slot back to its
+  reference.
 
 Instance configs stay out of the repository; `*.local.yaml` and `.env`
 are gitignored for local experiments, and the domain half of a local
@@ -85,8 +91,11 @@ for you.
 **Which hosts a configuration reaches.** Worth reading before deploying
 anywhere with an outbound allowlist, because a blocked host does not
 announce itself: the server boots healthy, other stages keep working,
-and the blocked stage waits out its `timeout_s` while the device plays
-silence.
+and the blocked stage waits out its timeout while the device plays
+silence: `timeout_s` on an OpenAI or ElevenLabs speech entry, the
+first-token watchdog in
+[Setting limits and probes](limits-and-probes.md) for the LLM, and
+`tool_timeout_s` for an MCP server.
 
 | Configured as | Reaches | Notes |
 | --- | --- | --- |
@@ -95,8 +104,8 @@ silence.
 | `asr: openai` | `api.openai.com` by default, else `base_url` | **Shares its host with an OpenAI LLM.** Adding cloud ASR to a deployment already using OpenAI for the LLM needs no new host |
 | `tts: openai` | `api.openai.com` by default, else `base_url` | Same |
 | `tts: elevenlabs` | `api.elevenlabs.io` | A separate host, and the one most likely to be missed |
-| `asr: faster_whisper` | `huggingface.co` at first start only | Model weights, downloaded once into `/data` |
-| `tts: piper` | the voice collection at first start only | Same |
+| `asr: faster_whisper` | `huggingface.co`, only while its weights are not cached | Model weights, downloaded once into its cache, which is under `/data` in the image |
+| `tts: piper` | the voice collection, only while its voice is not cached | Same |
 | `vad: silero` | nothing | Weights ship with the package |
 | `mcp_servers` (`streamable_http`) | whatever the entry's `url` names | Each entry is its own host |
 | `mcp_servers` (`stdio`) | wherever the command it runs goes | Not knowable from the configuration |
@@ -124,6 +133,8 @@ supported topology is one server process (see
 [Running vinga in a container](running-in-a-container.md)).
 
 The secret comes from the environment, never from the config file:
+`VINGA_AUTH_SECRET` by default, or whichever variable
+`server.auth.secret_env` names.
 
 ```bash
 VINGA_AUTH_SECRET=$(openssl rand -hex 32)
@@ -152,8 +163,13 @@ or `VINGA_SERVER__AUTH__ENABLED=false` in the environment.
 
 **Who gets a token is the allowlist.** A token is only issued to a device
 the configuration resolves to at least one agent. Omit `default_agent`
-and the `devices` map becomes an allowlist: an unknown MAC is issued
-nothing and turned away. There is no second list to keep in sync.
+and the `devices` map becomes an allowlist: an unknown MAC is issued no
+token. With onboarding on, which is the default, it is shown an
+activation code instead, and gets a token only once someone with the
+API's token claims it by that code
+([Onboarding a device](onboarding-a-device.md)); with
+`server.onboarding.enabled: false` it is answered with nothing and
+refused at the handshake. There is no second list to keep in sync.
 
 ## The OTA endpoint
 
@@ -163,10 +179,13 @@ served at two of them, and both are the same handler:
 
 - `/x/<key>/`, the short path an operator types into a board's captive
   portal, where the key is eight base32 characters derived from the
-  device-auth secret. Derived, so nothing configures or stores it, it
-  survives restarts, and it changes only when that secret does. With
-  device authentication off there is no secret to derive from and the
-  route is served keyless at `/x/`.
+  device-auth secret. Derived, so nothing stores it, it survives
+  restarts, and it changes only when that secret does, unless
+  `server.onboarding.key` pins one, which is what keeps boards reaching
+  the old URL across a rotation of the secret. With device
+  authentication off and no pinned key there is no secret to derive
+  from and the route is served keyless at `/x/`, and
+  `server.onboarding.enabled: false` unmounts it.
 - `server.ota_path`, the legacy full path, for boards already carrying
   one in NVS. Exposed publicly it should be a long random segment
   (`openssl rand -hex 8`), and it is nullable, so a deployment whose
@@ -177,12 +196,15 @@ served at two of them, and both are the same handler:
     ota_path: /xiaozhi/ota/8f3a9c2b1d4e5f60/   # or null to unmount
   ```
 
-The two segments are treated differently on purpose. The derived key is
-printed at startup and repeated in the log line a wrong key produces,
-which is what makes a typo and a rotated secret diagnose themselves; it
-is a deployment-scoped path segment rather than a per-device
-credential, and that trade is deliberate and recorded. The `ota_path`
-segment is never printed anywhere, and neither is any device token.
+Neither segment is printed at startup or written to a log. The
+startup line names the origin and whether a key guards the short path,
+and a wrong key is logged with only how long the attempt was, since
+the key stands in front of the token issuer and a near miss of it is a
+hint at it. The URL to type comes from `vinga-server config ota-url`,
+on your own terminal, or from `GET /api/runtime/info` behind the API's
+token. The derived key is a deployment-scoped path segment rather than
+a per-device credential, and that trade is deliberate and recorded.
+No device token is printed anywhere either.
 
 The WebSocket path never moves: the token is what protects it.
 
@@ -244,8 +266,8 @@ The telemetry section carries one of its own, and it is your assertion
 rather than anything this server checks. `server.telemetry.reach` says
 how far this section's destinations lie, and there are three of them:
 
-- the collector, in `OTEL_EXPORTER_OTLP_ENDPOINT`, which the traces and
-  the exported transcripts ride;
+- the collector, in `OTEL_EXPORTER_OTLP_ENDPOINT`, which the traces,
+  the exported transcripts and the exported LLM inputs ride;
 - the Langfuse the recording upload talks to, in `LANGFUSE_HOST`;
 - and wherever that Langfuse keeps its media. The upload asks it for an
   upload URL and PUTs the WAV, the manifest and each turn's clips to the
@@ -279,9 +301,10 @@ server:
     reach: network
 ```
 
-The checks run at boot, never at request time: a server that starts
-inside its boundary stays inside it, and a config edit that would break
-the promise stops the server from coming up instead of quietly shipping
-audio to a vendor. Declarations are enforced and behaviour is not
+The checks run when the server boots and when a configuration is
+applied, never per request: a server that starts inside its boundary
+stays inside it, and a config edit that would break the promise stops
+the server from coming up, or is refused at the apply with nothing
+running changed, instead of quietly shipping audio to a vendor. Declarations are enforced and behaviour is not
 verified: this is not a network sandbox, and it proves nothing about
 what a remote endpoint does with what it was sent.
