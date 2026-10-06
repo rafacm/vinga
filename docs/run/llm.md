@@ -318,7 +318,9 @@ A vendor needs its key, and the key is never a field of the entry and
 never an argument: the entry names where the server finds it. A
 `key=value` argument named like a credential is refused before it is
 sent, and an entry naming a variable the server's environment does not
-hold refuses the apply. There are two places for it.
+hold refuses the apply. There are two places for it, and the order
+is the same for both: the key reaches the server, or the store, before
+the apply that puts the entry in service.
 
 **In the server's environment**, named by the entry's `api_key_env`.
 The deployment's env file is where it goes, written so the key is
@@ -339,12 +341,17 @@ reads the key at its own prompt without echoing it, and takes
 precedence over `api_key_env` on the same entry (the variable it names
 is then not read at all). It needs `VINGA_MASTER_KEY` in the server's
 environment first, generated and kept apart from the database as
-[The master key](security.md#the-master-key) describes, and the stored
-key reaches a conversation at the next apply:
+[The master key](security.md#the-master-key) describes. A secret is
+stored on an entry, so the entry comes first: the command refuses a
+secret for an entry that is not written. Write the entry from its
+recipe below, store the key on it, and only then point an agent at it
+and apply, which is when the stored key reaches a conversation:
 
 ```bash
+# After `vinga provider set llm claude ...` from the recipe below:
 vinga provider secret set llm claude api_key    # an installed client
 docker compose exec vinga vinga provider secret set llm claude api_key    # the container's
+# Then point agent_defaults or an agent at claude, and:
 vinga apply
 ```
 
@@ -365,8 +372,9 @@ api_key_env: ANTHROPIC_API_KEY
 YAML
 ```
 
-Then point `agent_defaults` or an agent at `claude`, and apply. The
-type knows it reaches Anthropic, so it takes no `reach`, and an entry
+Then store the key, if it goes in the database rather than the
+environment, point `agent_defaults` or an agent at `claude`, and
+apply. The type knows it reaches Anthropic, so it takes no `reach`, and an entry
 declaring one is refused at the apply. Without a `max_tokens` it caps
 a reply at 1024 tokens, which a spoken reply does not come near.
 
@@ -388,7 +396,8 @@ reach: internet
 YAML
 ```
 
-Then point `agent_defaults` or an agent at `openai`, and apply. Leave
+Then store the key, if it goes in the database, point
+`agent_defaults` or an agent at `openai`, and apply. Leave
 `max_tokens` out: a model of the current family answers it with an
 HTTP 400. An entry with no key at all is not refused, since a local
 runner needs none, so a missing key against OpenAI shows only as a
