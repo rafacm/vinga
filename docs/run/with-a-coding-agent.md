@@ -96,8 +96,15 @@ same revision, with the `sim` extra section 7 uses:
 uv tool install "vinga-server[sim] @ git+https://github.com/rafacm/vinga@<revision>#subdirectory=vinga-server"
 ```
 
-From here on this page writes `vinga` for whichever of the two you
-use.
+A server that runs from a checkout has its client in the same
+checkout. Run it from the directory the deployment's `.env` is in, so
+it finds the address and the token there itself:
+
+```bash
+uv run --project <checkout>/vinga-server vinga info
+```
+
+From here on this page writes `vinga` for whichever of these you use.
 
 ## 2. Learn the model before the first question
 
@@ -161,8 +168,9 @@ by reading what was written.
   is `vinga info` answering once the server is up.
 - **The master key**, needed only when a credential is stored
   encrypted: [The master key](security.md#the-master-key) generates it
-  into the env file, and the server is restarted to read it. The check
-  is the `secret set` below being accepted.
+  into the deployment's env file (Getting Started's is `.env`, where
+  that page writes `vinga.env`), and the server is restarted to read
+  it. The check is the `secret set` below being accepted.
 - **A vendor's key.** [The key](llm.md#the-key) gives the two forms,
   and the person chooses: a line they type in an editor into the env
   file, followed by a restart, or a command they run at their own
@@ -175,9 +183,11 @@ by reading what was written.
   Hand over the command with the entry's real stage and name, never
   the value. It needs a terminal, so it is `docker compose exec`
   without `-T`, in the person's own shell; through a `-T` shell
-  function there is no prompt and nothing typed is hidden. The check is
-  `vinga apply` succeeding: an entry whose key variable the server's
-  environment does not hold refuses the apply, naming the entry.
+  function there is no prompt and nothing typed is hidden. The check,
+  for the env file, is `vinga apply` succeeding, since an entry whose
+  variable the server's environment does not hold refuses the apply,
+  naming the entry; for the prompt, it is `vinga show`, which prints
+  the stored slot as `********`.
 - **The board's NVS.** Getting Started's step 4 writes a CSV holding
   the Wi-Fi password, builds the partition from it and flashes it, and
   the CSV is deleted afterwards. The person runs all of it; the
@@ -278,8 +288,10 @@ vinga apply
 
 **An apply that is refused** changes nothing running, and the write it
 refused stays stored, so the next start refuses the same way. Some
-refusals name the entry and the rule; one that does not is answered by
-`vinga check`, which reads the store as a boot would and names both.
+refusals name the entry and the rule. One that does not, from
+`vinga apply` or from `vinga diff`, which refuses the same store the
+same way, is answered by `vinga check`, which reads the store as a boot
+would and names both.
 It needs the server's half of the package, so run it in the
 container (`docker compose exec -T vinga vinga check`) or from a
 checkout. A fresh store with agents and no device bound needs a
@@ -298,17 +310,17 @@ so does a workstation client installed as section 1 says; one
 installed without the `sim` extra names the extra and stops
 ([Installing it](../reference/cli.md#installing-it)). It also needs the
 OTA URL. `vinga info` prints one, the onboarding URL, when onboarding
-is on. When it prints a sentence saying onboarding is off instead,
-ask the person for the OTA URL their boards use, the path
-`server.ota_path` names on the deployment's own host, rather than
-guess one. That path stands in front of the endpoint that issues
-device tokens, so the person may prefer to run the simulator line
-themselves while you watch the events.
+is on. When it prints a sentence saying onboarding is off instead, the
+URL the boards use is the path `server.ota_path` names on the
+deployment's own host, and the server treats that path as the
+deployment's secret, so it is a step the person runs (section 4): give
+them the simulator line with the URL left for them to fill in, and
+watch the events while they run it. Never guess the URL.
 
 **Watch before you act.** The event stream keeps nothing and joins at
 the present, and without `--follow` it prints one event and exits. So
 start it first, in a second terminal or as a background process whose
-output you keep, and only then run the simulator:
+output goes to a file you read, and only then run the simulator:
 
 ```bash
 # First, and left running:
@@ -318,16 +330,25 @@ vinga events tail --follow
 vinga simulator run http://192.168.1.10:8003/x/AB2C4D5E/
 ```
 
-A turn that worked prints `heard:`, `said:` and `reply:` lines from the
-simulator, and the stream shows, among others and in this order,
-`ota_check`, `session_open`, `heard`, `llm_round`, `speaking_started`,
-`replied` and, when the simulator hangs up, `session_closed`. Stop the stream (Ctrl-C, or end
-the background process) once `session_closed` has appeared. What each
-event carries is the
-[event reference](../reference/events.md), and when each fires is
-[Reading logs and traces](logs-and-traces.md).
+The simulator prints `heard:` and `said:` lines, and on a turn that
+worked the stream shows, among others and in this order, `ota_check`,
+`session_open`, `heard`, `llm_round`, `speaking_started`, `replied`
+and, when the simulator hangs up, `session_closed`. Judge the turn by
+the stream, not by the simulator's exit code: a failed turn still
+speaks the agent's fallback phrase, so the simulator prints it after
+`said:` and exits 0, and the stream shows `reply_fallback` where
+`replied` should be.
 
-**When no reply comes back**, the stream says which stage failed:
+Stop the stream once `session_closed` has appeared: Ctrl-C in a
+terminal, or, for a background process, a TERM signal to the process
+id you started it as. A background job of a non-interactive shell
+ignores the interrupt Ctrl-C sends, and a pattern match such as
+`pkill -f "events tail"` also matches the shell that runs it. What
+each event carries is the [event reference](../reference/events.md),
+and when each fires is [Reading logs and traces](logs-and-traces.md).
+
+**When the reply is the fallback phrase or nothing**, the stream says
+which stage failed:
 `provider_failed` names the entry and the kind of error, `llm_retry` is
 a stalled model being asked again, `reply_fallback` is the fixed phrase
 said instead of a reply, and `sentence_withheld` is a model writing a
@@ -345,7 +366,8 @@ vinga conversation show <conversation>
 
 **A board** is the same loop with the person's hands in it. Start the
 stream for that board before they power it on or reset it, with its
-MAC from the sticker or from `vinga device pending list`:
+MAC from the sticker, or from `vinga device pending list` for a board
+waiting with a code on its screen:
 
 ```bash
 vinga events tail --follow --device aa:bb:cc:dd:ee:ff
