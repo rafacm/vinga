@@ -12,7 +12,7 @@ lives in the database, and these are what get written into it.
 
 Either way it needs a running server: `vinga-server config` writes
 through the configuration API the server mounts, which
-[the server README](../README.md#the-configuration-api) describes. An
+[Using the configuration API](../../docs/run/configuration-api.md) describes. An
 empty database is a valid state for that server to be running on.
 
 Every file names its own command in its header, so using one is copy,
