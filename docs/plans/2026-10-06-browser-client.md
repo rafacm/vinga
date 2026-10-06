@@ -98,14 +98,20 @@ plain ES modules, no bundler and no Node toolchain in the build: the
 client is small enough (D3) that a build step would cost more than it
 saves.
 
-**Q2. How the page reaches the OTA route.** The page is served under the
-onboarding path, at `/x/<key>/try/` (and `/x/try/` where onboarding is
-keyless because auth is off), so it reaches the OTA endpoint it is
-served beside by a relative URL and the key is never typed, never put
-in the page's source by the server for a different path, and never
-printed beyond where it is today. Anyone holding the onboarding URL can
-already check in as a board; loading the page grants nothing more. The
-`/try/` link (D5) moves the page there after redeeming its token.
+**Q2. How the page reaches the OTA route.** The page and its assets are
+served at the keyless `/try/` (`/try/static/<file>`), and the onboarding
+path reaches the page in the body of a response, never in a URL the
+page is loaded from: the redeem response (D5) carries it for a browser
+bound by a try link, and an unbound browser has the person paste the
+onboarding URL `vinga info` printed, once, the issue's "typed once"
+option. The page stores it beside the identity and uses it only as the
+target of its OTA `fetch`, which is exactly the request a board makes
+with the same key in it. So the key appears in a request target where a
+board's check-in already puts it, and nowhere else: not in the page's
+address, not in an asset request, not in a `Referer` (the page sets
+`Referrer-Policy: no-referrer`). The exposure guide's existing advice
+for the onboarding path covers the browser's check-in as it covers a
+board's, and says so (D2a).
 
 **Q3. The credential on the WebSocket handshake.** The
 `Sec-WebSocket-Protocol` header, which is the one header a browser's
@@ -221,14 +227,27 @@ different namespace so the two never collide. The page stores both in
 the `/try/redeem` request (D5) and the page's own "start" request when it
 holds no identity (D4). No JavaScript mints a MAC.
 
-**D2. The page and its assets.** `GET /x/<key>/try/` serves
-`index.html`; `GET /x/<key>/try/static/<file>` serves the modules and
-the AudioWorklet processor, with a strict set of files (no directory
-listing, no path traversal: a fixed allowlist read from the package),
-`Content-Security-Policy` restricting scripts to the same origin, and
-`Cache-Control` tied to the server's revision. A wrong key answers the
-stock 404, as the OTA alias does. Mounted only when onboarding is
-enabled, exactly like the alias.
+**D2. The page and its assets.** `GET /try/` serves `index.html` and
+`GET /try/static/<file>` serves the modules and the AudioWorklet
+processors, from a fixed allowlist read from the package (no directory
+listing, no path traversal), with `Content-Security-Policy` restricting
+scripts and connections to the same origin, `Referrer-Policy:
+no-referrer`, and `Cache-Control` tied to the server's revision (the
+page itself `no-store`, D5). Nothing under `/try/` is secret, so none of
+it needs a key; the routes are mounted whenever onboarding is enabled,
+like the alias, since a browser needs the alias to check in.
+
+**D2a. What a proxy sees.** A browser's requests carry the onboarding key
+only in its OTA check-in and the activation poll, the same two requests
+a board makes, and the identity-mint request (D4a), which the page sends
+to the onboarding path for the same reason. `docs/run/exposing-a-
+deployment.md` already has to say that a proxy logging request targets
+records the onboarding key from boards' check-ins; this plan extends
+that sentence to browsers and adds the rule it implies: exclude the
+`/x/` path family from request-target logging, or accept that the key
+is in those logs, since it is a deployment-scoped path segment and not a
+per-device credential (the trade `onboarding/keys.py` records). M2
+writes it; nothing about it is new to boards.
 
 **D3. The client's parts.** Four ES modules and one worklet, each with
 one job: `identity.js` (storage, the start request), `ota.js` (the
@@ -588,6 +607,8 @@ Reviewed 2026-10-06 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.0
    *Resolution:* Accepted. D7a now lists exactly where each secret may appear: the try token in the issuance response and the inbound redeem body only, the device token in the OTA reply and the inbound subprotocol only, neither logged, retained, echoed or returned elsewhere; the standing no-leak lens now states D7a's two classes instead of the old sentence.
 
 5. **P2: Serving every browser asset below `/x/<key>/` leaks the onboarding secret to normal proxy logs unless the deployment contract changes.** Evidence: D2 makes both the page and every module/worklet request contain the onboarding key (lines 213-220 (`docs/plans/2026-10-06-browser-client.md:213`)). The security guide classifies that key as sensitive and says neither onboarding path segment is written to a log (security.md (`docs/run/security.md:188`)). Uvicorn's disabled access log does not control a reverse proxy. The plan should require proxy redaction or suppression for the full `/x/<key>/...` route family, including request targets and `Referer`, and document that requirement in the exposure guide.
+
+   *Resolution:* Accepted, by moving the page rather than requiring a new proxy rule for it: Q2 and D2 now serve the page and its assets at the keyless `/try/`, and the onboarding path reaches the page only in a response body (the redeem response, or pasted once by the person for an unbound browser). The key then appears only in the OTA check-in, the poll and the identity mint, the requests a board already makes with it. D2a extends the exposure guide's existing onboarding-path advice to browsers and states the rule: exclude `/x/` from request-target logging, or accept the key there as the deployment-scoped segment it is.
 
 6. **P2: The browser lane's required coverage is contradicted by the Risk section.** Evidence: Q5a requires the browser lane on every event that triggers the server workflow because OTA, session, protocol, and packaging changes can break it (lines 172-183 (`docs/plans/2026-10-06-browser-client.md:172`)). The Risks section allows it to run only when `browser/` or `ws.py` changes (lines 425-427 (`docs/plans/2026-10-06-browser-client.md:425`)). The latter would repeat the settled coverage failure. Remove the conditional skip; optimize the lane without narrowing its trigger scope.
 
