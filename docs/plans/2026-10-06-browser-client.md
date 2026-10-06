@@ -475,8 +475,9 @@ The seam is the existing one: the browser is a device behind
   the server's hello expects; measured in M3 before the rest is built on
   it.
 - **The lane's weight in CI.** A container pull and a headless browser;
-  measured in M3 and stated in the PR. If it costs more than a few
-  minutes per run, it runs only when `browser/` or `ws.py` changes.
+  measured in M3 and stated in the PR. It runs on every server-workflow
+  event (Q5a); if it is slow, M3 makes it faster (a cached image, one
+  browser launch per run), never narrower.
 
 ## Standing lenses
 
@@ -611,6 +612,8 @@ Reviewed 2026-10-06 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.0
    *Resolution:* Accepted, by moving the page rather than requiring a new proxy rule for it: Q2 and D2 now serve the page and its assets at the keyless `/try/`, and the onboarding path reaches the page only in a response body (the redeem response, or pasted once by the person for an unbound browser). The key then appears only in the OTA check-in, the poll and the identity mint, the requests a board already makes with it. D2a extends the exposure guide's existing onboarding-path advice to browsers and states the rule: exclude `/x/` from request-target logging, or accept the key there as the deployment-scoped segment it is.
 
 6. **P2: The browser lane's required coverage is contradicted by the Risk section.** Evidence: Q5a requires the browser lane on every event that triggers the server workflow because OTA, session, protocol, and packaging changes can break it (lines 172-183 (`docs/plans/2026-10-06-browser-client.md:172`)). The Risks section allows it to run only when `browser/` or `ws.py` changes (lines 425-427 (`docs/plans/2026-10-06-browser-client.md:425`)). The latter would repeat the settled coverage failure. Remove the conditional skip; optimize the lane without narrowing its trigger scope.
+
+   *Resolution:* Accepted. The Risks line no longer narrows the trigger: the lane runs on every server-workflow event as Q5a decides, and if it is slow M3 makes it faster (a cached image, one browser launch per run), never narrower.
 
 7. **P2: "No upgrade action" is false for outstanding try links.** Evidence: try links exist only in process memory (lines 277-281 (`docs/plans/2026-10-06-browser-client.md:277`)), while the operator surface claims no upgrade action (lines 24-31 (`docs/plans/2026-10-06-browser-client.md:24`)). A restart or image upgrade invalidates every unredeemed link before its advertised ten-minute lifetime. The plan should state this expiry condition in the operator and upgrade guidance, test restart invalidation as the same fixed refusal, and tell an operator to issue a fresh link after a restart.
 
