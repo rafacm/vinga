@@ -172,8 +172,8 @@ def test_status_shows_each_entry_its_state_and_who_may_reach_it(
 def test_status_lists_the_agents_of_an_entry_in_name_order(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The order the README's sample output is written in, pinned here
-    so the two cannot drift."""
+    """The order the sample output in docs/run/tools-and-mcp.md is
+    written in, pinned here so the two cannot drift."""
     entry = {"transport": "streamable_http", "url": "http://127.0.0.1:9/mcp"}
     run.runtime["mcp_servers"] = _configured(
         {"home": entry}, {"kids": ["home"], "house": ["home"]}
