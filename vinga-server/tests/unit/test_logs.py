@@ -26,7 +26,7 @@ import os
 import subprocess
 import sys
 import textwrap
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
 import httpx
@@ -368,18 +368,52 @@ async def uvicorn_serving() -> AsyncIterator[int]:
     served = serving.uvicorn_config(handshake_app(), Config())
     served.host, served.port = "127.0.0.1", 0
     server = uvicorn.Server(served)
-    task = asyncio.create_task(server.serve())
-    try:
-        while not server.started:
-            if task.done():
-                task.result()
-            await asyncio.sleep(0.01)
-        with logs.quieted(["websockets.client"], logging.WARNING):
-            yield server.servers[0].sockets[0].getsockname()[1]
-    finally:
-        server.should_exit = True
-        await task
+    with uvicorn_loggers_as_served():
+        task = asyncio.create_task(server.serve())
+        try:
+            while not server.started:
+                if task.done():
+                    task.result()
+                await asyncio.sleep(0.01)
+            with logs.quieted(["websockets.client"], logging.WARNING):
+                yield server.servers[0].sockets[0].getsockname()[1]
+        finally:
+            server.should_exit = True
+            await task
     logging.getLogger("vinga_server.ws").warning(OWN_LINE)
+
+
+# The loggers uvicorn writes to. Its default `log_config` gives them
+# handlers of their own and stops them propagating, which a deployment
+# never sees (`serving.uvicorn_config` passes none) but this process may
+# have: any test that built a `uvicorn.Config` with the default before
+# this one ran it, and `--dist loadfile` decides which share a worker.
+UVICORN_LOGGERS = ("uvicorn", "uvicorn.error", "uvicorn.access")
+
+
+@contextlib.contextmanager
+def uvicorn_loggers_as_served() -> Iterator[None]:
+    """uvicorn's loggers as a served process has them: no handlers of
+    their own, propagating to the root, so its lines meet the handler
+    `logs.configure` installed. Without this, a test that finds nothing
+    printed may only have found that nothing reached the root, and the
+    two that expect a line fail. Levels are left alone, since the floor
+    under test sets them; handlers and propagation are given back."""
+    saved = [(logging.getLogger(name), name) for name in UVICORN_LOGGERS]
+    state = [(log, list(log.handlers), log.propagate) for log, _ in saved]
+    for log, _ in saved:
+        for handler in list(log.handlers):
+            log.removeHandler(handler)
+        log.propagate = True
+    try:
+        yield
+    finally:
+        for log, handlers, propagate in state:
+            for handler in list(log.handlers):
+                log.removeHandler(handler)
+            for handler in handlers:
+                log.addHandler(handler)
+            log.propagate = propagate
 
 
 async def handshake(port: int, path: str, **headers: str) -> int:
