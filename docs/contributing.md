@@ -9,7 +9,7 @@ the documentation workflow instead, and which paths run which workflow
 is the CI paragraph under [`AGENTS.md`'s Commands](../AGENTS.md#commands)),
 the opt-in local lane that holds a real conversation on local engines,
 the smoke lane that holds one with a running container, and the
-browser lane that holds three with the browser client in headless
+browser lane that holds four with the browser client in headless
 Chromium.
 
 The workflow every change follows (branches, commits, plans and their
@@ -215,10 +215,11 @@ and it works against any reachable server, not only a container.
 
 The browser client is JavaScript the server ships, and no Python test
 runs it, so a fifth lane loads the real page in headless Chromium and
-holds three whole conversations with it: one in realtime with a
+holds four whole conversations with it: one in realtime with a
 barge-in, an interruption and the idle timeout's ending; one with echo
-cancellation unavailable, in auto mode; and one in which the server
-discovers the page's device tools and calls one. The microphone is a
+cancellation unavailable, in auto mode; one in which the server
+discovers the page's device tools and calls one; and one in which a
+browser with no link pairs by its six-digit code. The microphone is a
 fake capture device playing a sentence the simulator ships
 ([`tests/browser/speech.wav`](../vinga-server/tests/browser/speech.wav),
 written by `tests/browser/make_speech.py`), and what the lane asserts
