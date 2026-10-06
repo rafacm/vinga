@@ -25,7 +25,7 @@
 3678	3-3	DROP
 3678	4-6	docs/run/exposing-a-deployment.md	kinds=procedure,explanation
 # When the server will not start (D8b reorder; order is not audited)
-3729	docs/run/recovering-a-deployment.md	kinds=procedure,explanation	edited=3,13
+3729	docs/run/recovering-a-deployment.md	kinds=procedure,explanation	edited=3,6,13
 # Choosing an image
 3833	docs/run/running-in-a-container.md	kinds=explanation,procedure	edited=13
 # Onboarding a device

@@ -54,8 +54,14 @@ deployment that is recording and wants to keep what it recorded drops
 that half alone, as the server role, and reruns the provisioning file
 after it:
 
-```sql
-drop schema domain cascade;
+```bash
+# Stop the server first, so nothing is using the schema while it goes.
+docker stop vinga && docker rm vinga
+
+# Drop the configuration schema as the server role, which owns it, on
+# the deployment's own database: the vinga service names both, and
+# ~/.pgpass holds the role's password.
+PGSERVICE=vinga psql -c 'drop schema domain cascade;'
 ```
 
 The rerun is the same either way, and the reason is the same: a
@@ -65,10 +71,11 @@ that let `vinga_ro` read tables the server has not created yet. The
 next boot then migrates from nothing, which is the state this
 procedure needs and the state a first-ever boot is in.
 
-After the statement, the rest is the block below from its provisioning
-rerun on: stop the server first, run the statement where the block runs
-`dropdb` and `createdb`, then rerun the provisioning file, start the
-server, import, re-enter the credentials and apply.
+From there the rest is the whole-database block below from its
+provisioning rerun on: rerun the provisioning file, start the server,
+import, re-enter the credentials and apply. Skip everything in it
+before the provisioning rerun, which stops the server again and drops
+the whole database.
 
 ### Dropping the whole database
 

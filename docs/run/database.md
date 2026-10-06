@@ -65,6 +65,13 @@ rather than to the one they act on. The same two files serve every
 `psql`, `pg_dump`, `pg_restore`, `dropdb` and `createdb` an
 administrator runs against this instance.
 
+A second service, `[vinga]`, with the same `host`, `port` and `dbname`
+and `user` set to the server role (the `VINGA_DB_USER` value), is for
+the rare statement that has to run as the role that owns the schemas,
+such as the configuration-only reset in
+[Recovering a deployment that will not start](recovering-a-deployment.md);
+its password goes in `~/.pgpass` beside the first.
+
 The executor needs to be able to create roles and to create schemas in
 that database (a superuser, or the database's owner with `CREATEROLE`);
 the server role needs neither, because it is given schemas it already
