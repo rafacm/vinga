@@ -199,6 +199,25 @@ depends on `ws.py`, the session, OTA, the protocol models and the
 packaging, and a filter narrower than those would let one of them break
 it unseen. Its cost per run is measured in M3 and stated in the PR.
 
+**Q5b. The lane's cases and its runtime.** Two cases beyond the
+realtime one: an echo-cancellation-unavailable case (the page started
+with a test-only switch that makes it treat the track's
+`echoCancellation` as false, since the fake device always reports true)
+asserting `listen auto`, no outbound microphone frames while a reply
+plays, re-arming after `tts stop`, and the visible no-interrupt
+sentence; and the device-tool case of D3a. The runtime is pinned and
+provisioned: Playwright's Python package as a `browser` dependency group
+in `pyproject.toml` (locked in `uv.lock`), run inside
+`mcr.microsoft.com/playwright/python:v<the locked version>-noble` so the
+browser binary and its system libraries match the package; the fake
+microphone is a committed short WAV under `tests/browser/`; the server
+under test is the built wheel installed in that container (and, in CI,
+a second run against the image the image job built), reached on the
+container's loopback. Locally: one documented command in
+`docs/contributing.md` that runs the container with the worktree
+mounted. In CI: a job in the server workflow using that image as its
+job container. M3 records the job's measured time.
+
 **Q6. #81's measurement harness.** Not built here. The browser client
 produces realtime, echo-cancelled sessions that the server records like
 any device's (capture and the conversation store are server-side), so
@@ -712,6 +731,8 @@ Say instead: specify the capture-to-main-thread encoder transfer and either a se
 7. **P2: The test plan does not drive the claimed auto fallback.**
 Evidence: Q4 promises `auto`, microphone pausing during reply playback, re-arming after `tts stop`, and a user warning; Q5 names only `listen realtime`. No JS unit harness or browser-lane case covers unavailable echo cancellation.
 Say instead: add a fake-media case whose track reports echo cancellation unavailable and assert `listen auto`, no outbound mic frames during TTS, re-arm after `tts stop`, and the visible no-interrupt warning.
+
+   *Resolution:* Accepted. Q5b adds the echo-cancellation-unavailable case (a test-only switch, since the fake device always reports true: `listen auto`, no mic frames during playback, re-arm after `tts stop`, the visible sentence) beside the device-tool case.
 
 8. **P2: D7a omits the required CLI disclosure of the try token.**
 Evidence: D5 requires `vinga info` to print `<origin>/try/#<token>`, while D7a says the try token appears in exactly the issuance response and redeem request body, and sentinel tests assert absence everywhere else.
