@@ -325,9 +325,14 @@ its own `reach`.
 ### The key
 
 A vendor needs its key, and the key is never a field of the entry and
-never an argument: the entry names where the server finds it. A
-`key=value` argument named like a credential is refused before it is
-sent, and an entry naming a variable the server's environment does not
+never an argument: the entry names where the server finds it. The
+server refuses a write that carries a credential-shaped value under a
+key named like one, `api_key=...` among the inline `key=value`
+arguments included, but that refusal stores nothing and protects
+nothing: by the time it answers, the key is already in your shell's
+history and was visible in the process list while the command ran.
+Treat a key typed into an argument as exposed and replace it at the
+vendor. An entry naming a variable the server's environment does not
 hold refuses the apply. There are two places for it, and the order
 is the same for both: the key reaches the server, or the store, before
 the apply that puts the entry in service.
