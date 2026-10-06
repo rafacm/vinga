@@ -112,18 +112,9 @@ async function start() {
   show("start", false);
   show("code", false);
   try {
-    say("Opening the microphone.");
-    try {
-      microphone = await Microphone.open({
-        onPacket: (packet) => conversation !== null && conversation.send(packet),
-        assumeNoEcho: ASSUME_NO_ECHO,
-      });
-    } catch {
-      say("This page cannot use the microphone. Allow it for this site and press Start again.");
-      return;
-    }
-    const mode = microphone.echoCancelled ? "realtime" : "auto";
-    show("no-interrupt", mode === "auto");
+    // The check-in first, and the microphone only once there is a
+    // conversation to open it for: a browser waiting to be claimed is
+    // not listening to anybody.
     say("Checking in with the server.");
     let reply = await ota.checkIn(device);
     if (reply.access === "denied") {
@@ -139,13 +130,20 @@ async function start() {
               : "Tell the person who runs this server this code, so they can connect this browser.",
           );
         },
-        () => microphone === null,
       );
       show("code", false);
-      if (reply === null) {
-        return;
-      }
     }
+    say("Opening the microphone.");
+    try {
+      microphone = await Microphone.open({
+        onPacket: (packet) => conversation !== null && conversation.send(packet),
+        assumeNoEcho: ASSUME_NO_ECHO,
+      });
+    } catch {
+      throw new Error("This page cannot use the microphone. Allow it for this site and press Start again.");
+    }
+    const mode = microphone.echoCancelled ? "realtime" : "auto";
+    show("no-interrupt", mode === "auto");
     say("Connecting.");
     conversation = await Conversation.open({
       identity: device,
