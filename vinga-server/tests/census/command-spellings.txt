@@ -338,10 +338,13 @@ respell  config provider show llm claude
 respell  config reference
 respell  config schema
 respell  config show
+respell  vinga agent export assistant
 respell  vinga agent preview
 respell  vinga agent rename
+respell  vinga agent set
 respell  vinga agent set assistant
 respell  vinga agent show kids
+respell  vinga agent-defaults export
 respell  vinga agent-defaults set
 respell  vinga apply
 respell  vinga check
@@ -399,7 +402,9 @@ respell  vinga provider set
 respell  vinga provider set asr ears
 respell  vinga provider set asr whisper
 respell  vinga provider set llm claude
+respell  vinga provider set llm llamacpp
 respell  vinga provider set llm local
+respell  vinga provider set llm openai
 respell  vinga provider set tts
 respell  vinga provider set tts eleven
 respell  vinga provider set tts piper
