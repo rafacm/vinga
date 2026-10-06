@@ -339,8 +339,7 @@ def test_the_server_discovers_and_calls_the_browsers_device_tools(
     visits: Callable[..., Visit], server: Server
 ) -> None:
     server.seed(TOOL_REPLY)
-    # No switches at all: the page as a person opens it.
-    visit = visits("")
+    visit = visits(OBSERVE)
     page = visit.page
     mac = visit.identity()["mac"]
 
@@ -358,12 +357,12 @@ def test_the_server_discovers_and_calls_the_browsers_device_tools(
         "the volume tool's call", lambda: page.locator("#volume").inner_text() == f"Volume {VOLUME}"
     )
     visit.wait_for("the reply after the call", lambda: server.said("replied", device=mac))
-
-    # The lane's switches are inert unless the address names them: the
-    # echo canceller decides the mode, and the speaker publishes nothing.
-    assert said_in_session(server, mac, "listening (realtime mode)")
-    assert not page.locator("#no-interrupt").is_visible()
-    assert page.evaluate("document.documentElement.dataset.vingaPcmSum") is None
+    # Not only the number on the page: the gain the playback processor
+    # applies to what it renders, as the processor itself reports it.
+    visit.wait_for(
+        "the speaker's gain",
+        lambda: page.evaluate("document.documentElement.dataset.vingaGain") == str(VOLUME / 100),
+    )
 
     page.locator("#end").click()
     visit.wait_for("the person's ending", lambda: visit.status() == ENDED_BY_PERSON)
@@ -380,7 +379,8 @@ def test_an_unbound_browser_pairs_with_a_code(visits: Callable[..., Visit], serv
     # The path `vinga info` prints, at the origin the page is opened on,
     # which is the one a person pastes into a page they opened from it.
     onboarding = server.base + urlsplit(server.api("GET", "/runtime/info")["onboarding_url"]).path
-    visit = visits(OBSERVE, link=False)
+    # No switches at all: the page as a person opens it.
+    visit = visits("", link=False)
     page = visit.page
 
     # Another deployment's onboarding URL is refused before anything is
@@ -422,6 +422,16 @@ def test_an_unbound_browser_pairs_with_a_code(visits: Callable[..., Visit], serv
     )
     visit.wait_for("it was heard", lambda: server.said("heard", device=mac))
     assert not page.locator("#code").is_visible()
+
+    # The lane's switches are inert unless the address names them: the
+    # echo canceller decides the mode, and the speaker, which has been
+    # rendering for the whole conversation, publishes nothing.
+    assert said_in_session(server, mac, "listening (realtime mode)")
+    assert not page.locator("#no-interrupt").is_visible()
+    observed = (
+        "[document.documentElement.dataset.vingaPcmSum, document.documentElement.dataset.vingaGain]"
+    )
+    assert page.evaluate(observed) == [None, None]
     page.locator("#end").click()
     visit.wait_for("the person's ending", lambda: visit.status() == ENDED_BY_PERSON)
     assert_no_leak(server, visit)

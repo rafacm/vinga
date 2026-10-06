@@ -10,7 +10,8 @@
 // "vinga-playback" is the speaker. The main thread decodes the server's
 // Opus and hands it the samples; this processor owns the jitter buffer,
 // the volume the device tool sets, and, only when the page was opened
-// with the lane's switch, the running sum of what it rendered. It takes
+// with the lane's switch, the running sum of what it rendered and the
+// gain it is applying. It takes
 // three messages: append samples, set the gain, flush.
 
 const BLOCK = 960;
@@ -49,7 +50,7 @@ class Capture extends AudioWorkletProcessor {
 // long as the threshold would have taken to fill.
 const START_SECONDS = 0.12;
 
-// How often the running sum is reported, in render quanta of 128
+// How often the running sum and the gain are reported, in render quanta of 128
 // samples: about ten times a second at 24 kHz.
 const REPORT_EVERY = 20;
 
@@ -141,7 +142,7 @@ class Playback extends AudioWorkletProcessor {
       }
       this.quanta += 1;
       if (this.quanta % REPORT_EVERY === 0) {
-        this.port.postMessage({ type: "sum", sum: this.sum });
+        this.port.postMessage({ type: "observed", sum: this.sum, gain: this.gain });
       }
     }
     return true;

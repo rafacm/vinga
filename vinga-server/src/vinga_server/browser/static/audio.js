@@ -151,9 +151,9 @@ export class Microphone {
 
 export class Speaker {
   // `observe` is the lane's switch: only with it does the playback
-  // processor report the running sum of what it rendered, and only
-  // then does `onSum` ever hear from it.
-  static async open({ sampleRate, volume, observe, onSum }) {
+  // processor report the running sum of what it rendered and the gain
+  // it applies, and only then does `onObserved` ever hear from it.
+  static async open({ sampleRate, volume, observe, onObserved }) {
     const context = new AudioContext({ sampleRate });
     await context.audioWorklet.addModule(WORKLET);
     const node = new AudioWorkletNode(context, "vinga-playback", {
@@ -164,12 +164,12 @@ export class Speaker {
     });
     node.connect(context.destination);
     await context.resume();
-    const speaker = new Speaker(context, node, sampleRate, onSum);
+    const speaker = new Speaker(context, node, sampleRate, onObserved);
     speaker.setVolume(volume);
     return speaker;
   }
 
-  constructor(context, node, sampleRate, onSum) {
+  constructor(context, node, sampleRate, onObserved) {
     this.context = context;
     this.node = node;
     this.posted = 0;
@@ -185,8 +185,8 @@ export class Speaker {
       if (message.type === "idle") {
         this.consumed = message.consumed;
         this.settle();
-      } else if (message.type === "sum") {
-        onSum(message.sum);
+      } else if (message.type === "observed") {
+        onObserved(message);
       }
     };
     this.timestamp = 0;
