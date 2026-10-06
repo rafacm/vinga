@@ -62,7 +62,6 @@ from urllib.parse import urlsplit
 # live on, and a name imported from the package would be a snapshot.
 import vinga_server.onboarding as onboarding
 from vinga_server.config.loader import (
-    ConfigError,
     DeviceAlreadyBoundError,
     SnapshotOnlyError,
     TryLinkRefusedError,
@@ -112,6 +111,11 @@ SNAPSHOT_ONLY = (
     "does not read its devices from. Nothing was issued, and making the request again "
     "will not help; a server started from a store issues them."
 )
+
+# What an issuance that minted a token and then could not answer with
+# it raises. Not a state of the deployment, so not a refusal: the API's
+# last-resort handler answers it as the failure it is.
+ISSUE_FAILED = "a try link was minted and could not be answered, so it was withdrawn"
 
 Clock = Callable[[], float]
 
@@ -244,12 +248,27 @@ class Issuer:
             raise SnapshotOnlyError(SNAPSHOT_ONLY)
         if default_agent is None:
             raise TryLinkRefusedError(NO_DEFAULT_AGENT, reason=RefusalReason.NO_DEFAULT_AGENT)
+        origin = link_origin(self.server)
         token = self.links.issue()
-        return TryLink(
-            origin=link_origin(self.server),
-            page=f"{BROWSER_MOUNT_PATH}/#{token}",
-            lifetime_s=int(onboarding.TRY_LINK_TTL_S),
-        )
+        answer: TryLink | None = None
+        try:
+            answer = TryLink(
+                origin=origin,
+                page=f"{BROWSER_MOUNT_PATH}/#{token}",
+                lifetime_s=int(onboarding.TRY_LINK_TTL_S),
+            )
+        except Exception:
+            # Building the one answer that carries the token failed, and
+            # what failed may quote what it was given (a model's
+            # validation error does), so nothing of it is kept: the
+            # link nobody was told about is withdrawn, and the failure
+            # raised below is a fixed sentence raised outside this
+            # handler, carrying no chain.
+            answer = None
+        if answer is None:
+            self.links.claim(token)
+            raise RuntimeError(ISSUE_FAILED)
+        return answer
 
 
 def browser_name(mac: str) -> str:
@@ -270,8 +289,9 @@ async def redeem(
     identity and has the store create the device, bound to the default
     agent and named, in one transaction (D5b); a MAC that already has a
     row is minted again, `TRY_LINK_MINTS` times at most, and every other
-    refusal (the default agent cleared since the link was issued, a
-    database that will not answer) is None with nothing written. The
+    failure (the default agent cleared since the link was issued, a
+    database that will not answer, anything a layer under the store
+    raises) is None with nothing written and nothing raised. The
     token is spent either way: a link is one attempt.
 
     `randomness` is the minter's, injected so a test can make two draws
@@ -281,11 +301,20 @@ async def redeem(
         return None
     for _ in range(onboarding.TRY_LINK_MINTS):
         identity = mint(randomness)
+        failed = False
         try:
             await asyncio.to_thread(store.enroll_device, identity.mac, browser_name(identity.mac))
         except DeviceAlreadyBoundError:
             continue
-        except ConfigError:
+        except Exception:
+            # Every other failure, the store's own refusals and anything
+            # a layer under it raised alike, is the one answer: nothing
+            # bound. Contained rather than raised, because this frame
+            # holds the token and what a lower layer says is not this
+            # module's to vouch for, so nothing of it may escape; the
+            # same belt `ota.reply` wears on its unauthenticated path.
+            failed = True
+        if failed:
             return None
         return identity
     return None

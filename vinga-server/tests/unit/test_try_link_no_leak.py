@@ -33,12 +33,13 @@ from fastapi.testclient import TestClient
 
 from tests.conftest import TEST_API_SECRET
 from tests.support.apps import entered_app
-from tests.support.leaks import renderings
+from tests.support.leaks import chain, renderings
 from tests.support.registry import booted, store_at
 from vinga_server.browser import REDEEM_PATH
 from vinga_server.config.loader import StorageError
 from vinga_server.config.store import ConfigStore
 from vinga_server.events import Emission, attach_server_tap, detach_server_tap
+from vinga_server.onboarding import try_links
 
 PLANTED = b"try-sentinel-never-a-real-token!"
 assert len(PLANTED) == 32
@@ -217,3 +218,116 @@ def test_the_redemption_names_the_browser_in_no_record(
     assert body["mac"] not in rendered
     assert body["mac"].replace(":", "") not in rendered
     assert body["client_id"] not in rendered
+
+
+# --- the process's own streams, and failures that carry the token -------
+#
+# A log record is not the only way a value leaves: a `print` or a raw
+# write reaches the process's stdout or stderr, which a container
+# runtime keeps as its log whatever logging is configured, and an
+# exception that escapes a handler is printed with its message by
+# whatever serves the application. `capfd` reads the file descriptors,
+# so a raw `os.write` is caught as well as a `print`.
+
+
+def streams(capfd: pytest.CaptureFixture[str]) -> str:
+    captured = capfd.readouterr()
+    return captured.out + "\n" + captured.err
+
+
+def test_neither_stream_carries_the_token(
+    capfd: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.DEBUG), deployment() as (_, client):
+        issued = client.post(ISSUE, headers=BEARER)
+        assert SENTINEL in issued.text
+        redeemed = client.post(REDEEM_PATH, json={"token": SENTINEL}, headers=SAME_ORIGIN)
+        assert redeemed.status_code == 200
+        client.post(REDEEM_PATH, json={"token": SENTINEL}, headers=SAME_ORIGIN)
+        client.post(REDEEM_PATH, json={"token": SENTINEL}, headers={})
+
+    assert SENTINEL not in streams(capfd)
+
+
+def carrying(kind: type[Exception]):
+    """A failure whose own message is the token, which is the worst a
+    library under the handler could do."""
+
+    def fail(*args: object, **kwargs: object) -> object:
+        raise kind(f"the layer below said {SENTINEL}")
+
+    return fail
+
+
+FAILURES = [StorageError, RuntimeError]
+
+
+@pytest.mark.parametrize("kind", FAILURES, ids=lambda kind: kind.__name__)
+def test_a_redemption_failing_with_the_token_in_its_message_carries_it_nowhere(
+    kind: type[Exception],
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    tap: Tap,
+) -> None:
+    """The write a redemption makes fails, after the claim, with the
+    token in its message: what the route answers, logs, prints and lets
+    escape carries none of it. A failure the store did not classify is
+    contained like one it did, so nothing escapes the handler at all."""
+    escaped: list[BaseException] = []
+    with caplog.at_level(logging.DEBUG), deployment() as (_, client):
+        issued = client.post(ISSUE, headers=BEARER)
+        assert SENTINEL in issued.text
+        monkeypatch.setattr(ConfigStore, "enroll_device", carrying(kind))
+        try:
+            answer = client.post(REDEEM_PATH, json={"token": SENTINEL}, headers=SAME_ORIGIN)
+        except Exception as failure:  # what escaped the application
+            escaped.append(failure)
+            answer = None
+
+    assert not escaped, [chain(failure) for failure in escaped]
+    assert answer is not None and answer.status_code == 403
+    assert SENTINEL not in answered(answer)
+    assert SENTINEL not in everywhere(caplog, tap)
+    assert SENTINEL not in streams(capfd)
+
+
+def answering_with(kind: type[Exception]):
+    """The issuance's answer failing to build around the token it was
+    given, with the token in the failure: what a model's validation
+    error does with the value it refused."""
+
+    def fail(**fields: object) -> object:
+        raise kind(f"could not build an answer around {fields['page']}")
+
+    return fail
+
+
+@pytest.mark.parametrize("kind", [StorageError, ValueError], ids=lambda kind: kind.__name__)
+def test_an_issuance_failing_with_the_token_in_its_message_carries_it_nowhere(
+    kind: type[Exception],
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    tap: Tap,
+) -> None:
+    """The token is minted, and building the answer around it fails with
+    the token in the failure's message: the refusal carries none of it,
+    nothing escapes, and the link nobody was told about is withdrawn
+    rather than left live."""
+    escaped: list[BaseException] = []
+    monkeypatch.setattr(try_links, "TryLink", answering_with(kind))
+    with caplog.at_level(logging.DEBUG), deployment() as (app, client):
+        try:
+            answer = client.post(ISSUE, headers=BEARER)
+        except Exception as failure:
+            escaped.append(failure)
+            answer = None
+        held = app.state.composition.try_links.held
+
+    assert not escaped, [chain(failure) for failure in escaped]
+    assert answer is not None and answer.status_code == 500
+    assert SENTINEL not in answered(answer)
+    assert SENTINEL not in everywhere(caplog, tap)
+    assert SENTINEL not in streams(capfd)
+    assert held == 0
