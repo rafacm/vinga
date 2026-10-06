@@ -324,14 +324,19 @@ write path every device write already takes, rather than a sixth path.
    problem body, and a transport failure still ends `info`. The
    loopback origin keeps the API target's scheme and port (an `https`
    loopback terminator stays `https`) and names `localhost`.
-6. **Same-origin is `Sec-Fetch-Site`, else `Origin` against `Host`.**
-   The plan says "same-origin" without a mechanism. The browser's fetch
-   metadata decides alone when present; a browser that sends none is
-   judged by `Origin`'s authority against the `Host` it reached
-   (authority only, because a TLS-terminating proxy hands the server
-   `http`); a request with neither is refused. Origin and body are both
-   checked before the claim, so a refused request spends nothing. The
-   body is read up to 1 KiB.
+6. **Same-origin is `Sec-Fetch-Site: same-origin`, and nothing else.**
+   The plan says "same-origin" without a mechanism. A redemption is
+   admitted exactly when the browser's own fetch metadata says
+   `same-origin`; an absent header gets the same fixed 403. The first
+   version fell back to `Origin` against the `Host` the request
+   reached, comparing the authority only (a TLS-terminating proxy hands
+   the server `http`), which let a page on `http://host` post to
+   `https://host`; PR #625's review found it, and the fallback is gone
+   rather than rebuilt with the scheme, because every engine that can
+   run the client (WebCodecs Opus: Chromium 94+, Firefox 130+, Safari
+   26) sends fetch metadata. Origin and body are both checked before
+   the claim, so a refused request spends nothing. The body is read up
+   to 1 KiB.
 7. **The redeem refusal is 403 `{"error": ...}`**, the body shape M1's
    mint uses, one sentence for every way of not redeeming, `no-store`.
 
@@ -417,7 +422,7 @@ worktree's `.logs/mutations-m2.log`.
 | D6b, snapshot, no runtime, `no-store` | each removed | one test each |
 | D5c server half | any scheme accepted; the listen address guessed | the secure-context cases; `test_a_link_is_issued_into_the_page_s_fragment` |
 | D5d atomic claim | check, `await asyncio.sleep(0)`, then claim | `test_of_redemptions_started_together_exactly_one_binds` 10 of 10; `test_of_concurrent_redemptions_exactly_one_binds` 5 of 10 (see Discoveries) |
-| Same origin | removed; checked after the claim; no `Origin` fallback; `Origin` before fetch metadata | eight origin cases; `test_an_origin_naming_the_host_reached_is_the_page_s_own`; the `cross-site` plus matching `Origin` case |
+| Same origin | removed; checked after the claim; an absent `Sec-Fetch-Site` admitted; the `Origin` fallback restored | eight origin cases; four of them and both `test_an_origin_header_without_fetch_metadata_is_not_enough` cases; the latter two |
 | Body | the 1 KiB bound removed; any object accepted | `test_a_long_body_is_not_read_to_its_end`; two body cases |
 | Redemption | no claim; a collision gives up; draws unbounded; a non-collision redrawn; `no-store` dropped; wrong onboarding path | fifteen tests; `test_a_minted_mac_that_is_taken_is_drawn_again`; `test_the_draws_are_bounded`; `test_a_refusal_that_is_not_a_collision_is_not_drawn_again`; one each |
 | D5c CLI half | no completion; any target local; CLI overrides the server; the address guessed; link on stderr | one to seven tests each |

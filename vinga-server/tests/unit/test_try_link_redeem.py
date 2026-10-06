@@ -195,14 +195,13 @@ def test_fetching_the_page_spends_nothing() -> None:
         {"Sec-Fetch-Site": "cross-site"},
         {"Sec-Fetch-Site": "same-site"},
         {"Sec-Fetch-Site": "none"},
-        # Another origin's page, in a browser that sends no fetch
-        # metadata: its Origin names a host this request did not reach.
+        # No fetch metadata at all, whatever `Origin` says: not a
+        # browser on this page.
         {"Origin": "https://somebody-else.example"},
         {"Origin": "http://testserver.example"},
-        # And nothing at all, which is not a browser on this page.
         {},
-        # A browser that says same-origin while naming another origin
-        # is believed about neither: the metadata wins.
+        # The metadata decides, and an `Origin` beside it changes
+        # nothing.
         {"Sec-Fetch-Site": "cross-site", "Origin": "http://testserver"},
         {"Origin": "null"},
     ],
@@ -220,13 +219,31 @@ def test_a_redemption_from_anywhere_but_the_page_s_origin_spends_nothing(
         assert redeemed(client, token).status_code == 200
 
 
-def test_an_origin_naming_the_host_reached_is_the_page_s_own() -> None:
-    """A browser that sends no fetch metadata still sends `Origin` on a
-    POST, and one naming the host the request reached is this page."""
+@pytest.mark.parametrize(
+    "origin",
+    [
+        # The host the request reached, on the scheme it reached it on.
+        "http://testserver",
+        # The same host on another scheme: a page on `http://host`
+        # posting to `https://host` is another origin, and an authority
+        # comparison cannot tell, which is why `Origin` decides nothing.
+        "https://testserver",
+    ],
+)
+def test_an_origin_header_without_fetch_metadata_is_not_enough(origin: str) -> None:
+    """Only the browser's own `Sec-Fetch-Site: same-origin` admits a
+    redemption. Every engine that can run the client (WebCodecs Opus:
+    Chromium 94+, Firefox 130+, Safari 26) sends fetch metadata, so a
+    request without it is not this page, whatever `Origin` it names. It
+    spends nothing."""
     with deployment() as (_, client):
-        answer = redeemed(client, token_of(client), {"Origin": "http://testserver"})
+        token = token_of(client)
+        refused = redeemed(client, token, {"Origin": origin})
 
-    assert answer.status_code == 200
+        assert refused.status_code == 403
+        assert refused.json() == {"error": REDEEM_REFUSED}
+        assert browsers() == {}
+        assert redeemed(client, token).status_code == 200
 
 
 @pytest.mark.parametrize(

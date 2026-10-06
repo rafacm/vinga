@@ -52,7 +52,6 @@ every unbound device pair.
 """
 
 import json
-from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
@@ -225,27 +224,18 @@ def same_origin(request: Request) -> bool:
     """Whether this request comes from a page of this server's own
     origin, which for a redemption is the page at `/try/`.
 
-    The browser says so itself: `Sec-Fetch-Site` is set by the browser,
-    never by a page, and a proxy in front of this server does not touch
-    it, so where it is present it decides alone. A browser that sends
-    no fetch metadata still sends `Origin` on a POST, and that is read
-    against the `Host` the request arrived with; a request carrying
-    neither is not a browser on this page at all. The comparison is of
-    the authority only, because a TLS-terminating proxy hands this
-    server `http` for a page the browser loaded over `https`.
+    The browser says so itself, and nothing else is believed:
+    `Sec-Fetch-Site` is set by the browser, never by a page, and a proxy
+    in front of this server does not rewrite it, so a redemption is
+    admitted exactly when it says `same-origin`. Every engine that can
+    run the client (WebCodecs Opus: Chromium 94+, Firefox 130+, Safari
+    26) sends it, so a request without it is not this page. `Origin` is
+    not a fallback: comparing it with the `Host` a request reached sees
+    the authority and not the scheme, since a TLS-terminating proxy
+    hands this server `http` for a page loaded over `https`, so a page
+    on `http://host` posting to `https://host` would pass it.
     """
-    site = request.headers.get("sec-fetch-site")
-    if site is not None:
-        return site == "same-origin"
-    origin = request.headers.get("origin")
-    host = request.headers.get("host")
-    if origin is None or host is None:
-        return False
-    try:
-        parts = urlsplit(origin)
-    except ValueError:
-        return False
-    return parts.scheme in ("http", "https") and parts.netloc.lower() == host.lower()
+    return request.headers.get("sec-fetch-site") == "same-origin"
 
 
 async def _token_of(request: Request) -> object:
