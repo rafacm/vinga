@@ -94,11 +94,14 @@ class Visit:
         return self.page.locator("#status").inner_text()
 
 
-def open_link(browser: Browser, server: Server, switches: str) -> Visit:
-    """A fresh try link, opened in a fresh browser profile."""
-    issued = server.api("POST", "/runtime/try-links")
-    page_path = issued["page"]
-    path, _, token = page_path.partition("#")
+def open_link(browser: Browser, server: Server, switches: str, link: bool = True) -> Visit:
+    """A fresh try link, opened in a fresh browser profile; or, with
+    `link` false, the page alone, as a person who was given only the
+    onboarding URL opens it."""
+    if link:
+        path, _, token = server.api("POST", "/runtime/try-links")["page"].partition("#")
+    else:
+        path, token = "/try/", ""
     context = browser.new_context(permissions=["microphone"])
     page = context.new_page()
     visit = Visit(page, token)
@@ -136,19 +139,20 @@ def open_link(browser: Browser, server: Server, switches: str) -> Visit:
 
     DIAGNOSTICS.append(describe)
     query = f"?{switches}" if switches else ""
-    page.goto(f"{server.base}{path}{query}#{token}")
-    visit.wait_for("the page to say it is bound", lambda: page.locator("#start").is_visible())
+    page.goto(f"{server.base}{path}{query}" + (f"#{token}" if token else ""))
+    ready = "#start" if link else "#pair"
+    visit.wait_for("the page to be ready", lambda: page.locator(ready).is_visible())
     return visit
 
 
 @pytest.fixture
-def visits(browser: Browser, server: Server) -> Iterator[Callable[[str], Visit]]:
+def visits(browser: Browser, server: Server) -> Iterator[Callable[..., Visit]]:
     """Opens fresh try links, and closes every profile they opened, and
     with it that profile's microphone and socket, when the case ends."""
     opened: list[Visit] = []
 
-    def opener(switches: str) -> Visit:
-        visit = open_link(browser, server, switches)
+    def opener(switches: str, link: bool = True) -> Visit:
+        visit = open_link(browser, server, switches, link)
         opened.append(visit)
         return visit
 
@@ -186,8 +190,8 @@ def assert_no_leak(server: Server, visit: Visit) -> None:
     """D7a: neither the try token nor the device token reaches the
     server's log, the page's console, its document, its storage or its
     address."""
-    secrets = [visit.try_token, *visit.device_tokens]
-    assert visit.try_token and visit.device_tokens, "the lane saw no tokens to look for"
+    secrets = [secret for secret in (visit.try_token, *visit.device_tokens) if secret]
+    assert visit.device_tokens, "the lane saw no device token to look for"
     log = server.log_text()
     console = "\n".join(visit.console)
     document = visit.page.content()
@@ -209,7 +213,7 @@ def assert_no_leak(server: Server, visit: Visit) -> None:
 
 
 def test_a_realtime_conversation_with_barge_in_and_an_ending(
-    visits: Callable[[str], Visit], server: Server
+    visits: Callable[..., Visit], server: Server
 ) -> None:
     server.seed(PLAIN_REPLY)
     visit = visits(OBSERVE)
@@ -273,7 +277,7 @@ def test_a_realtime_conversation_with_barge_in_and_an_ending(
 
 
 def test_without_echo_cancellation_the_page_listens_in_auto_mode(
-    visits: Callable[[str], Visit], server: Server
+    visits: Callable[..., Visit], server: Server
 ) -> None:
     server.seed(PLAIN_REPLY)
     visit = visits(f"{OBSERVE}&{NO_ECHO}")
@@ -305,7 +309,7 @@ def test_without_echo_cancellation_the_page_listens_in_auto_mode(
 
 
 def test_the_server_discovers_and_calls_the_browsers_device_tools(
-    visits: Callable[[str], Visit], server: Server
+    visits: Callable[..., Visit], server: Server
 ) -> None:
     server.seed(TOOL_REPLY)
     # No switches at all: the page as a person opens it.
@@ -334,6 +338,38 @@ def test_the_server_discovers_and_calls_the_browsers_device_tools(
     assert not page.locator("#no-interrupt").is_visible()
     assert page.evaluate("document.documentElement.dataset.vingaPcmSum") is None
 
+    page.locator("#end").click()
+    visit.wait_for("the person's ending", lambda: visit.status() == ENDED_BY_PERSON)
+    assert_no_leak(server, visit)
+
+
+def test_an_unbound_browser_pairs_with_a_code(visits: Callable[..., Visit], server: Server) -> None:
+    """D4: with no default agent set, a browser holding no identity and
+    no link starts from the onboarding URL, is minted an identity, shows
+    the six-digit code its check-in carries, and is in a conversation
+    once the operator claims the code."""
+    server.seed(PLAIN_REPLY)
+    server.api("DELETE", "/default-agent")
+    onboarding = server.api("GET", "/runtime/info")["onboarding_url"]
+    visit = visits(OBSERVE, link=False)
+    page = visit.page
+
+    page.locator("#onboarding").fill(onboarding)
+    page.locator("#join").click()
+    visit.wait_for("an identity", lambda: page.locator("#start").is_visible())
+    mac = visit.identity()["mac"]
+
+    page.locator("#start").click()
+    code = visit.wait_for(
+        "a code", lambda: page.locator("#code").is_visible() and page.locator("#code").inner_text()
+    )
+    assert len(code) == 6 and code.isdigit(), code
+    assert not server.said("session_open", device=mac)
+    server.api("POST", f"/devices/pending/{code}", {"agents": [LANE_AGENT]})
+
+    visit.wait_for("the claimed browser's session", lambda: server.said("session_open", device=mac))
+    visit.wait_for("it was heard", lambda: server.said("heard", device=mac))
+    assert not page.locator("#code").is_visible()
     page.locator("#end").click()
     visit.wait_for("the person's ending", lambda: visit.status() == ENDED_BY_PERSON)
     assert_no_leak(server, visit)

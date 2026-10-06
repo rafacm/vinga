@@ -1766,7 +1766,7 @@ jobs:
             -e VINGA_DB_NAME=vinga_browser \
             -e VINGA_SERVER__LOG_FORMAT=json \
             -e VINGA_SERVER__LOG_LEVEL=DEBUG \
-            -e VINGA_SERVER__LIMITS__IDLE_TIMEOUT_S=2 \
+            -e VINGA_SERVER__LIMITS__IDLE_TIMEOUT_S=3 \
             -v browser-data:/data \
             -v "$PWD/tests/smoke/config.yaml:/config/config.yaml:ro" \
             vinga-server:ci-amd64
