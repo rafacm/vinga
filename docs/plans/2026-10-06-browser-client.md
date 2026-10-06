@@ -476,6 +476,8 @@ Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
 
 9. **P2: The printed link may be unusable on the default local deployment.** D5 derives its origin like the onboarding URL (plan:226 (`docs/plans/2026-10-06-browser-client.md:226`)). With no configured public URL, that derivation can print the listen address `http://0.0.0.0:8003`, explicitly marked as a guess by the current code (origin.py:178 (`vinga-server/src/vinga_server/onboarding/origin.py:178`)). That does not provide the promised `localhost` secure context. **Specify how `vinga info` obtains a reachable `localhost` URL for a local trial, or refuse link issuance until a usable HTTPS public URL is configured.**
 
+   *Resolution:* Accepted. D5c: `vinga info` prints `server.public_url` when it is https or localhost, else `http://localhost:<port>` when the CLI reached the API on loopback, else no link and a sentence asking for an HTTPS `server.public_url`; never the listen address and never a guess.
+
 10. **P2: The plan's no-leak test asserts an impossible rule for identity.** D1 stores the MAC and client ID in the page; D7 says nothing stored by the page reaches a log, while also requiring the browser MAC in ordinary device events (plan:176 (`docs/plans/2026-10-06-browser-client.md:176`), plan:246 (`docs/plans/2026-10-06-browser-client.md:246`)). OTA already emits the MAC and client ID as device metadata (reply.py:574 (`vinga-server/src/vinga_server/ota/reply.py:574`)). **Classify identity as permitted, bounded device metadata and the token as secret**, then test the exact fields each may reach. If identity itself must remain secret, the proposed reuse of board events needs redesign.
 
 **Verdict: ready after the P1/P2 amendments.**
