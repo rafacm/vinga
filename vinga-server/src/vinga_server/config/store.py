@@ -2436,8 +2436,9 @@ def _swapped_record(record: DeviceRecord, old: str, new: str) -> DeviceRecord:
     the thing in the room is called.
 
     The one name that MOVES is the one nobody chose. `Device <mac>` is
-    what this server calls a board until somebody names it, the spelling
-    is reserved to the device whose own MAC it is
+    what this server calls a board until somebody names it (and
+    `Browser <mac>` a browser a try link bound), the spelling is
+    reserved to the device whose own MAC it is
     (`_refuse_reserved_name`), and it is how every reader tells "nobody
     has named this" from a name. Left behind after a swap it would be
     all three things wrong at once: a placeholder naming a board that is
@@ -2446,12 +2447,17 @@ def _swapped_record(record: DeviceRecord, old: str, new: str) -> DeviceRecord:
     re-derived, and a record nobody has named is still a record nobody
     has named.
 
+    The placeholder keeps its word: a browser's moves as a browser's
+    and a board's as a board's, because which it was is all the record
+    says about it and the swap does not know what is at the new address.
+
     It cannot collide, and the check that would catch it runs anyway:
-    the only row that may hold `Device <new mac>` is the record at that
-    address, and this write has already refused one.
+    the only row that may hold a minted name for the new MAC is the
+    record at that address, and this write has already refused one.
     """
-    if record.name == default_device_name(old):
-        return record.model_copy(update={"name": default_device_name(new)})
+    for was, becomes in zip(minted_device_names(old), minted_device_names(new), strict=True):
+        if record.name == was:
+            return record.model_copy(update={"name": becomes})
     return record
 
 
