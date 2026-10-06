@@ -32,7 +32,9 @@ display) talk to a Python conversation server over WebSocket. It builds on
 ## Commands
 
 All vinga-server commands run from the `vinga-server/` directory. Use `uv`
-for Python; never `pip install` directly.
+for Python; never `pip install` directly. Setting up a checkout, the
+development database, and the opt-in local and smoke lanes are in
+[`docs/contributing.md`](docs/contributing.md).
 
 ```bash
 uv sync                          # Install/update dependencies
