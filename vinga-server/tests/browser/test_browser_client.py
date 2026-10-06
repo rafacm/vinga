@@ -368,7 +368,14 @@ def test_an_unbound_browser_pairs_with_a_code(visits: Callable[..., Visit], serv
     assert not server.said("session_open", device=mac)
     server.api("POST", f"/devices/pending/{code}", {"agents": [LANE_AGENT]})
 
-    visit.wait_for("the claimed browser's session", lambda: server.said("session_open", device=mac))
+    # Within a couple of the page's three-second polls: a page that
+    # ignored the poll's answer would still get there, at its next
+    # check-in thirty seconds on, and only this bound tells the two apart.
+    visit.wait_for(
+        "the claimed browser's session",
+        lambda: server.said("session_open", device=mac),
+        timeout=10,
+    )
     visit.wait_for("it was heard", lambda: server.said("heard", device=mac))
     assert not page.locator("#code").is_visible()
     page.locator("#end").click()
