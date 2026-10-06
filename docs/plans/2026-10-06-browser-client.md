@@ -134,6 +134,20 @@ echoing a value that carries the token. Chosen over the alternatives:
 The token's lifetime and verification are unchanged; nothing about a
 board's handshake changes.
 
+**Q3a. The verified identity reaches the session.** `DeviceSession`
+reads `Device-Id` and `Client-Id` from the headers and accepts without a
+subprotocol, so authenticating in `ws.py` alone would let a browser pass
+the gate and then be turned away for a missing MAC. So the handshake's
+result is one value, the verified identity (MAC, client id) and the
+subprotocol to select, built in `ws.py` from whichever source it read,
+headers or subprotocol, and handed to the session, which reads its
+identity from that value rather than from the headers and accepts with
+the selected subprotocol (none for a board, `vinga.device.v1` for a
+browser). A board's path produces the same value from the same headers,
+so its behavior is unchanged and its existing tests pin that. M1's tests
+drive a complete browser hello through the session, not only the
+upgrade.
+
 **Q4. Echo cancellation unavailable.** The page reads the track's
 `getSettings().echoCancellation`. True: it announces `realtime`. False
 (a browser or device that cannot cancel): it announces `auto` and
@@ -385,6 +399,8 @@ Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
 ---
 
 1. **P1: The subprotocol handshake cannot reach a conversation as written.** The plan changes only `ws.py` for the browser credential (plan:108 (`docs/plans/2026-10-06-browser-client.md:108`)), but `DeviceSession` still reads `Device-Id` and `Client-Id` from headers and calls `accept()` without selecting a subprotocol (session.py:440 (`vinga-server/src/vinga_server/device/session.py:440`)). A browser can pass the proposed auth check and then be rejected for its missing MAC. **Amend M1** to pass the verified identity and selected protocol into the session, and test a complete browser hello, not only an upgrade.
+
+   *Resolution:* Accepted. Q3a: `ws.py` builds one verified-identity value (MAC, client id, the subprotocol to select) from headers or subprotocol, and `DeviceSession` takes its identity from that value and accepts with the selected subprotocol; a board yields the same value from its headers, pinned by its existing tests, and M1 tests a complete browser hello through the session.
 
 2. **P1: Device MCP tools are missing.** The issue requires the browser to carry device MCP tools. The proposed `wire.js` and browser lane name hello, listen, audio and server messages, but no MCP initialize, tool listing or tool call (plan:195 (`docs/plans/2026-10-06-browser-client.md:195`), plan:146 (`docs/plans/2026-10-06-browser-client.md:146`)). The server discovers tools only when hello advertises MCP (session.py:981 (`vinga-server/src/vinga_server/device/session.py:981`)). **Amend M3** to name the browser tools it can implement, their MCP exchange and a lane assertion that discovers and calls one.
 
