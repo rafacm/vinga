@@ -952,7 +952,7 @@ changed.
 | The `/try/` step (#611's D8) | `docs/run/with-a-coding-agent.md` | `Hand the try link to the person, never the agent` |
 | Changelog | `changelog.d/613-device-guide.md` | `Record the device guide in a changelog fragment` |
 | The manual checkpoint | below, written and not run | this section's commit |
-| The #301 comment (D8) | handed to the orchestrator to post, not posted here | none |
+| The #301 comment (D8) | [posted on #301](https://github.com/rafacm/vinga/issues/301#issuecomment-6015148740) by the orchestrator, from the text this milestone wrote | none |
 
 The device guide follows the board guides' house style: every section
 says where its facts come from, **checked in the browser lane**, **read
@@ -1154,8 +1154,13 @@ speech caused.
 
 ### The #301 comment
 
-D8's recommendation is a GitHub write, which this milestone does not
-make: its text was handed to the orchestrator to post on #301.
+D8's recommendation, that #301 shrink to `--from-file` and
+`--to-file` for the CLI simulator now that the browser client is the
+live-microphone path, is
+[posted on #301](https://github.com/rafacm/vinga/issues/301#issuecomment-6015148740).
+This milestone wrote the text and the orchestrator posted it, naming
+the guide as landing in #627; changing #301's scope stays Rafael's
+call.
 
 ### Verification
 
