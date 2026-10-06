@@ -365,15 +365,26 @@ which stage failed: `provider_failed` names the entry and the kind of
 error, `llm_retry` is a stalled model being asked again,
 `reply_fallback` is the fixed phrase said instead of a reply, and
 `sentence_withheld` is a model writing a tool call into its speech. The
-guide for that stage says what each means for it. Where the deployment
+guide for that stage says what each means for it.
+
+**The stream is the check; the record is not.** Where the deployment
 records conversations, which is off by default
-([Recording conversations](conversation-store.md)), the record keeps
-what the stream did not:
+([Recording conversations](conversation-store.md)), the record holds
+what people said to its devices, the person's household included:
+conversation titles are utterances, and a conversation's page is what
+was said. Do not list or read conversations to verify a turn. When the
+stream is not enough, read the one session the simulator opened, by
+the `session` its `session_open` event carried, which prints its
+board, agent, timing and how it ended, and no words:
 
 ```bash
-vinga session list
 vinga session show <session>
-vinga conversation list
+```
+
+Its words, the simulator's own conversation by the `conversation` the
+same event carried, are read only with the person's consent:
+
+```bash
 vinga conversation show <conversation>
 ```
 
