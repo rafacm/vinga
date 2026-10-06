@@ -47,6 +47,8 @@ One premise makes all of this possible, a [**thin device and a smart server**](d
 
 Here is a path to get a [Waveshare ESP32-S3-Touch-LCD-1.54](https://www.waveshare.com/esp32-s3-lcd-1.54.htm) talking to a vinga server and nothing you say leaves your computer: the transcription, the model and the voice all run locally.
 
+If you would rather a coding agent such as Claude Code or Codex took these steps with you, point it at [Running vinga with a coding agent](docs/run/with-a-coding-agent.md): it is written for the coding agent to read, and it leaves the steps that carry a secret for you to run.
+
 > [!NOTE]
 > This path has been walked on macOS, in zsh, and nowhere else. Where Linux is known to differ, the step that differs says so, as step 3 does about reaching Ollama from inside a container. The shell is named because it matters: a block zsh accepts is not always one bash accepts.
 

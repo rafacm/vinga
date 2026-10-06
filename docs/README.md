@@ -13,6 +13,10 @@ what each class of page may claim.
 
 - [**Getting Started**](../README.md#getting-started): the path from
   nothing to a board answering a server on your own computer.
+- [**run/with-a-coding-agent.md**](run/with-a-coding-agent.md): for
+  handing the work to a coding agent: point it here, and it reads the
+  rest at your server's revision and leaves the steps that carry a
+  secret to you.
 - [**run/**](run/): one task guide per page, from running the container
   to reading what a conversation cost, listed one line each in
   [the guides' index](run/README.md).
