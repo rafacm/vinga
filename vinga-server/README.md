@@ -1097,14 +1097,6 @@ audio to a vendor. Declarations are enforced and behaviour is not
 verified: this is not a network sandbox, and it proves nothing about
 what a remote endpoint does with what it was sent.
 
-**Upgrading from `server.local_only`.** The old key is gone with no
-alias and is refused at parse, so a file carrying
-`server.local_only: true` must become `server.data_boundary: host`
-before the new image starts. Stored provider and MCP entries are
-migrated for you on the first boot: a provider's `egress: false`
-becomes `reach: host`, an MCP entry's becomes `reach: network`, and
-`egress: true` becomes `reach: internet` on both.
-
 ## Listening and barge-in
 
 The firmware decides how it listens and the server follows. In `auto`
