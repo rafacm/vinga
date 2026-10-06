@@ -188,12 +188,21 @@ the reply, and `tool_invocations` for what a tool was asked and what it
 answered. Filtering the logs for it no longer works, and that is the
 point (see the
 [content and telemetry ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)):
-a surface with no free-text field cannot leak one. The one exception is
-`ota_check_body`, at DEBUG, which carries the whole of what a board
-reported at check-in, bounded in size. What the events keep is what a
-latency brief reads, which is every duration, every count and every
-identifier they ever carried. Device tokens and the API's bearer token
-are never logged, at any level.
+a surface with no free-text field cannot leak one. What the events keep
+is what a latency brief reads, which is every duration, every count and
+every identifier they ever carried. What vinga itself never logs, at
+any level, is the device tokens it issues and the configuration API's
+bearer token: neither is a field of any event, and the HTTP server's own
+logger, which at debug would print every request header, is held at
+WARNING whatever `log_level` says.
+
+**The one exception is `ota_check_body`, at DEBUG.** It records a board's
+check-in body verbatim, bounded in size and redacted in no other way,
+so whatever a board puts in that body, a credential included, reaches
+the DEBUG log and `vinga events tail --level DEBUG`. Keep `log_level`
+above DEBUG, and the tail at its INFO default, except while diagnosing a
+board, and treat a log or a terminal that held DEBUG as holding what
+the boards sent.
 
 ## Exporting traces
 
