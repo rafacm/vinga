@@ -166,6 +166,36 @@ def test_no_other_path_under_try_reaches_a_file(path: str) -> None:
     assert (answer.status_code, answer.content) == expected
 
 
+@pytest.mark.parametrize("trailing", ["", "/"])
+@pytest.mark.parametrize("version", ["0000000000000000", "not-a-version"])
+def test_a_refused_module_is_the_stock_404_in_either_spelling(trailing: str, version: str) -> None:
+    """Both spellings of a module path reach the handler, so a refused
+    one is never answered by the router's slash redirect instead, whose
+    `Location` would repeat the path and the query it was asked with."""
+    sentinel = "SENTINEL-try-static-query"
+    with TestClient(create_app(config_with_agent())) as client:
+        answer = client.get(
+            f"{STATIC_PATH}/{version}/page.js{trailing}?{sentinel}=1",
+            follow_redirects=False,
+        )
+        expected = unserved(client)
+
+    assert (answer.status_code, answer.content) == expected
+    assert "location" not in answer.headers
+    assert sentinel not in answer.text
+    assert all(sentinel not in value for value in answer.headers.values())
+
+
+@pytest.mark.parametrize("trailing", ["", "/"])
+def test_a_module_is_served_in_either_spelling(trailing: str) -> None:
+    with TestClient(create_app(config_with_agent())) as client:
+        path = module_path(client.get("/try/").text)
+        answer = client.get(f"{path}{trailing}", follow_redirects=False)
+
+    assert answer.status_code == 200
+    assert answer.content == packaged("page.js")
+
+
 def test_another_version_is_not_served() -> None:
     with TestClient(create_app(config_with_agent())) as client:
         answer = client.get(f"{STATIC_PATH}/0000000000000000/page.js")

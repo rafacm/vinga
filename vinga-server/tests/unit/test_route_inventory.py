@@ -51,6 +51,7 @@ EXPECTED = {
     ("http", "/x/{key}/try-identity", "POST"): ONBOARDING_KEY,
     ("http", "/try/", "GET"): PUBLIC_PAGE,
     ("http", "/try", "GET"): PUBLIC_PAGE,
+    ("http", "/try/static/{version}/{name}/", "GET"): PUBLIC_PAGE,
     ("http", "/try/static/{version}/{name}", "GET"): PUBLIC_PAGE,
     ("websocket", "/xiaozhi/v1/", "-"): DEVICE_TOKEN,
     ("mount", "/api", "-"): API_BEARER,
@@ -92,6 +93,22 @@ def test_every_route_is_named_with_what_guards_it(client: TestClient) -> None:
     gone = set(EXPECTED) - table
     assert not unnamed, f"routes nobody has said who may reach: {sorted(unnamed)}"
     assert not gone, f"routes named here that the app no longer serves: {sorted(gone)}"
+
+
+def test_every_http_route_is_served_in_both_spellings(client: TestClient) -> None:
+    """A path served in one spelling only is answered in the other by the
+    router's slash redirect, before any handler or guard has run, with a
+    `Location` repeating the path and query it was asked with. Served in
+    both, every request reaches its handler, so what a handler refuses is
+    refused by the handler and nothing else."""
+    table = served(client.app)
+    http = {(path, method) for (kind, path, method) in table if kind == "http"}
+
+    def other(path: str) -> str:
+        return path[:-1] if path.endswith("/") else f"{path}/"
+
+    lonely = sorted((path, method) for path, method in http if (other(path), method) not in http)
+    assert not lonely, f"routes served in one spelling only: {lonely}"
 
 
 KEY_GUARDED = sorted(
