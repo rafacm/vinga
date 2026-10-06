@@ -37,8 +37,8 @@ curl -s http://192.168.1.10:8003/healthz
 ```
 
 `vinga info` prints the same revision in brackets on its `server:`
-line; run it with its try link filtered out, as the end of this
-section shows. Then decide where to read by what the revision looks like
+line; run it with its two credentials filtered out, as the end of
+this section shows. Then decide where to read by what the revision looks like
 ([Which build is running](upgrading.md#which-build-is-running) says
 where each form comes from):
 
@@ -110,7 +110,7 @@ the image ships, from the directory the compose file is in, since it
 was built with the server and cannot disagree with it:
 
 ```bash
-docker compose exec -T vinga vinga info | grep -v '/try/#'
+docker compose exec -T vinga vinga info | grep -v -e '/try/#' -e '/x/'
 ```
 
 When a client on the workstation is needed instead, install it at the
@@ -127,21 +127,36 @@ so it uses the environment the server runs from rather than changing
 it:
 
 ```bash
-uv run --no-sync --project <checkout>/vinga-server vinga info | grep -v '/try/#'
+uv run --no-sync --project <checkout>/vinga-server vinga info | grep -v -e '/try/#' -e '/x/'
 ```
 
 From here on this page writes `vinga` for whichever of these you use.
 
-**Run `vinga info` with its try link filtered out, every time**, as the
-two commands above do, whichever client you use. Each run prints a new
-try link, on a line of its own, and until a browser opens it or ten
-minutes pass the link is a credential: whoever opens it first makes
-their browser a device of this deployment, talking to its default
-agent ([the browser client](../devices/browser.md)). Filtered, it never
-reaches your transcript or your provider's logs, and the line before
-it still tells you what you need: it ends in a colon when a link was
-issued, and carries a sentence saying why when none was. The link
-itself is the person's, in section 7.
+**Run `vinga info` with two lines filtered out, every time**, as the
+two commands above do, whichever client you use. Each is a credential,
+each sits on a line of its own, and the filter drops exactly those two
+lines:
+
+- **The onboarding URL**, the line carrying `/x/`. Its path segment is
+  the deployment's onboarding key, which stands in front of the
+  endpoint that issues device tokens, so the server writes it to no log
+  and a proxy in front of it must not either
+  ([Exposing a deployment](exposing-a-deployment.md)).
+- **The try link**, the line carrying `/try/#`. Each run prints a new
+  one, and until a browser opens it or ten minutes pass it is a
+  credential: whoever opens it first makes their browser a device of
+  this deployment, talking to its default agent
+  ([the browser client](../devices/browser.md)).
+
+Filtered, neither reaches your transcript or your provider's logs, and
+the label above each still tells you what you need. The onboarding
+URL's label says onboarding is on and where its address came from (a
+sentence saying onboarding is off takes its place otherwise); the try
+link's ends in a colon when a link was issued, and carries a sentence
+saying why when none was. Everything else `vinga info` reports, the
+server's revision and the counts of what is configured, is untouched.
+Section 7 is how you use the onboarding URL without seeing it, and
+the try link is the person's.
 
 ## 2. Learn the model before the first question
 
@@ -184,8 +199,9 @@ serving, so what you sent is not what is there.
 **Secrets are typed by the person.** Never ask for a key, a token or a
 password, never put one in a command you run, and never open, print or
 search a file one was written into: `.env`, another env file, the
-board's NVS file. A try link is one too, which is why section 1 has you
-filter it out of `vinga info`. A secret you receive is in your transcript and in
+board's NVS file. The onboarding URL and a try link are secrets too,
+which is why section 1 filters both out of `vinga info`. A secret you
+receive is in your transcript and in
 your provider's logs, and it cannot be taken back from either. The
 server refuses a credential-shaped `key=value` argument, but only after
 it has been in the shell's history and the process list. Section 4 is
@@ -285,7 +301,7 @@ the client's `--help` holds the rest.
 Read what is there before you ask anything:
 
 ```bash
-vinga info | grep -v '/try/#'
+vinga info | grep -v -e '/try/#' -e '/x/'
 vinga list
 vinga diff
 ```
