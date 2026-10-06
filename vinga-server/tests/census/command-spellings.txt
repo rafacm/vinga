@@ -249,9 +249,11 @@ historical  vinga provider frobnicate
 historical  vinga provider secret
 historical  vinga provider secret frobnicate
 historical  vinga provider secret set
+historical  vinga provider secret set llm
 historical  vinga provider secret set llm claude token
 historical  vinga provider set
 historical  vinga provider set asr whisper
+historical  vinga provider set llm
 historical  vinga provider set llm claude
 historical  vinga provider set llm local
 historical  vinga provider set tts voice
