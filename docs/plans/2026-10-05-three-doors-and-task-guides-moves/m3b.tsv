@@ -1,0 +1,23 @@
+# M3b: where each move unit of vinga-server/README.md went, read against
+# the README at the branch base, ac40be9f (M3a's tip).
+# Run from the repository root:
+#   git show ac40be9f:vinga-server/README.md > old.md
+#   python3 scripts/audit_doc_move.py old.md vinga-server/README.md <this file>
+# Columns, tab-separated: LINE [FIRST-LAST] DESTINATION [kinds=] [edited=].
+# Providers: the section's own paragraphs; its three subsections below
+78	1-8	docs/run/providers.md	kinds=explanation,procedure	edited=5,8
+# Choosing how it hears and OpenAI transcription
+124	docs/run/speech-recognition.md	kinds=explanation	edited=13
+207	docs/run/speech-recognition.md	kinds=procedure,explanation,contract	edited=3,4,7,21
+# Choosing a voice, ElevenLabs, OpenAI (D8 table, D8a listing)
+387	docs/run/voices.md	kinds=explanation
+454	docs/run/voices.md	kinds=procedure,explanation,contract	edited=6,7,10
+514	docs/run/voices.md	kinds=procedure,explanation,contract	edited=18
+# Tools, split by paragraph runs: tools, then memory, then tools again
+617	1-27	docs/run/tools-and-mcp.md	kinds=procedure,explanation	edited=3,7,12,15,22,23,25,27
+617	28-48	docs/run/memory.md	kinds=procedure,explanation	edited=30,33,36
+617	49-50	docs/run/tools-and-mcp.md	kinds=explanation	edited=49,50
+# What the model is actually sent
+1027	docs/run/agents-and-prompts.md	kinds=procedure,explanation
+# What the MCP servers are doing; Applying a change without a restart (617, 69-82) stays for M3c
+1141	docs/run/tools-and-mcp.md	kinds=procedure,explanation
