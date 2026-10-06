@@ -621,3 +621,55 @@ Reviewed 2026-10-06 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.0
    *Resolution:* Accepted. D5e: a restart or upgrade invalidates every unredeemed link (the store is in memory); redemption afterwards meets the same fixed refusal, tested, and the onboarding and upgrading guides each say to issue a fresh link after a restart. The operator-surface line is corrected to match.
 
 Verdict: not ready. Address the P1 and P2 amendments before implementation.
+
+## Plan review round 3
+
+Reviewed 2026-10-06 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.0, read-only sandbox, runtime 6m05s, at commit 76efd88b, plan blob ddc48a8f.
+
+---
+
+1. **P1: D2a permits logging the onboarding secret.**
+Evidence: D2a says a proxy may "accept that the key is in those logs"; security.md (`docs/run/security.md:220`) says neither onboarding segment is written to a log. This violates the no-leak contract.
+Say instead: proxy request-target logging for every `/x/` route, including `try-identity` and `activate`, is required to redact or suppress the path. Remove the acceptance alternative and add an edge-configuration verification step.
+
+2. **P1: Expired try tokens have no deletion mechanism.**
+Evidence: D5/D6 define an in-memory token record with expiry, while D7a promises it is not retained beyond expiry. No pruning, timer, or expiry sweep is specified. Issuing links indefinitely therefore retains expired bearer material and grows memory.
+Say instead: `try_links.py` owns expiry removal, including a bounded pruning strategy or scheduled removal; tests must advance the injected clock and prove expired records are removed, not merely refused.
+
+3. **P2: The origin rule has no implementable owner.**
+Evidence: D5c says the link uses `localhost:<port>` "when the CLI reached the API on a loopback address," but the server cannot know the address the CLI used. Existing `RuntimeInfo` exposes an onboarding URL, not the safe public-origin value needed for this rule.
+Say instead: define the issuance response and responsibility explicitly: the server returns a validated configured public origin when one exists; otherwise the CLI derives only a loopback origin from its own API target. Refuse all other cases. Test both sides, including a server listening on `0.0.0.0`.
+
+4. **P2: Try-link issuance is undefined when onboarding is disabled.**
+Evidence: D2 mounts `/try/` only when onboarding is enabled; D5a refuses only for a missing default agent. A link could be issued even though redemption cannot return the required alias for OTA.
+Say instead: refuse `POST /api/runtime/try-links` when onboarding is disabled, with a fixed actionable message, and cover it in `vinga info` and API tests.
+
+5. **P2: The static-cache strategy can serve stale protocol code after an upgrade.**
+Evidence: D2 serves fixed asset paths such as `/try/static/page.js`, while only saying `Cache-Control` is "tied to the server's revision." The page is `no-store`, but its module imports may remain cached under unchanged URLs.
+Say instead: choose and specify either revisioned or content-hashed asset URLs, or `no-cache` plus a revision-derived validator. Add an upgrade/cache test showing a fresh `/try/` page cannot load an older module set.
+
+6. **P2: The audio design names only a capture worklet but requires a playback processor.**
+Evidence: D3 specifies `capture-worklet.js`, then requires decoded audio to play through "a second worklet node with a jitter buffer." An `AudioWorkletNode` needs a registered processor; WebCodecs encoding also cannot be assumed to run inside that processor.
+Say instead: specify the capture-to-main-thread encoder transfer and either a separate playback worklet or one explicitly dual-purpose worklet module, including its packet/PCM ownership and jitter-buffer message protocol.
+
+7. **P2: The test plan does not drive the claimed auto fallback.**
+Evidence: Q4 promises `auto`, microphone pausing during reply playback, re-arming after `tts stop`, and a user warning; Q5 names only `listen realtime`. No JS unit harness or browser-lane case covers unavailable echo cancellation.
+Say instead: add a fake-media case whose track reports echo cancellation unavailable and assert `listen auto`, no outbound mic frames during TTS, re-arm after `tts stop`, and the visible no-interrupt warning.
+
+8. **P2: D7a omits the required CLI disclosure of the try token.**
+Evidence: D5 requires `vinga info` to print `<origin>/try/#<token>`, while D7a says the try token appears in exactly the issuance response and redeem request body, and sentinel tests assert absence everywhere else.
+Say instead: classify the operator's `vinga info` stdout as an explicitly allowed owner-facing disclosure, while requiring it not to enter server logs, events, exceptions, caches, or any API response beyond issuance.
+
+9. **P2: The browser CI lane lacks a provisioned, pinned runtime.**
+Evidence: M3 requires Playwright Python plus a Chromium container, but `pyproject.toml` has no Playwright dependency and the existing workflow has no browser-image setup. "Containerized Chromium" alone does not state where the test runner, browser binary, fake WAV, or server networking are installed.
+Say instead: name the pinned Playwright/container version, dependency and lockfile changes, CI setup, local invocation, and the wheel/image server topology used by the lane.
+
+10. **P3, settled round-2 finding #5: keyless-page wording still conflicts with D2.**
+Evidence: Q2 and D2 correctly keep the page at keyless `/try/`, but M1 still says page assets are "under the onboarding path," and D5 says the page "moves" to the onboarding path after redemption. That would put the key back into an address/history and proxy request target.
+Say instead: state consistently that the browser remains at `/try/`; redemption returns the alias only in a response body, stores it locally, and uses it only as the target of OTA and activation requests.
+
+11. **P3: The device-guide footprint does not repair the current board-only index.**
+Evidence: M4 names only "a line" in docs/devices/README.md (`docs/devices/README.md:1`), whose heading, opening claim, and table all say the directory contains one guide per board. The issue requires a browser guide without a hardware-table row.
+Say instead: add a separate browser-client entry outside the board table and revise the surrounding board-only wording so the new guide is discoverable without claiming it is hardware.
+
+**Verdict: not ready. Address the P1 and P2 amendments before implementation.**
