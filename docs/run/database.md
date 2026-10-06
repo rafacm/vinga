@@ -3,7 +3,8 @@
 At the end of this guide you will have a Postgres database the server
 can reach and migrate, provisioned with the three schemas it owns and
 the read-only role an analyst uses, and a way to read what was said
-without the server's credentials.
+without the server's credentials. You will also know how the server is
+told where the database is, and what it does when it cannot reach it.
 
 ## The configuration database in a deployment
 
@@ -84,6 +85,49 @@ way, **rerun that file after any database reset**: a `dropdb`/`createdb`
 takes the schemas and the database-local default privileges with it,
 while the instance-level `vinga_ro` role survives, which is why every
 statement in the file is written to be run again.
+
+## How the server finds it
+
+**The database is named by four keys and five variables.**
+`server.database` carries `host` (`127.0.0.1`), `port` (`5432`), `name`
+(`vinga`) and `user` (`vinga`), which are the compose service's own
+values, so a checkout says nothing about any of it. Those four have
+short environment names of their own, and those are the documented
+spellings, because the compose file feeds the Postgres image from the
+same four and a fact with two names is a fact with a disagreement
+pending:
+
+```bash
+VINGA_DB_HOST=db.internal VINGA_DB_NAME=vinga_prod uv run vinga-server
+```
+
+The generic `VINGA_SERVER__DATABASE__HOST` spelling would otherwise
+work by accident of the nesting scheme, so it is refused instead, with
+a sentence naming the short one to use.
+
+Two more variables have no configuration key at all, deliberately.
+`VINGA_DB_PASSWORD` is the password, which a file that gets committed,
+diffed and printed back is the wrong home for; it defaults to `vinga`
+to match the compose service, and that default is a convenience on an
+instance bound to loopback rather than anything to deploy on.
+`VINGA_DB_URL` is the whole connection at once and wins over the other
+five when it is set, accepting `postgresql://` and
+`postgresql+psycopg://` and refusing everything else, because a second
+storage backend is not a thing this server has.
+
+The server reads all of it at boot, and the config commands read none
+of it: they are clients of the API, and where the rows are kept is the
+server's business.
+
+**A database the server cannot reach is a boot that refuses**, with a
+sentence naming those variables and telling a checkout to run `docker
+compose up -d --wait`. It is never a traceback, and it quotes nothing
+of the connection back, not even the parts that look harmless: a URL
+carries a password in its authority and can carry another in its
+query, so none of the five travels into a message or a log line.
+Restarting is the orchestrator's job rather than the entrypoint's,
+which is why the image waits for nothing and simply says why it
+stopped.
 
 ## Reading what was said
 
