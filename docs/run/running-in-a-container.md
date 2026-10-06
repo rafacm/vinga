@@ -43,8 +43,11 @@ the domain half is written into it over the API it is already serving,
 with the `vinga` client on whichever machine administers this
 deployment. The image ships that same client under the server's own
 entry point, so a shell inside the running container is the alternative
-where the API is not routed outward: the token and the loopback address
-are already in its environment.
+where the API is not routed outward: the token is already in its
+environment and the client defaults to the loopback address. It reads
+the mounted file only when the exec command names it, which matters
+where that file moves the port or renames the token's variable
+([the command-line client](configuration-api.md#the-command-line-client)).
 
 **A configuration file is optional.** Every key of the server half has a
 default and every one of them is overridable with a `VINGA_`-prefixed
