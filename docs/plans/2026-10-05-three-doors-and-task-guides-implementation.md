@@ -1363,3 +1363,295 @@ After the fixes, against `git show origin/main:vinga-server/README.md`
 The link check reports `checked 318 files, 0 failures` and the Run and
 Use check `checked 29 Run and Use pages, 0 findings`; the census ran
 last, and its outcome is in the hand-back.
+
+## M3d: conversation behavior, observability, and the README's end state
+
+**Attribution:** anthropic/claude-opus-5-5, thinking high; Claude Code 2.1.289; 2026-10-06.
+
+### What landed
+
+| Decision | Where | Commit |
+| --- | --- | --- |
+| D11: the upgrade test, written first and watched failing | `vinga-server/tests/integration/test_event_name_comment_upgrade.py` | `Test the event-name comment's upgrade before it` |
+| D11: the column comment, its migration `1011_events_cite_the_reference`, the regenerated `conversations-schema.md`, and the three pins of the chain head | `conversations/schema.py`, `conversations/migrations/versions/`, `docs/reference/conversations-schema.md`, `test_conversations_schema.py`, `test_metrics_views_upgrade.py`, `.github/workflows/vinga-server.yml` | `Name the event reference in the event-name comment` |
+| Q5: Stack, Development, the local and smoke lanes; the README's "Developing it"; the Develop door, the maintained-maps class, `AGENTS.md`'s link; D8a for the smoke lane | `docs/contributing.md` (new), `docs/README.md`, `AGENTS.md`, the server README | `Move the stack and the development lanes to a page` |
+| Listening and barge-in; the glossary's and `memory.md`'s links | `docs/run/turn-taking.md` (new), `docs/glossary.md`, `docs/run/memory.md` | `Move listening and barge-in to a turn-taking guide` |
+| Masking reply latency and When a reply fails; the withheld tool call into Flow 2; the limits guide's link | `docs/run/slow-and-failed-replies.md` (new), `docs/system-overview.md`, `docs/run/limits-and-probes.md` | `Move slow and failed replies to a guide and Flow 2` |
+| Logging, Watching a deployment, Exporting traces; D10's `LOGGING_SECTION` and the regenerated `events.md`; the test that read the README's index; `deployment.md`'s link; three docstrings | `docs/run/logs-and-traces.md` (new), `events_docgen.py`, `docs/reference/events.md`, `test_event_docs.py`, `test_session_events.py`, `test_conversations_session.py`, `docs/deployment.md` | `Move logging and trace export to a guide` |
+| The conversation store; D8's column lists; D8c's privacy paragraph; the read-only role linked; `configuration-api.md`'s two links | `docs/run/conversation-store.md` (new), `docs/run/configuration-api.md` | `Move the conversation store to its own guide` |
+| Capturing a session | `docs/run/capturing-a-session.md` (new) | `Move capturing a session to its own guide` |
+| What a conversation cost; D8a's model definition; `speech-recognition.md`'s link | `docs/run/conversation-cost.md` (new), `docs/run/speech-recognition.md` | `Move what a conversation cost to a pricing guide` |
+| D9: the README's end state, moved to the Develop door; the index's Observing group; the root README; the workflow comment | the server README, `docs/README.md`, `docs/run/README.md`, `README.md`, `.github/workflows/vinga-server.yml` | `Make the server README the package's own page` |
+| Statements corrected against the code (below), and two secret-handling fixes | the six guides, `contributing.md`, `system-overview.md` | `Correct what the moved guides claimed about the code` |
+| The mapping | `docs/plans/2026-10-05-three-doors-and-task-guides-moves/m3d.tsv` | `Record where M3d's move units went` |
+| The last pointers found by the untruncated grep | `docs/related-projects.md`, two test docstrings | `Point the last README mentions at their new homes` |
+| D12 | `changelog.d/609-observability-guides.md` | `Add the changelog fragment for the observability guides` |
+
+Each move commit retargeted every inbound link and by-name pointer to
+what it moved, so the link checker passed after each one; where a new
+guide linked a section a later commit moved (the store guide's capture
+pointer), it linked the README section until that commit retargeted it.
+The README went from 1,231 lines to 96 (1,148 removed, 13 added: the
+two pointer sections).
+
+The audit against `git show 83cff064:vinga-server/README.md` (M3c's
+tip, this branch's base), exit 0 (`.logs/m3d-audit.txt` in the
+implementer's worktree):
+
+```text
+13 units, 132 paragraphs moved, 46 declared edited, 2 declared dropped, 0 kept in the page, 0 findings
+```
+
+The 46 declared edits, by mapping row and paragraph, and what each
+became:
+
+- Row 2 (Development) 4: the `server` profile needs a `.env` with
+  `VINGA_API_SECRET`; 7: the integration lane's tier-closure tests may
+  reach the package index; 9: the local lane's two other tests; 13:
+  Ollama's `/v1` endpoint, and the database a skipping run still
+  needs; 15: what the smoke lane checks; 16: the lane's own database;
+  17: the smoke block (D8a, the database, "From vinga-server/").
+- Row 3 (Listening) 5: a failed confirmation is not an event, and a
+  manual `listen stop` with `barge_in` off; 8: the glossary link made
+  relative.
+- Row 4 (Masking) 2 and 3: the example edits the exported
+  `agent_defaults` entry and applies it, since `set` replaces the whole
+  entry; 5: the example file's link.
+- Row 5 (When a reply fails) 2 and 3: the same for `fallback`; 6:
+  `vinga apply` spelled `vinga-server config apply`, and only fallback
+  synthesis is bounded.
+- Row 6 (the withheld tool call) 4: "the fallback phrase above" links
+  the new guide; `unknown` when the keys fit two tools; the opt-in LLM
+  export does carry the sentence.
+- Row 7 (Logging) 4: only event records carry `event`; 5: the
+  reference link made relative; 6: seven index rows (`replied`,
+  `agent_said`, `tool_call`, `asr_prompt_echo`, `llm_input_exported`,
+  `llm_input_export_failed`, `drain_started`); 7: which MCP lines name a
+  tool by position; 12: the tail's clock is UTC; 14: the store is off
+  by default, `ota_check_body` is not metadata, which tokens are never
+  logged, and the ADR link on one line.
+- Row 8 (Exporting traces) 2: unsampled content is reported exported,
+  not `no_trace`; 4: where a failure's words do go; 5: the two content
+  switches, what else they export and that it outlives local erasure;
+  6: what the 256 KiB limit drops and shares; 8: links made relative;
+  9 and 10: the OTLP header built into an environment file through a
+  pipe; 11: what the Collector strips and masks.
+- Row 9 (Capturing) 7 and 8: the manifest's four provider names and the
+  per-turn clip directory; 11: about six hours, what pruning never
+  takes, and the two events; 13: copying the clips off, and
+  `export_audio` uploading the recording.
+- Row 10 (cost) 7: the server does hold a Langfuse key pair, and never
+  writes a definition with it; 20: the model definition (D8a); 24:
+  usage only on spans that reported it; 27: Piper reports characters.
+- Row 11 (the store) 4: the per-row column lists become a link to the
+  schema reference (D8), and the recap table is named; 9: a resumed
+  conversation carries its tool calls' arguments and results, and the
+  tools link made relative; 12: D8c, below, and the capture link; 14:
+  a deleted thread takes its memory; 17: reading as `vinga_ro` links
+  `database.md`'s Reading what was said rather than restating it.
+- Row 13 (the store, end) 20: `vinga metric`, `vinga session` and
+  `vinga conversation` exist; 21: the dropped count is zero with
+  `telemetry` off; 22: a turn can be lost after three failed writes.
+
+The two declared drops (row 12) are the `vinga_ro` psql block and its
+password paragraph, which `database.md`'s Reading what was said
+already carries; the one sentence it lacked ("A database provisioned
+without that file simply has no analyst role") moved into paragraph 17.
+
+Replaced blocks (D8's table rule): the conversation store's per-column
+lists of what each row holds (row 11, 4), now a link to
+`docs/reference/conversations-schema.md`. The event index table stays,
+as D8 says (it says when each event fires, which the reference does
+not), with seven rows corrected. The capture file table, the cost
+stage table, the definitions table and the switch-combination table
+stay: no generated reference states any of them. Each guide opens with
+a paragraph linking the reference sections for the keys it names.
+
+### Deviations from the plan
+
+- **The README's "On this page" list is gone.** D9's end state does
+  not list it, and the page it indexed is four short sections.
+- **The withheld tool call is an H4 under Flow 2**, after step 11,
+  which step 8's existing sentence now links down to; Flow 2 is a
+  numbered list a section cannot sit inside.
+- **Titles.** Capturing a session keeps its heading as the guide's
+  title. The cost and store guides take a task title ("Pricing a
+  conversation", "Recording conversations") and keep the moved heading
+  as their first section; the store guide adds six headings the README
+  did not have (resuming, who it records, retention, deleting, reading,
+  how it is written), the anchor `configuration-api.md`'s Deleting on
+  demand link needed among them.
+- **Two secret-handling fixes beyond D8a's inventory.** The direct
+  Langfuse OTLP header was an `export` with the encoded key pair typed
+  into the shell; it is built into a 0600 environment file through a
+  pipe from a 0600 file written in an editor (the orchestrator's relay
+  of M3c's review: a value the shell expands is visible to `set -x`).
+  The smoke lane's `-e NAME=value` lines hand the throwaway values over
+  by name instead, as CI does; the values stay literals typed in the
+  document, which the block says are for that run alone. The Langfuse
+  model definition uses the protected curl config file form
+  (`curl -K ~/.langfuse-curlrc`), as the amended D8a says. Sites
+  changed: `docs/contributing.md` (the smoke block),
+  `docs/run/conversation-cost.md` (the model definition),
+  `docs/run/logs-and-traces.md` (the OTLP header). No moved text
+  generates a secret with a command substitution
+  (`.logs/m3d-generated-secrets.txt`, zero positions).
+- **The filler and fallback examples were destructive, and are
+  rewritten.** `vinga-server config agent-defaults set` replaces the
+  whole `agent_defaults` entry (`config/api.py`, the PUT), so the
+  README's examples, a fragment holding only `filler:` or `fallback:`,
+  dropped the deployment's default stages; and nothing changes until an
+  apply. Both now export the entry, edit it, `set -f` it and apply.
+- **The smoke lane seeded the development database.** Without
+  `VINGA_DB_NAME` the seed overwrote the configuration in `vinga`; the
+  block creates `vinga_smoke` with `docker compose exec postgres
+  createdb` (checked against the development instance with a throwaway
+  name, created and dropped) and names it on both containers, as CI's
+  scenario databases do.
+- **D11's chain head had three pins the plan did not name**:
+  `test_conversations_schema.py`'s and `test_metrics_views_upgrade.py`'s
+  `HEAD`, and the server workflow's wheel-migration check, which names
+  the packaged chain's head and refuses any other. All three move to
+  `1011_events_cite_the_reference`.
+- **The generated sentence was reworded so its link stays on one
+  line.** The sentence that linked "the README's Logging section"
+  now links "the Logging section" and names the logs and traces guide
+  after the link; linking the guide's full name wrapped the link text
+  at the generator's 78 columns, where the link checker cannot see it.
+- **`test_event_docs.py` read the README's index**, splitting the file
+  on `## Logging`; it reads the guide now, and its link assertion is
+  the guide's relative path. The plan's footprint named only
+  `test_session_events.py`'s docstring.
+- **The server workflow's comment on the Run and Use check** named the
+  server README as the Run page under its paths; it now says why the
+  step stays (D3) after the README left the Run door.
+- **`system-overview.md`'s Interrupting a reply was wrong** ("the
+  moment right after playback starts is ignored": the refractory window
+  was removed) and left out the merge branch. The page is one M3d
+  edits, so it is corrected.
+
+### Resolutions
+
+- **D11's revision.** The chain's head at the base was
+  `1010_turns_name_their_utterance` (re-read, not assumed), so the
+  migration is `1011_events_cite_the_reference`. The test, watched
+  failing before the migration existed, failed on the comment
+  assertion (`.logs/m3d-d11-watched-failing.txt`); the downgrade case
+  passed vacuously then, and setting the migration's downgrade comment
+  to the new text turns exactly it red (`.logs/m3d-d11-mutation.txt`).
+  `1002_conversation_threads.py` and the `2002_memory_scopes.py`
+  docstring keep their text.
+- **No `Upgrade:` line.** The migration runs at boot like every other,
+  changes a comment and nothing else, and asks nothing of an operator.
+- **The privacy paragraph (D8c).** "Until per-user controls exist",
+  "voiceprint identification, which does not exist here yet" and "both
+  are what the erasure API will address" become present facts: there
+  are no per-user controls, vinga does not identify voices, and the
+  erasure API, which exists, addresses both units.
+
+### Discoveries
+
+- **Claims checked against the code.** 328 claims across the
+  moved units and Flow 2, each read against the code with file and
+  line evidence, in four lists (`.logs/m3d-claims-turns.txt`,
+  `-logging.txt`, `-traces.txt`, `-store.txt`). The errors corrected
+  are listed with the declared edits above; every one predates this
+  move. What leaves the host first: unsampled content reported as
+  exported; `export_llm_input` carrying tool arguments and results,
+  recap requests, remembered facts and a failed tool's error; exported
+  text outliving local erasure; `export_audio` uploading recordings;
+  the Langfuse key pair the server does hold.
+- **Stale text the docs cannot fix** (code and generators, left for
+  their owners): `retention_days`'s description in `config/models.py`,
+  rendered into `server-config.md`, says whole sessions are pruned by
+  age, and `conversations/store.py`'s module docstring says the same,
+  while the code prunes threads on their last activity; `capture.py`'s
+  docstring says capture is "off unless a directory is configured",
+  where `enabled` is the switch; `device_bindings_unreadable`'s sentence
+  still says "the configuration this server started with"; a comment
+  in `telemetry.py` calls the round "session-local".
+- **Behavior worth an owner's look.** The filler's synthesis has no
+  bound, so with the filler on a hanging voice can hold a start or an
+  apply open (only the fallback's is capped, at 10 s); content attached
+  to an unsampled turn is reported as exported though nothing is sent,
+  and `reference_media` answers true on an unsampled trace.
+- **The README's two CLI spellings.** It used `vinga ...` and
+  `vinga-server config ...` side by side without introducing the
+  first; both work. The guides keep what they moved, apart from the
+  apply in the fallback paragraph, which now matches the masking
+  section's spelling.
+
+### Inventories
+
+Untruncated, positions only, under `.logs/` in the implementer's
+worktree.
+
+- Anchored links to M3d's anchors (`.logs/m3d-anchors-before.txt`,
+  `-after.txt`): 9 lines before (the glossary, `deployment.md`,
+  `events.md`, `events_docgen.py`, and the five guide links M3b and
+  M3c left: two in `configuration-api.md`, one each in
+  `limits-and-probes.md`, `memory.md` and `speech-recognition.md`), 0
+  after. `CHANGELOG.md`'s `#running-in-a-container` still resolves to
+  the stub.
+- Mentions of the server README outside the records
+  (`.logs/m3d-readme-mentions-before.txt`, `-after.txt`): after, ten
+  lines, each the package page itself (the doors, the taxonomy, the
+  root README, the link checker's file list) or a comment saying the
+  README no longer carries the event table; `related-projects.md`'s
+  testing-section pointer and two test docstrings were retargeted. By
+  name in code, YAML, the Dockerfile and the examples
+  (`.logs/m3d-code-by-name.txt`): nothing names a moved section; the
+  `2002_memory_scopes.py` docstring stays (D11), and two comments name
+  the project README.
+- D8a (`.logs/m3d-d8a-before.txt`, `-after.txt`, `-tree-after.txt`),
+  with the pattern widened to the two-line `-u` form, `-e NAME=` values
+  and an `export` of a header or secret: six positions in the README at
+  the base (the smoke lane's four `-e` values, the OTLP header export,
+  the Langfuse `-u`), none in any page M3d wrote, and none in the tree
+  outside the dated records and the tests for the plan's own pattern.
+- D8c over the six guides, `system-overview.md` and the index
+  (`.logs/m3d-d8c-guides.txt`, dispositions in
+  `.logs/m3d-d8c-dispositions.txt`): 17 positions, none about vinga's
+  own future: 10 a guide's end state, 3 present conditionals or
+  refusals, 4 "later" in the sense of time or order. The three
+  rewritten are the privacy paragraph's, above.
+- Prose pointers (`.logs/m3d-prose-pointers.txt`): 21 `above`, `below`
+  or `this page` in the six guides and the contributing page, every
+  one within its own page; the one that crossed a page, the withheld
+  tool call's "the fallback phrase above", now links the guide.
+
+### Verification
+
+On agentpi, from the worktree root unless noted:
+
+- `python3 scripts/check_doc_links.py .`: `checked 325 files, 0 failures`, exit 0.
+- `python3 scripts/check_run_use_pages.py .`: `checked 34 Run and Use pages, 0 findings`, exit 0 (M3c's 29, plus
+  the six guides, less the server README, which left the Run door;
+  `contributing.md` is in the Develop door and not counted).
+- `python3 scripts/fold_changelog.py check .`: `checked 2 fragments, 0 failures`, exit 0.
+- `python3 scripts/audit_doc_move.py` over `m3d.tsv`: exit 0, quoted above.
+- `uv run ruff check .` from `vinga-server/`: All checks passed.
+- `uv run pytest tests/unit -q -n auto --dist loadfile` from
+  `vinga-server/`: `8115 passed, 19 skipped in 917.40s (0:15:17)`,
+  exit 0, distributed with `-n auto --dist loadfile`.
+- `uv run pytest tests/integration -q -n auto --dist loadfile` from
+  `vinga-server/`: `353 passed in 223.25s (0:03:43)`, exit 0,
+  distributed with `-n auto --dist loadfile`; it includes the new
+  upgrade test and `test_metrics_views_upgrade.py` at the new head.
+- The generated-document drift checks, each reference regenerated with
+  its command and compared (`.logs/m3d-drift.txt`): `events.md`,
+  `conversations-schema.md`, `metrics-views.md`, `domain-config.md`,
+  `server-config.md` and `api-openapi.json` all current.
+- The Langfuse model definition's `curl -K` form, against a local
+  listener with a dummy pair: the request carried the Basic header the
+  pair encodes and the file stayed 0600; the OTLP environment file
+  built through the pipe was 0600, three lines, and its header decoded
+  to the pair (`.logs/m3d-curl-config-file.txt`).
+- `uv run pytest tests/census -q` from `vinga-server/`: run last,
+  after this section; its outcome is in the hand-back rather than
+  here.
+- Not run locally: the server workflow's wheel-migration step, whose
+  pin this milestone moved; the image job and its smoke run, which run
+  on the pull request because M3d touches `vinga-server/`. The smoke
+  lane's documented commands were not run end to end; the `createdb`
+  step was.
