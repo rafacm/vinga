@@ -387,7 +387,7 @@ census ran last, and their outcome is in the hand-back.
 | D8b: recovery, decision before the destructive command | `docs/run/recovering-a-deployment.md` | `Move recovery to a guide that decides before it drops` |
 | The master key into `security.md` | `docs/run/security.md` | `Start the security guide with the master key` |
 | "An edit is stored" into `configuration.md` | `docs/run/configuration.md` | `Start the configuration guide with applying an edit` |
-| D13: Which build is running, the rerun-then-boot rule, the API secret, Past releases as changelog links | `docs/run/upgrading.md` | `Move upgrading to a guide that links past releases` |
+| D13: Which build is running, the rerun-then-boot rule, Past releases as changelog links (the API secret note dropped after review, below) | `docs/run/upgrading.md` | `Move upgrading to a guide that links past releases` |
 | Providing the database and reading as `vinga_ro` | `docs/run/database.md` | `Move providing the database to its own guide` |
 | Ports and topology, Behind a reverse proxy, the API at the edge | `docs/run/exposing-a-deployment.md` | `Move ports, the proxy and the API's edge to a guide` |
 | Onboarding a device | `docs/run/onboarding-a-device.md` | `Move onboarding a device to its own guide` |
@@ -410,7 +410,7 @@ README is byte-identical to `3073d08b`'s), exit 0
 (`.logs/m3a-audit.txt` in the implementer's worktree):
 
 ```text
-19 units, 135 paragraphs moved, 22 declared edited, 4 declared dropped, 1 kept in the page, 0 findings
+19 units, 135 paragraphs moved, 22 declared edited, 5 declared dropped, 1 kept in the page, 0 findings
 ```
 
 The 22 declared edits, by mapping row and paragraph, and what each
@@ -435,7 +435,8 @@ became:
 - Row 22 (configuration) 24: "And the operational one, said again
   because" dropped from the opening.
 - Row 24 (exposing) 2: "Four more things" becomes two, the README link
-  made explicit, a pointer to the upgrading guide added.
+  made explicit, a pointer to where the container guide states the API
+  secret added.
 - Row 28 (recovery) 3: the whole-database block says what it deletes
   first, its provisioning rerun takes a service file (D8a), and "the
   run command from above" names the container guide; 13: the `cli.md`
@@ -447,11 +448,25 @@ became:
 - Row 36 (ports) 2: `server.port` links the reference (D8); 10: the
   Limits link names the limits guide.
 
-The 4 declared drops are D13's two past releases' four paragraphs,
-all of which the changelog carries (2026-08-30 for the `memory`
-schema's rerun, stopping before starting, and the memory files left
-on disk; 2026-08-28 for the `record` rename's rerun); `upgrading.md`
-links both sections. The one kept paragraph is the stub's heading.
+The 5 declared drops are past releases' notes, all of which the
+changelog carries, so D13 links them rather than moving them: the four
+D13 names (2026-08-30 for the `memory` schema's rerun, stopping before
+starting, and the memory files left on disk; 2026-08-28 for the
+`record` rename's rerun), and "Set `VINGA_API_SECRET` before rolling
+the image, not after", which the first hand-back moved verbatim and
+flagged because "an image from this release" and "the one upgrade step
+this change forces" read like a release's note. Review confirmed it is
+one: the changelog carries it under 2026-08-11 ("Every deployment must
+set `SAMTAL_API_SECRET` before upgrading", the variable's name before
+the rename). It is dropped (row 25), `upgrading.md`'s Past releases
+list links that section and names the old spelling, and the standing
+fact, that a server without the API secret refuses to boot and which
+variable to set, is a new paragraph in `running-in-a-container.md`
+under The container, where neither that guide nor `security.md`
+stated it; being new rather than a changed moved paragraph, the audit
+does not list it. `upgrading.md`'s opening and its index line no longer
+mention the secret, and the exposure guide points at the container
+guide for it. The one kept paragraph is the stub's heading.
 
 Replaced blocks (D8's table rule): none. M3a's units hold no table or
 list whose every row is a key, route, event or column a generated
@@ -504,12 +519,9 @@ link rather than losing the sentence: a paragraph in
   `tests/unit/test_config_cli_onboarding.py` read the onboarding
   walkthrough by splitting the README on its heading, which would have
   raised `IndexError` once the section moved. It reads the guide now.
-- **The API secret paragraph moved verbatim, "this release" and all.**
-  The table puts it in `upgrading.md`. Its rule is standing (the API is
-  always gated, so the secret precedes the image), but "an image from
-  this release" and "the one upgrade step this change forces" read
-  like a release's note. D13 names four notes and not this one, so it
-  is left for review to decide rather than rewritten.
+- **The API secret paragraph is a fifth dropped release note.** The
+  table puts it in `upgrading.md`; it is the 2026-08-11 changelog
+  entry's note, so D13 applies, as recorded with the drops above.
 
 ### Resolutions
 
