@@ -53,24 +53,39 @@ where each form comes from):
   The second form is the plain Markdown, and the one to fetch. A
   relative link on a page resolves at the same commit when you follow
   it on GitHub.
-- **Anything else**: a name with `-g<hash>` in it, a `-dirty` suffix,
-  a hash of another length. The server runs from a checkout, and the
-  revision is `git describe --always --dirty` output, which is not a
-  reference GitHub can resolve. Read the checkout itself, at its
-  `HEAD`, after confirming that `git rev-parse --short HEAD` in it is
-  the hash after `-g`; when it is not, the server is running other code
-  than the checkout holds, so say so and ask. If you cannot reach the
-  checkout, take the hash (after `-g`, where there is one) and read at
-  it on the checkout's remote only after confirming the commit exists
-  there: for this repository,
-  `https://github.com/rafacm/vinga/commit/<hash>` answers 200 rather
-  than 404. A fork's commit is on the fork's remote, not on this one.
-- **A `-dirty` suffix you cannot see the tree behind.** The running
-  code is not any commit. Say so, and ask the person.
+- **Anything else.** The server runs from a checkout, and the revision
+  is that checkout's `git describe --always --dirty`, in one of three
+  forms: `<tag>-<n>-g<hash>`, a bare `<tag>` when the commit is the
+  tag's, or a bare abbreviated `<hash>` when no tag is reachable, each
+  with `-dirty` after it when the tree had uncommitted changes. None of
+  them is a reference you can put in a URL as it stands.
+
+  **When you can reach the checkout**, run the same command in it:
+
+  ```bash
+  git -C <checkout> describe --always --dirty
+  ```
+
+  It must print exactly the server's revision. When it does not, the
+  server runs code other than the checkout now holds: say so, and ask
+  the person. When it does, read the checkout's working tree, and take
+  every file you need from it rather than from a URL. With `-dirty`,
+  the working tree is the running code and no commit is.
+
+  **When you cannot reach the checkout**, a `-dirty` revision is the
+  end of it: the running code is not any commit, so say so and ask the
+  person. Otherwise take the commit it names (the hash after `-g`, the
+  bare hash, or the tag) and resolve it to a full commit hash on the
+  checkout's remote before reading anything there. For this
+  repository, the `sha` field of
+  `https://api.github.com/repos/rafacm/vinga/commits/<hash-or-tag>` is
+  the full hash, and an answer without one means the commit is not
+  there; a fork's commit is on the fork's remote, not on this one.
+  Then read and fetch at that full hash, as for a published image.
 - **`unknown`.** The build does not know what it is. Ask the person
   which image tag or commit they installed.
 
-**When this page is not there at that revision** (GitHub answers 404),
+**When this page is not there at that commit** (GitHub answers 404),
 the deployment is older than this page. Tell the person, and work from
 that commit's own `README.md` and the pages it links, at that commit.
 
@@ -84,10 +99,12 @@ never its own.
 [Getting Started](../../README.md#getting-started) as it reads on
 `main`, and apply this section from the first `/healthz` that answers.
 
-**Files and the client follow the same revision.** A file you fetch
+**Files and the client follow the same revision.** A file you need
 for a deployment that already runs (the compose file,
 `deploy/postgres-init.sql`, an example fragment) comes from the raw
-URL at the server's revision, not from `main`. Run the `vinga` client
+URL at the published image's revision, or at the full hash a
+checkout's revision resolved to, and from the checkout's own working
+tree when you can reach it; never from `main`. Run the `vinga` client
 the image ships, from the directory the compose file is in, since it
 was built with the server and cannot disagree with it:
 
