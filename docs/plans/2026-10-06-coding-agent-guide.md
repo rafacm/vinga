@@ -93,6 +93,28 @@ any commit, so the agent reads that tree's own files; `unknown` means a
 build with no revision, and the agent says so to the person and reads
 `main` with that caveat stated rather than silently.
 
+**D1a. Artifacts follow the same revision, and the CLI is the image's.**
+Getting Started fetches the compose file and the provisioning SQL from
+`main` and installs a workstation CLI from `main`. On a deployment that
+already runs, the guide tells the agent to fetch any file at the
+server's revision (the same revision in the raw URL), and to prefer the
+CLI the image ships (`docker compose exec vinga vinga ...`, or
+`vinga-server config` inside the container), which cannot disagree with
+the server it talks to; a workstation CLI is installed at the same
+revision when one is needed. For a fresh install there is no running
+revision yet, so Getting Started's `main` is the honest starting point,
+and from the first `/healthz` on, the rule applies.
+
+**D1b. When the page at that revision is not there.** A revision from
+before this page existed, an `unknown` build or a `-dirty` tree the
+agent cannot see all leave it without instructions it can trust. The
+guide says what to do in each: before this page, tell the person this
+deployment predates the guide and read the pages that existed at that
+revision (the README of that commit) rather than this one; `unknown`,
+ask the person which image or commit they installed rather than assume
+`main`; `-dirty` without access to the tree, say so and ask. In no case
+does it present `main`'s instructions as the install's.
+
 **D2. The rules carry their failure modes.** Each of the three rules
 says what goes wrong without it, in one sentence each: an agent quoting
 last month's docs recommends a command the install lacks (hence the
@@ -252,6 +274,8 @@ Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    *Resolution:* Accepted. D3a: `vinga diff` before the first write and immediately before `vinga apply`; anything pending that the agent did not write is shown to the person and applied only on their say.
 
 4. **P2: Revision-pinned reading still executes `main` artifacts.** Evidence: plan, D1 (`docs/plans/2026-10-06-coding-agent-guide.md:87`) pins pages to the running revision, but the linked Getting Started (`README.md:94`) downloads Compose and provisioning files from `main` and installs the CLI from `main` (`README.md:152`). The plan should pin those artifacts and any workstation CLI installation to the same revision, or use the CLI shipped in the running image.
+
+   *Resolution:* Accepted. D1a pins every fetched artifact to the server's revision and prefers the CLI the image ships, with a workstation CLI installed at the same revision when needed; a fresh install starts from Getting Started's `main` until there is a revision to read. D1b gives the agent a rule for each case without a readable page: before the guide existed, `unknown`, and an inaccessible `-dirty` tree, and never presents `main` as the install's instructions.
 
 5. **P2: The version rule has no safe answer when the guide cannot be found.** Evidence: plan, D1 (`docs/plans/2026-10-06-coding-agent-guide.md:87`) sends an `unknown` build to `main` and assumes a `-dirty` build's tree is available. A running revision from before this guide lands has no page at the prescribed URL. The plan should specify how to handle an absent page or inaccessible dirty tree, and avoid presenting `main` instructions as instructions for an unidentified install.
 
