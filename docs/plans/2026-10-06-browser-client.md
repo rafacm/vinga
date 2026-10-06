@@ -605,7 +605,7 @@ be a browser.
 - [x] **[M3: the client and its lane](2026-10-06-browser-client-implementation.md#m3-the-client-and-its-lane)** ([PR #626](https://github.com/rafacm/vinga/pull/626)). The modules and worklets (D3),
   realtime and the auto fallback (Q4), the ending (D9), the 60 ms frame
   measured first, the browser lane and its CI job (Q5).
-- [ ] **M4: the device guide and the rest of the footprint.**
+- [x] **[M4: the device guide and the rest of the footprint](2026-10-06-browser-client-implementation.md#m4-the-device-guide-and-the-rest-of-the-footprint)** (PR TBD).
   `docs/devices/browser.md`, the coding-agent guide's step, the glossary
   and concepts sentences, the manual checkpoint recorded, and the #301
   recommendation comment (D8).
