@@ -602,7 +602,7 @@ be a browser.
   page that reads the token from the fragment and clears it, the
   same-origin `POST /try/redeem` that binds and names in one transaction
   (D5b), their tests, and the onboarding and exposure guides.
-- [ ] **M3: the client and its lane.** The modules and worklets (D3),
+- [x] **[M3: the client and its lane](2026-10-06-browser-client-implementation.md#m3-the-client-and-its-lane)** (PR TBD). The modules and worklets (D3),
   realtime and the auto fallback (Q4), the ending (D9), the 60 ms frame
   measured first, the browser lane and its CI job (Q5).
 - [ ] **M4: the device guide and the rest of the footprint.**

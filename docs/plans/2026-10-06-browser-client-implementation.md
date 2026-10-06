@@ -558,3 +558,307 @@ Verification after the round, from the worktree's `.logs/`:
 
 Not verified: a real reverse proxy in front of the prefix case (an ASGI
 shim stood in for one), and engines other than Chromium.
+
+## M3: the client and its lane
+
+**Attribution:** anthropic/claude-opus-5-5, thinking high; Claude Code 2.1.291; 2026-10-06.
+
+### The 60 ms frame, measured first
+
+Before anything was built on it (the plan's Risks): in the pinned
+Chromium (HeadlessChrome 153.0.8010.12, Playwright 1.63's
+`mcr.microsoft.com/playwright/python:v1.63.0-noble`, on agentpi's
+aarch64), `AudioEncoder.isConfigSupported` accepts `{codec: "opus",
+sampleRate: 16000, numberOfChannels: 1, opus: {frameDuration: 60000,
+application: "voip"}}`. Twenty 960-sample blocks of a tone encoded to
+21 chunks (the encoder's lookahead flushes one more), every chunk's
+`duration` 60000 µs. Each packet's TOC byte says 60 ms: either one
+SILK frame of 60 ms (code 0) or three CELT frames of 20 ms (code 3).
+The server's own `OpusDecoder` at 16 kHz decoded every packet to 960
+samples, the first to 944 (its resampler's priming). So WebCodecs'
+packets are exactly the frames the server's hello names, with nothing
+to translate. Log: `.logs/m3-60ms-frame.log`.
+
+### What landed
+
+| Decision | Where | Commit |
+| --- | --- | --- |
+| Q5b: the runner's pinned dependencies | `pyproject.toml` (`browser` group), `uv.lock` | `Lock Playwright as the browser lane's runner` |
+| D3, D3b: the microphone, the speaker and their two processors | `browser/static/audio.js`, `audio-worklet.js` | `Give the browser client a microphone and speaker` |
+| Q3, Q4, D9, D3a: the conversation over the socket, the device tools | `browser/static/wire.js`, `tools.js` | `Speak the device protocol from the browser` |
+| D3, D4, Q4, D9: the page, the identity, the check-in, one URL home | `browser/static/page.js`, `identity.js`, `ota.js`, `urls.js`, `index.html`, `page.css`, `browser/assets.py` (allowlist, socket marker), `tests/unit/test_browser_routes.py` | `Serve the browser's conversation client` |
+| Inventories by tooling | `tests/unit/test_browser_client_files.py` | `Hold the client's files to the allowlist` |
+| Q5a: the PCM sum is what was rendered | `audio-worklet.js` | `Sum what the speaker rendered from its output` |
+| Q5b: the fake microphone | `tests/browser/speech.wav`, `make_speech.py` | `Give the browser lane a sentence to say` |
+| Q5, Q5a, Q5b: the lane | `tests/browser/run.sh`, `pytest.ini`, `conftest.py`, `lane.py`, `test_browser_client.py` | `Drive the browser client in headless Chromium` |
+| Q5a: the CI job, wheel and image | `.github/workflows/vinga-server.yml` (`browser`, a step in `image`, `image-publish`'s `needs`), `AGENTS.md` | `Run the browser lane in CI, wheel and image` |
+| Documentation | `docs/contributing.md`, `docs/run/onboarding-a-device.md`, `changelog.d/613-browser-client.md` | `Document the browser lane and the working client`, `Count the lane's four cases where it is described` |
+| The prefix, after M2's review round | `tests/unit/test_browser_prefix.py` | `Hold the client's whole way in under a prefix` |
+| D4: the microphone after the claim | `browser/static/page.js`, `ota.js` | `Open the microphone only once a browser is admitted` |
+| D4: the pairing case | `tests/browser/test_browser_client.py`, `lane.py`, the image job's idle timeout | `Drive a pairing browser in the lane`, `Bound how long a claimed browser takes to connect` |
+
+### Deviations from the plan
+
+1. **Seven modules and a stylesheet, not four modules and one
+   worklet.** D3 names `identity.js`, `ota.js`, `wire.js`, `audio.js`
+   with `capture-worklet.js`, and `page.js`; D3b names the worklet
+   module `audio-worklet.js`, which is the name used. Two modules are
+   added. `tools.js` is D3a's MCP server, which the plan added after
+   D3 was written and gave no home. `urls.js` is the one place an
+   address is resolved: a deployment may be published under a path
+   prefix (`server.public_url` of `https://example.org/vinga`, raised
+   by M2's review), so every request resolves against the deployment
+   root read off the module's own address, and the other modules
+   build no URL (`test_no_module_but_urls_writes_an_address`). The
+   onboarding path the redemption hands back is normalized there too,
+   so adapting to the shape M2's fix round settles on is a change to
+   `onboardingPath` alone. `page.css` exists because the page's
+   Content-Security-Policy refuses inline styles.
+2. **The socket is the page's own origin, not the OTA reply's
+   `websocket.url`.** A board follows the reply's URL. The page
+   connects to the boundary's `WEBSOCKET_PATH`, which `Assets` renders
+   into the page (`<meta name="vinga-socket">`) relative to the root,
+   over ws or wss to match the page. The reply's URL is the request's
+   netloc, or `server.websocket_url`, and neither knows a path prefix
+   a proxy strips; a configured URL naming another origin would be
+   refused by `connect-src 'self'` anyway. The page is served by the
+   server whose socket it opens, so its own origin is the one that is
+   always right.
+3. **`tts stop` drains the speaker; it does not flush it.** D3b says
+   flush "on a barge-in's `tts stop`". The page cannot tell a barge-in's
+   `tts stop` from any other: the server paces reply frames in real
+   time (`device/pacing.py`), so at either kind of stop the speaker
+   holds only its jitter buffer, about 120 ms. Flushing every `tts
+   stop` would clip the end of every reply, and the firmware does not:
+   it plays its queue out, and in auto mode waits for the queue to
+   drain before it listens again (`application.cc`,
+   `pending_listening_start_`). So `tts stop` drains, auto mode re-arms
+   once the speaker is idle, and the flush message is sent when the
+   person presses Interrupt (with the board button's `abort`) and when
+   the conversation ends.
+4. **An Interrupt and an End button.** Not in the plan: they are the
+   board's button, which aborts a reply while it speaks and closes the
+   channel while it listens. Interrupt is the only way to stop a reply
+   in auto mode, and the visible sentence names it.
+5. **The hello always says protocol version 1.** A board sends its
+   own build's binary protocol version; the page speaks bare Opus,
+   version 1, whatever the reply's `websocket.version` says. The
+   session reads the version from the hello, so the two agree.
+6. **The fake microphone's loop is composed at run time.** Q5b says a
+   committed short WAV. What is committed is the sentence alone
+   (`speech.wav`, 54 KB, the simulator's packaged Piper utterance,
+   decoded); the loop around it (the sentence, 1 s, the sentence, 9 s)
+   is composed by `lane.py` with the standard library, where the timing
+   the cases depend on sits beside the reply length and the idle
+   timeout it is reasoned against. A loop of real silence committed as
+   audio would be about 400 KB.
+7. **The lane reads events from the API's stream, and seeds through
+   the API.** The plan says "events by name"; they are read from `GET
+   /api/runtime/events`, the same for a server the lane starts and for
+   the image CI started, so the image variant needs no second way in.
+   The server's log is read too, for the two facts that are log lines
+   rather than events (`listening (<mode> mode)` and the discovered
+   tools) and for the no-leak sentinel; for the image it is streamed
+   into a file the lane's container mounts.
+8. **The image variant runs inside the image job.** Q5a says one
+   variant runs against "the image the image job built". On a pull
+   request that image exists only in the image job's own daemon, so the
+   second run is a step there (amd64, default variant, since the client
+   is the same bytes in both), not a job of its own.
+9. **`image-publish` waits on the browser lane.** Not in the plan; the
+   workflow's own rule is that publishing waits on every check the
+   suite is made of.
+10. **The auto case tolerates one frame per reply.** Q5b says no
+    outbound frames while a reply plays. Chromium reports the received
+    `tts start` before the page's handler has run, so one frame encoded
+    in between appears inside the reply in Chromium's record; the case
+    allows at most one per reply. The mutation that removes the guard
+    sends 49.
+11. **A fourth lane case: an unbound browser pairs.** Q5b names three
+    cases. None of them reached the pasted onboarding URL, the mint
+    under it, the six-digit code or the activation poll, which is code
+    this milestone wrote; the fourth case removes the default agent,
+    pastes the URL the API reports, waits for the code and claims it
+    through the API, and asserts the conversation that follows. It
+    costs about 6 s.
+12. **The device token is not stored.** A board keeps its token in
+    NVS. The page checks in before every conversation and holds the
+    token in memory for that conversation only, so storage holds the
+    identity and the onboarding path and nothing else.
+
+### Resolutions
+
+- **The test-only switches** are the page's address only:
+  `?test-observe=1` publishes the PCM sum as
+  `data-vinga-pcm-sum` on the document, `?test-echo-cancellation=off`
+  treats the track's `echoCancellation` as false. The device-tool case
+  opens the page with neither and asserts realtime mode and no
+  attribute, which pins both inert by default; the mutations that turn
+  either on unconditionally fail it.
+- **The device tools** answer `initialize` (protocol `2024-11-05`,
+  server name `vinga-browser`), `tools/list` (one page) and
+  `tools/call`; an unknown method or tool is JSON-RPC `-32601`, a
+  volume that is not an integer from 0 to 100 is `-32602`, as the
+  firmware's property checks refuse it. The status is
+  `{"audio_speaker": {"volume": n}, "listening": bool}`. The volume
+  starts at 70, a board's default, and is not kept across reloads.
+- **What the page names itself:** `board.type` `vinga-browser` in its
+  check-in body (D7), and nothing else of its own.
+- **The ending's words:** an idle close (code 1000, the session's own
+  reason `idle timeout`) is "The conversation ended because nobody
+  spoke for a while."; the person's End is "You ended the
+  conversation."; anything else "The conversation ended."
+- **Activation**, when a pasted-URL browser is unbound: the code is
+  shown with a sentence asking the person to give it to whoever runs
+  the server, naming no command (a page the server ships does not
+  name the CLI's grammar, #386); the page polls `activate` every 3 s,
+  ten times, then checks in again, as the firmware does.
+
+### The rebase onto M2's review round
+
+M2 merged with its review fixes while this milestone was in flight, and
+the branch was rebased onto it (`git rebase --onto origin/main
+a12215c4`, two conflicts, both read and resolved; all commits present
+afterwards, checked by their symbols).
+
+- **`Assets` renders the page twice**, once per spelling of its own
+  path, with module references relative to each. The socket marker is
+  rendered into both, and is the same in both, since the client
+  resolves the socket against the root read off its module rather than
+  against the page.
+- **`page.js`** conflicted with M2's relative redemption; this
+  milestone's page replaces it, and `urls.js` resolves the redemption
+  as M2 did, against the deployment root. The onboarding path the
+  redemption now hands back relative to the root (`x/<key>/`) is what
+  `urls.onboardingPath` already accepted, and the page stores it in
+  M2's shape, the full path on this origin with any prefix included,
+  so a browser bound by M2's page and one bound by this one read back
+  the same.
+- **`tests/unit/test_browser_prefix.py`** is extended rather than
+  copied: the root is read out of `urls.js` and resolved behind the
+  prefix-stripping shim, and the browser's whole way in (redeem, check
+  in, connect with its subprotocols, hello) is walked at the addresses
+  the client resolves. Its root-relative check covers every module but
+  `urls.js`, which takes paths apart and is asked instead where its
+  root comes from.
+- **M2's changelog fragment** had already been folded into
+  `CHANGELOG.md`, so this milestone's change to it was dropped at the
+  rebase: the dated entry was true the day it was written, and this
+  milestone's own fragment says the link now opens a conversation.
+
+### Discoveries
+
+- **The idle timeout has to outlast the first utterance.** Opening the
+  microphone after the check-in (so a browser waiting to be claimed is
+  not capturing) made the page ask to listen at the moment the loop
+  starts speaking, and a realtime session's idle count starts there; a
+  2 s timeout fired before the first sentence ended as an utterance at
+  about 2.4 s. The lane's timeout is 3 s and the loop's tail 9 s.
+
+- **The server's MCP `initialize` arrives while the speaker is still
+  starting.** The first version dropped messages between the server's
+  hello and the speaker being ready, so discovery's `initialize` was
+  lost and the server ran without the page's tools until discovery
+  timed out ("unknown tool ... failed" in the device-tool case). The
+  conversation now keeps what arrives early and handles it in order;
+  the mutation that drops it fails the device-tool case.
+- **Playwright's synchronous API delivers browser events only while it
+  is being called.** A wait that slept between polls saw a websocket
+  record that never moved; the cases wait with the page's own
+  `wait_for_timeout`.
+- **The PCM sum first counted what the processor meant to play.** A
+  processor that wrote silence while counting its samples would have
+  passed; it is now summed from the filled output buffer, and the
+  silent-render mutation fails both cases that read it.
+- **`connect-src 'self'` admits the page's own `ws:` origin in
+  Chromium**, so the M1 policy needed no widening. Other engines are
+  unverified (M4's guide).
+- **Echo cancellation and noise suppression pass the fake device's
+  speech:** the energy endpointer heard every sentence of the loop, and
+  the barge-in gate confirmed the second one inside the reply.
+- **The lane's cost**, on agentpi, four cores, all four cases: five
+  consecutive runs of the documented command each `4 passed` in 45.7 s
+  to 46.3 s of pytest and 51 s to 52 s wall, uv's cache in a volume
+  (`.logs/m3-lane-stability.log`); with no cache at all the three-case
+  lane took 58 s wall against 54 s warm, so a cold cache costs a few
+  seconds here (the wheel build, the constrained install and
+  Playwright's wheel are all inside those figures). CI is not measured
+  here: the `browser` job adds the image pull
+  (`mcr.microsoft.com/playwright/python` is about 2.4 GB unpacked) to
+  roughly a minute of lane, so an estimate of 3 to 4 minutes, in
+  parallel with the unit and integration lanes and so off the critical
+  path; the image job's amd64 default variant gains the same pull and
+  run, about 2 minutes, before `image-publish`.
+
+### Tests first, and the mutations
+
+The 60 ms measurement came first. The lane's cases were written
+against the client and then held to it by mutation; the unit inventory
+was written after the files it reads and falsified the same way. One
+lane run per mutation, the client restored and touched after each;
+every line is in `.logs/m3-mutations-lane.log` and
+`.logs/m3-mutations-unit.log`.
+
+| Guard | Mutation | Killed by |
+| --- | --- | --- |
+| Audio reaches the server | `send` returns before sending | all three cases (`heard`, the second utterance, the tool call never come) |
+| Auto mode: no frames while a reply plays | the `micOpen = false` at `tts start` removed | the auto case (`[49, 1]` frames inside replies) |
+| Auto mode: re-arm after `tts stop` | `rearm` returns at once | the auto case (no second utterance) |
+| Interrupt sends `abort` | the `abort` send removed | the realtime case (no aborted reply) |
+| PCM at the sink | output written as zeros | the realtime and auto cases |
+| PCM at the sink | decoded audio never appended | the realtime case |
+| Honest seams | `OBSERVE = true`; `ASSUME_NO_ECHO = true` | the device-tool case, each |
+| D9 ending | the idle close read as any other | the realtime case |
+| D3a | `tools/list` answers no tools | the device-tool case |
+| D3a | early messages dropped | the device-tool case |
+| No leak | the try token written to the console | the realtime case, by place |
+| D4: the code shown | `onCode` told nothing | the pairing case |
+| D4: the poll's answer heeded | the `200` ignored | the pairing case, once its wait was bounded to ten seconds (it survived the thirty-second wait: the page is admitted anyway at its next check-in) |
+| Prefix | `urls.js` resolving its root from the origin's root | the prefix test's root and walk cases |
+| Prefix | the socket path rendered root-relative | the prefix walk; the inventory's socket check |
+| Inventory | a root-relative literal in `wire.js`; `ota.js` building its own URL | `test_no_module_but_urls_writes_an_address` |
+| Inventory | a stray file; `urls.js` dropped from the allowlist | `test_the_allowlist_is_exactly_the_client_that_ships`, and the loaded-modules test for the second |
+| Socket path | the marker left unrendered | `test_the_page_connects_to_the_socket_the_boundary_names` |
+
+**One survivor, reported:** removing the speaker's flush on Interrupt
+passes the realtime case. The driver reaches the condition (Interrupt
+is pressed mid-reply and the server records the aborted reply); what
+differs is the at most 120 ms or so of audio the jitter buffer held,
+which the lane cannot tell apart from the frames already in flight when
+the abort left. Pinning it would need the speaker to report its queue,
+a second test-only surface for a fifth of a second of sound; left as a
+finding.
+
+### Verification
+
+Run on agentpi (four cores), each line quoted from the log written in
+the worktree's `.logs/`:
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run pytest tests/unit -q -n auto --dist loadfile`, on the tree
+  rebased onto M2's review round: `8355 passed, 19 skipped in 934.97s
+  (0:15:34)` (`m3-unit-rebased.log`); the two `test_logs.py` uvicorn
+  cases M1 and M2 recorded did not fail in this run, which keeps the
+  two files on separate workers. Before the rebase: `8334 passed, 19
+  skipped in 1019.30s (0:16:59)`.
+- `uv run pytest tests/integration -q -n auto --dist loadfile`:
+  `354 passed in 220.77s (0:03:40)` (`m3-integration-rebased.log`)
+- The browser lane through its documented command, last, on the
+  rebased tree (`m3-lane-final.log`): the four cases `PASSED`, `4
+  passed in 46.11s`, 52 s wall; and five consecutive runs before it,
+  each `4 passed` (`m3-lane-stability.log`).
+- The eight generated-document checks the server workflow runs, each
+  regenerated to a scratch directory and compared: all current
+  (`m3-drift-rebased.log`).
+- The wheel built with `uv build --wheel` carries all ten client files
+  (`m3-wheel-contents-rebased.log`), which the lane's install from it
+  proves as well.
+- `python3 scripts/check_doc_links.py .`: `checked 333 files, 0 failures`
+- `python3 scripts/fold_changelog.py check .`: `checked 1 fragments, 0 failures`
+- `uv run pytest tests/census -q`, last, after this section: CENSUS_LINE
+
+Not verified here: the image variant of the lane and the CI job's
+real timing (CI's), the page in any engine but Chromium, and the
+manual checkpoint on a laptop in a real room with a real barge-in,
+which is M4's. Echo cancellation's effect is not exercised by the lane
+at all: the fake device's input is a file, not a room.
