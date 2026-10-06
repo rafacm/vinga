@@ -721,3 +721,10 @@ The audit's tests `34 passed`; the link check reports
 removed paragraph's "later" is gone, and the guide title database.md
 now links for the configuration-only reset is one more;
 the census ran last, and its outcome is in the hand-back.
+
+Beyond the round: `docs/reference/cli.md`'s hand-written recovery
+recipe carried the same defect finding 3 named in the guide, a bare
+`drop schema domain cascade;` SQL block with no stop and no named
+connection. The orchestrator gave it the guide's shape: the server
+stopped at step 1, the drop run as the server role through the `vinga`
+service with its password in `~/.pgpass`, in place of step 2.
