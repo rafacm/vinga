@@ -860,10 +860,10 @@ class DeviceSession:
 
         Three states answer None and every reader treats them alike. A
         board with no record at all, which a default agent's coverage
-        makes ordinary. A record still carrying the `Device <mac>`
-        spelling this server mints and reserves, which is a placeholder
-        rather than a name: M2 refuses to say it out loud for the same
-        reason, and an analyst has no more use for a MAC repeated in a
+        makes ordinary. A record still carrying the `Device <mac>` or
+        `Browser <mac>` spelling this server mints and reserves, which
+        is a placeholder rather than a name: M2 refuses to say it out
+        loud for the same reason, and an analyst has no more use for a MAC repeated in a
         second column than for the one beside it. And a read that could
         not be made, which the view already answers as no record.
         """

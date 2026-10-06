@@ -251,9 +251,10 @@ def device_introduction(name: str | None, location: str | None) -> str:
     configuration rather than about the world, and a model reading one
     tends to say it out loud. A device nobody has NAMED is the ordinary
     case too, for as long as it takes an operator to think of a name:
-    the record carries `Device <mac>` until then, and a model told it is
-    speaking through a device called Device aa:bb:cc:dd:ee:ff will read
-    a MAC address aloud when somebody asks which speaker it is. Whether
+    the record carries `Device <mac>` (or a browser's `Browser <mac>`)
+    until then, and a model told it is speaking through a device called
+    Device aa:bb:cc:dd:ee:ff will read a MAC address aloud when somebody
+    asks which speaker it is. Whether
     a name is that placeholder is decided where the rule lives
     (`LiveDevice.named`); what arrives here is a name to say or nothing.
 
