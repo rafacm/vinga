@@ -147,9 +147,15 @@ derived from it. Boards already connected do not care: they hold their
 own full URL. What needs the old key is a board being onboarded through
 the URL somebody wrote down before the rotation, and
 `server.onboarding.key` pins it for exactly that. A wrong key answers
-404, byte for byte what a path that was never served answers, while
-logging the attempted key beside the correct one, so a typo and a
-rotation both diagnose themselves in the server's own log.
+404, byte for byte what a path that was never served answers, and the
+server's log repeats neither key: it records an
+[`onboarding_key_mismatch`](../reference/events.md#onboarding_key_mismatch)
+carrying only how long the attempt was, or an
+[`onboarding_key_unshaped`](../reference/events.md#onboarding_key_unshaped)
+when the segment could not have been typed at a key at all. A run of
+mismatches is the sign of a typo or a rotation; the URL to compare
+against is what `vinga-server config ota-url` prints on your own
+terminal.
 
 **The WebSocket URL** is derived from the address the device reached
 the OTA endpoint on, so a LAN deployment needs no extra configuration.
