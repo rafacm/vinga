@@ -195,6 +195,7 @@ historical  vinga agent set kids
 historical  vinga agent show kids
 historical  vinga agent-defaults set
 historical  vinga apply
+historical  vinga check
 historical  vinga config apply
 historical  vinga config import
 historical  vinga conversation
@@ -339,6 +340,7 @@ respell  config provider show llm claude
 respell  config reference
 respell  config schema
 respell  config show
+respell  vinga agent
 respell  vinga agent export assistant
 respell  vinga agent preview
 respell  vinga agent rename
@@ -413,6 +415,7 @@ respell  vinga provider set vad silero
 respell  vinga reference
 respell  vinga reference server
 respell  vinga schema
+respell  vinga schema agent
 respell  vinga schema provider asr
 respell  vinga session
 respell  vinga session delete
