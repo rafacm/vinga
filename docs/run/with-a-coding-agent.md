@@ -187,6 +187,16 @@ page at the revision, say that they carry a secret, wait until the
 person says the step is done, and then check it by its effect, never
 by reading what was written.
 
+**A restart is an apply.** Two of these steps end in restarting the
+server, and a server that starts serves everything stored, not only
+what was applied before it stopped: a change someone wrote and never
+applied goes live with the restart, exactly as it would with
+`vinga apply`. So before you hand over any step that ends in a
+restart, run `vinga diff`. If it lists anything you did not write in
+this conversation, show the person that list and say the restart will
+install it; restart only when they say so, or once they have put the
+change back.
+
 - **The deployment's own secrets.** Getting Started's `.env` block in
   step 1 generates the API token and the device-auth secret straight
   into a file only the person can read. The person runs it. The check
@@ -307,8 +317,9 @@ Four conventions hold for every answer:
   exists: say which command would resolve it, and run it only when the
   person says so.
 
-**Diff again immediately before the apply.** `vinga apply` installs
-everything stored, not only what you wrote. If `vinga diff` lists
+**Diff again immediately before the apply**, and before any restart
+(section 4). `vinga apply` installs everything stored, not only what
+you wrote. If `vinga diff` lists
 anything you did not write in this conversation, show the person that
 list and apply only when they say so; otherwise you install a change
 nobody here asked for.
