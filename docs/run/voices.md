@@ -108,14 +108,20 @@ someone else's configuration will usually 404. Pick one in the
 ElevenLabs app, or list your own:
 
 ```bash
-printf 'header = "xi-api-key: %s"\n' "$ELEVENLABS_API_KEY" \
-  | curl -s -K - https://api.elevenlabs.io/v1/voices \
+# Once: a curl config file only you can read. Write one line into it
+# in the editor, header = "xi-api-key: <your key>", with the key
+# pasted there and nowhere else.
+install -m 600 /dev/null ~/.elevenlabs-curlrc
+"${EDITOR:-vi}" ~/.elevenlabs-curlrc
+
+curl -s -K ~/.elevenlabs-curlrc https://api.elevenlabs.io/v1/voices \
   | jq -r '.voices[] | "\(.voice_id)  \(.name)"'
 ```
 
-The key reaches `curl` on standard input, as a config file written by
-the shell's builtin `printf`, rather than in its arguments, where the
-process table and the shell's tracing would show it.
+The key goes into the file in an editor and reaches `curl` from there,
+so the shell never sees it: it is in no command's arguments, where the
+process table would show it, and in no expansion, which the shell's
+tracing (`set -x`) would print.
 
 Every option, with its default and what it accepts, is in the domain
 configuration reference under
