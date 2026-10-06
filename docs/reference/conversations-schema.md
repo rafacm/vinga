@@ -348,6 +348,6 @@ carries the per-leg counts, and the per-round, per-model truth is the
 | `id` | `BIGINT` | no | Monotonic row id, never reused. The reconcile cursor. |
 | `session` | `TEXT` | no | The `sessions.session` this event belongs to. |
 | `t_ms` | `INTEGER` | no | The event's offset from session open, in milliseconds, aligned with the capture's decision track. |
-| `name` | `TEXT` | no | The event name, from the event vocabulary the README's table defines. |
+| `name` | `TEXT` | no | The event name, from the event vocabulary the generated event schema reference (docs/reference/events.md) defines. |
 | `level` | `INTEGER` | no | The numeric logging level the event was emitted at. |
 | `fields` | `JSON` | no | The event's payload minus `event`, `session` and `device`, which live on this row and on the session. Field names are the event vocabulary's own, copied verbatim, which is the contract. Never content: the writer strips an utterance's or a reply's `text` and a tool call's `tool` name whatever the storage switches say, because content has its own tables and its own switch and this table is metadata-only by construction. |
