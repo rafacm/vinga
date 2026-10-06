@@ -33,4 +33,6 @@
 # Transports (D8c)
 4074	docs/system-overview.md	kinds=explanation	edited=2,3
 # Ports and topology, with Behind a reverse proxy
-4091	docs/run/exposing-a-deployment.md	kinds=explanation,procedure,contract	edited=2,10
+4091	1-10	docs/run/exposing-a-deployment.md	kinds=explanation,procedure,contract	edited=2,10
+# Dropped in review: running the image twice, against the one-replica topology
+4091	11-11	DROP
