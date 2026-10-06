@@ -88,8 +88,8 @@ this whole section already gives. What is known about the default is
 narrower and recorded where it belongs: it reports the language it
 heard, which is the section below, and OpenAI publishes it at $0.0045
 per minute of audio against $0.006 for `whisper-1`, which is
-[the cost table](../../vinga-server/README.md#the-definitions-worth-entering)
-in the server README.
+[the cost table](conversation-cost.md#the-definitions-worth-entering)
+in the cost guide.
 
 What the local engine still wins: it is the only one that keeps the
 audio on your host, the only one that says how sure it was of the
