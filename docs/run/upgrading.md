@@ -68,6 +68,9 @@ What a particular release asked of an operator is in that release's
 between the build you run and the one you are moving to before you
 roll. The releases that moved the provisioning file or forced a step:
 
+- [2026-09-12](../../CHANGELOG.md#2026-09-12): `server.local_only`
+  becomes `server.data_boundary`, and an entry's `egress` becomes
+  `reach`.
 - [2026-08-30](../../CHANGELOG.md#2026-08-30): memory moves into the
   database, in a `memory` schema, and gains scopes.
 - [2026-08-28](../../CHANGELOG.md#2026-08-28): the conversation store's
