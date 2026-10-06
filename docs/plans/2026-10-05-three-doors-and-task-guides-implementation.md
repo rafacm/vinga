@@ -728,3 +728,234 @@ recipe carried the same defect finding 3 named in the guide, a bare
 connection. The orchestrator gave it the guide's shape: the server
 stopped at step 1, the drop run as the server role through the `vinga`
 service with its password in `~/.pgpass`, in place of step 2.
+
+## M3b: providers, tools, memory and prompts
+
+**Attribution:** anthropic/claude-opus-5-5, thinking high; Claude Code 2.1.289; 2026-10-06.
+
+### What landed
+
+| Decision | Where | Commit |
+| --- | --- | --- |
+| Choosing a voice, ElevenLabs, OpenAI; D8's ElevenLabs table; D8a's voice listing | `docs/run/voices.md` | `Move choosing a voice and the TTS types to a guide` |
+| Choosing how it hears, OpenAI transcription; D8's transcription table; the example's by-name pointer | `docs/run/speech-recognition.md`, `vinga-server/examples/asr-openai.yaml` | `Move choosing how an agent hears to a guide` |
+| The Providers section's own paragraphs; D8c's licensing note; the root README's `#providers` link and the two "every provider option" annotations | `docs/run/providers.md`, `README.md`, `docs/README.md` | `Move the providers table and licensing to a guide` |
+| What the model is actually sent | `docs/run/agents-and-prompts.md` | `Move what the model is sent to its own guide` |
+| The Tools section's memory run, `remember` to "Whether an agent remembers at all" | `docs/run/memory.md` | `Move what an agent remembers to its own guide` |
+| The rest of Tools and What the MCP servers are doing; D8c's SSE and display sentences; Applying a change without a restart promoted to a section | `docs/run/tools-and-mcp.md`, the server README, `tests/unit/test_config_cli_rendering.py` (a docstring) | `Move tools and the MCP status to their own guide` |
+| D8a in the example fragment | `vinga-server/examples/tts-elevenlabs.yaml` | `Keep the ElevenLabs key out of curl's arguments` |
+| The index | `docs/run/README.md` | `List the provider, tool, memory and prompt guides` |
+| Seven statements corrected against the code (below) | `tools-and-mcp.md`, `memory.md`, `speech-recognition.md` | `Correct what the moved guides claimed about the code` |
+| The mapping | `docs/plans/2026-10-05-three-doors-and-task-guides-moves/m3b.tsv` | `Record where M3b's move units went` |
+| D12 | `changelog.d/609-provider-guides.md` | `Add the changelog fragment for the provider guides` |
+
+Each guide commit moved its units and retargeted every inbound link
+and by-name pointer to them, so the link checker passed after each
+one. The guides that link each other were created in an order that
+kept every intermediate commit green (voices, speech recognition,
+providers; prompts, memory, tools), and the last of each group added
+the links back. The README went from 3,231 lines to 2,117 (1,123
+removed, 9 added).
+
+The audit against the README at this branch's base (`ac40be9f`, M3a's
+tip), exit 0 (`.logs/m3b-audit.txt` in the implementer's worktree):
+
+```text
+11 units, 150 paragraphs moved, 24 declared edited, 0 declared dropped, 0 kept in the page, 0 findings
+```
+
+The 24 declared edits, by mapping row and paragraph, and what each
+became:
+
+- Row 8 (Providers) 5: "see Security below" links the README's
+  Security section, where it still is until M3c; 8: "any future
+  `edge-tts` provider" becomes the present rule for that GPL package
+  (D8c).
+- Row 10 (Choosing how it hears) 13: "the cost table near the end of
+  this page" links the README's cost definitions.
+- Row 11 (OpenAI transcription) 3: "the TTS types above" links
+  `voices.md`; 4: the option table becomes a link to its reference
+  section and a sentence naming the facts the reference lacks and
+  where below they are said (D8); 7: correction (below); 21: "See
+  Security below" links the README section.
+- Row 14 (ElevenLabs) 6: the voice listing hands curl the key on
+  standard input through `printf` (D8a), followed by a new sentence
+  saying why; 7: the option table becomes a link to its reference
+  section, keeping as a sentence the one fact the reference lacks,
+  Swedish among the default model's languages (D8); 10: the Security
+  link.
+- Row 15 (OpenAI speech) 18: the Security link.
+- Row 17 (Tools, first run) 3 and 25: correction (below); 7: D8c's SSE
+  rewrite, "vinga implements no SSE transport of its own; an SSE-only
+  server is reached through the `mcp-proxy` bridge", keeping the
+  rationale in the present tense; 12 and 22: corrections; 15 and 23:
+  "the surface below" links the prompt preview in
+  `agents-and-prompts.md`; 27: "`server.conversations.resumption`
+  (below)" links its reference section.
+- Row 18 (memory) 30: the Listening and barge-in link, a same-page
+  anchor, names the README section; 33 and 36: corrections.
+- Row 19 (Tools, last run) 49: "(15 seconds by default)" is the
+  reference's to state, so the sentence links `tool_timeout_s`
+  instead (D8); 50: "The condition for revisiting this is the
+  display..." becomes "The device path renders speech and nothing
+  else, so no result carries structured content to the board" (D8c).
+  The decision itself is the 2026-08-13 MCP operability plan's, which
+  records it, so nothing moves to `direction.md`.
+
+Replaced blocks (D8's table rule): the OpenAI transcription table
+(row 11, 4) and the ElevenLabs table (row 14, 7), each now a link to
+its section of `docs/reference/domain-config.md` (`asr` options for
+`type: openai`, `tts` options for `type: elevenlabs`). The OpenAI
+speech table stays (deviation, below). Each guide also opens with a
+new paragraph linking the reference sections for every field it
+names, M3a's convention.
+
+### Deviations from the plan
+
+- **The OpenAI speech table is kept.** D8 names it among the three
+  tables to replace, but `domain-config.md` declares no options for
+  `tts openai`: it is one of the passthrough types whose options the
+  reference says are written down in their example fragments. Under
+  D8's own test (a table "which the generated page states") it stays,
+  and `voices.md`'s opening says where the undeclared types' options
+  are written down.
+- **Prose was replaced only where a sentence states a key's default,
+  bound or accepted values and nothing else.** That is D8's own
+  enumeration ("a key's default or bound, what a route answers, a
+  column's meaning"), and it found one sentence beyond the two tables:
+  the tool timeout's default. Many moved paragraphs about MCP guidance,
+  prompt fragments and the memory switch describe behavior the
+  reference's field descriptions also describe, often in the same
+  words, since those descriptions were written from this README. They
+  explain and advise, so they kept their words and gained the opening
+  paragraph's links rather than being cut to a link each. A reviewer
+  who reads D8 more strictly will find them in `tools-and-mcp.md`
+  (Guidance for a server's tools), `agents-and-prompts.md` (the
+  `prompt_includes` paragraph) and `memory.md` (Switching it off).
+- **Seven verbatim paragraphs were corrected, not moved verbatim.**
+  The brief, after M3a's review found two falsehoods its move had
+  carried, asked for the moved claims about logging, refusals,
+  offers and bounds to be checked against the code. Twenty-six were
+  checked; seven were wrong or short, all of them errors that predate
+  this move:
+  - the reserved MCP entry names (row 17, 3) and the always-offered
+    builtins (row 17, 25) both omitted `set_device_location`
+    (`tools/names.py` `BUILTIN_TOOL_NAMES`, `tools/source.py`
+    `snapshot`), reserved since 2026-09-11;
+  - "An unset variable fails the boot" holds only for an entry some
+    agent references (row 17, 12): only referenced entries get a
+    manager, and resolution happens in its constructor
+    (`tools/mcp/manager.py`);
+  - "Values shorter than eight characters are left alone" (row 17,
+    22) is not true of a value known to be a credential, which is
+    redacted at any length (`tools/mcp/prompts.py`,
+    `REDACTION_FLOOR`, since #504);
+  - a forgotten fact is held "until that conversation ends" (row 18,
+    33): it is held for as long as the conversation is kept, which on
+    a recording deployment outlives the session, and until the
+    session closes where nothing is recorded (`memory/store.py`);
+  - "the deletion answers how much of it went" (row 18, 36): only an
+    erasure through the API reports the ledger and held facts it took;
+    the retention prune reports conversations, sessions and days
+    (`conversations/store.py`);
+  - the prompt-echo comparison ignores any sentence-final punctuation,
+    not only "a full stop" (row 11, 7; `providers/openai_asr.py`,
+    `TRAILING`).
+- **Applying a change without a restart is promoted from H3 to H2 in
+  the README.** It stays for M3c, and the `## Tools` section it sat
+  under is gone; its anchor is unchanged, and the audit compares
+  headings without their `#`s, so it is not a finding.
+- **`memory.md` has three headings the README did not.** The memory
+  run had no heading of its own; the guide adds "What an agent keeps",
+  "Reading and correcting what it kept" and "Switching it off" above
+  paragraphs that moved verbatim.
+- **The index lists the six guides under Configuring**, ahead of the
+  two M3a put there, in the order a deployment meets them.
+
+### Resolutions
+
+- **Where the `## Tools` heading went.** It moved with the first run
+  to `tools-and-mcp.md`, as a section heading under the guide's title.
+- **`server.conversations.resumption` (below)** pointed at the
+  conversation store, which M3d moves; the guide links the key's
+  reference section instead, which no later milestone moves.
+
+### Discoveries
+
+- **The claims checked and found true**, so the next milestone need
+  not redo them: the entry-name pattern; the empty grant refused and
+  the grant rechecked at call time; the unpublished-grant warning; the
+  shipped-guidance capture, listing check and position-only warnings;
+  the 4000-character cap; device tool name sanitizing; the
+  resumption offer rules; tool failures as error results; the
+  placeholder for non-text content; the memory scope bounds, the
+  injected block, `recall`'s bounds and the ownership-blind answer;
+  the ledger's caps and order; the 700 ms default; `vinga memory set`
+  taking no text argument; memory off withholding all seven tools and
+  every block; the prompt order and `prompt_assembled`; the three MCP
+  states; the 0.1 s floor, retries off and the host-decided OpenAI
+  checks. Two caveats not worth an edit: `vinga memory delete` asks
+  only when standard input is a terminal (`--force` and piped input
+  proceed), and a tool shadowed by a more specific grant draws no
+  unpublished-grant warning.
+- **The guide-to-README links are M3c's and M3d's to retarget.** Five
+  links now point from the new guides into README sections later
+  milestones move: Security (four times), the cost definitions, and
+  Listening and barge-in.
+- **`domain-config.md` describes the passthrough types' options as
+  documented "in the example fragments below"**, and `voices.md`'s
+  OpenAI table is a second home for the same facts as
+  `tts-openai.yaml`. Typing that provider (the reference names #88)
+  would let the table become a link too.
+
+### Inventories
+
+Untruncated, positions only, under `.logs/` in the implementer's
+worktree.
+
+- D8a (`.logs/m3b-d8a-before.txt`, `.logs/m3b-d8a-after.txt`): 3
+  positions at the base plus the Langfuse form; M3b's two are fixed
+  (`vinga-server/README.md:479`, now in `voices.md`, and
+  `vinga-server/examples/tts-elevenlabs.yaml:17`). Two remain, both
+  later milestones': `vinga-server/README.md:657` (L1777 at `3073d08b`,
+  M3c) and the Langfuse form at `:1826` (M3d). The guides under
+  `docs/run/` have none.
+- D8c over the six guides (`.logs/m3b-d8c-guides.txt`, dispositions in
+  `.logs/m3b-d8c-dispositions.txt`): 11 positions, none about vinga's
+  own future: 6 a guide's end state, 2 "later" in the sense of time,
+  2 present conditionals, and one rationale for the fixed prompt order
+  ("lets a later feature compose against a known base"), which names
+  no commitment. The three rewritten before the move are listed above.
+- Prose pointers (`.logs/m3b-prose-pointers.txt`): 23 `above`, `below`
+  or `this page` in the guides, every one within its own page.
+- Anchored links to M3b's anchors (`.logs/m3b-anchors-before.txt`,
+  `.logs/m3b-anchors-after.txt`): 6 lines before (the root README's
+  `#providers`, and five inside the server README), none after. By-name
+  pointers (`.logs/m3b-by-name-before.txt`,
+  `.logs/m3b-by-name-after.txt`): the root README's "every provider
+  option", `docs/README.md`'s annotation, the example comment and the
+  test docstring; what remains is the guides' own headings and code
+  that names the OpenAI API or a test section. Tests reading the README
+  (`.logs/m3b-tests-reading-readme.txt`): only `test_event_docs.py`,
+  whose section is M3d's.
+
+### Verification
+
+On agentpi, from the worktree root unless noted:
+
+- `python3 scripts/check_doc_links.py .`: `checked 317 files, 0 failures`, exit 0.
+- `python3 scripts/check_run_use_pages.py .`: `checked 28 Run and Use pages, 0 findings`, exit 0 (the six guides joined M3a's 22).
+- `python3 scripts/fold_changelog.py check .`: `checked 2 fragments, 0 failures`, exit 0.
+- `python3 scripts/audit_doc_move.py` over `m3b.tsv`: exit 0, quoted above.
+- `uv run ruff check .` from `vinga-server/`: All checks passed (a test docstring changed).
+- `uv run pytest tests/unit -q -n auto --dist loadfile` from
+  `vinga-server/`: `8113 passed, 19 skipped in 930.39s (0:15:30)`,
+  exit 0, run after the test docstring changed; every commit after it
+  touches documentation only.
+- The voice listing's `curl -K -` form, run against a local listener
+  with a dummy key: the request carried the `xi-api-key` header.
+- `uv run pytest tests/census -q` from `vinga-server/`: run last,
+  after this section; its outcome is in the hand-back rather than
+  here.
+- Not run: the integration lane, since M3b changes no code it
+  exercises and adds no migration.

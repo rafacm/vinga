@@ -1020,7 +1020,7 @@ Pages are this plan's modules; the reader is the caller.
   `limits-and-probes.md`, Transports into `system-overview.md`, every
   inbound link and pointer for those sections (D10, D14), and
   `scripts/audit_doc_move.py` with its tests, then its first mapping.
-- [ ] **M3b: providers, tools, memory and prompts.** `providers.md`,
+- [x] **[M3b: providers, tools, memory and prompts](2026-10-05-three-doors-and-task-guides-implementation.md#m3b-providers-tools-memory-and-prompts)** (PR TBD). `providers.md`,
   `speech-recognition.md`, `voices.md` (the three option tables per D8),
   `tools-and-mcp.md`, `memory.md`, `agents-and-prompts.md`.
 - [ ] **M3c: configuration and security.** `configuration-api.md`, the
