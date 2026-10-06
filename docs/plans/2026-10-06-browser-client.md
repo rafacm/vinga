@@ -382,6 +382,20 @@ one more thing to document and refuse. The plan review may ask for a
 key; if so it goes under `server.onboarding`, beside the alias it sits
 with.
 
+**D6a. Expired links are removed, not only refused.** `try_links.py`
+owns expiry removal: every mint and every claim first prunes records
+past their expiry, and the store holds at most a fixed number of live
+links (a mint past the bound refuses with a fixed sentence), so neither
+memory nor expired bearer material grows without limit. Tests advance
+the injected clock and assert expired records are gone from the store,
+not merely refused.
+
+**D6b. Issuance refuses when onboarding is off.** With
+`server.onboarding.enabled` false there is no alias for the redeem
+response to hand over and no `/try/` page, so `POST /api/runtime/try-links`
+refuses with a fixed sentence naming the setting, and `vinga info` prints
+it in the link's place. API and CLI tests cover it beside D5a's.
+
 **D7. Every surface reads a browser board as a board.** No new event
 type and no new field: `ota_check`, `session_open` and the rest carry
 the browser's MAC like any device's. The device record's name is how an
@@ -640,6 +654,8 @@ Say instead: proxy request-target logging for every `/x/` route, including `try-
 2. **P1: Expired try tokens have no deletion mechanism.**
 Evidence: D5/D6 define an in-memory token record with expiry, while D7a promises it is not retained beyond expiry. No pruning, timer, or expiry sweep is specified. Issuing links indefinitely therefore retains expired bearer material and grows memory.
 Say instead: `try_links.py` owns expiry removal, including a bounded pruning strategy or scheduled removal; tests must advance the injected clock and prove expired records are removed, not merely refused.
+
+   *Resolution:* Accepted. D6a: every mint and claim prunes expired records first, and the store holds at most a fixed number of live links (refusing a mint past the bound), so expired tokens are removed; tests advance the injected clock and assert removal, not just refusal.
 
 3. **P2: The origin rule has no implementable owner.**
 Evidence: D5c says the link uses `localhost:<port>` "when the CLI reached the API on a loopback address," but the server cannot know the address the CLI used. Existing `RuntimeInfo` exposes an onboarding URL, not the safe public-origin value needed for this rule.
