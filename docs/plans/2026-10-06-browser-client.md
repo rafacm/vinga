@@ -463,7 +463,10 @@ appears in exactly the places a board's does (the OTA reply's body,
 which hands it to its owner) plus the inbound `vinga.token.*`
 subprotocol value, which is read and dropped. The try token appears in
 exactly two: the issuance response to the operator's authenticated
-request, and the inbound body of `POST /try/redeem`. Neither is logged,
+request, and the inbound body of `POST /try/redeem`, plus the operator's
+own terminal, where `vinga info` prints the link: an owner-facing
+disclosure on stdout, never written to a server log, event, exception,
+cache or any API response beyond issuance. Neither is logged,
 retained beyond its expiry, echoed, returned by any other route, carried
 in an accepted subprotocol, or written to any event field or exception
 text, in either log format; sentinel tests plant credential-shaped
@@ -737,6 +740,8 @@ Say instead: add a fake-media case whose track reports echo cancellation unavail
 8. **P2: D7a omits the required CLI disclosure of the try token.**
 Evidence: D5 requires `vinga info` to print `<origin>/try/#<token>`, while D7a says the try token appears in exactly the issuance response and redeem request body, and sentinel tests assert absence everywhere else.
 Say instead: classify the operator's `vinga info` stdout as an explicitly allowed owner-facing disclosure, while requiring it not to enter server logs, events, exceptions, caches, or any API response beyond issuance.
+
+   *Resolution:* Accepted. D7a lists `vinga info`'s stdout as the one owner-facing disclosure of the try token, and states it reaches no server log, event, exception, cache or API response beyond issuance.
 
 9. **P2: The browser CI lane lacks a provisioned, pinned runtime.**
 Evidence: M3 requires Playwright Python plus a Chromium container, but `pyproject.toml` has no Playwright dependency and the existing workflow has no browser-image setup. "Containerized Chromium" alone does not state where the test runner, browser binary, fake WAV, or server networking are installed.
