@@ -1259,6 +1259,17 @@ def create_app(
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
+        # No slash redirects anywhere on this application, for the reason
+        # the configuration API turned them off (`config/api.py`): the
+        # router's default answers a path one slash away from a route with
+        # a 307 whose `Location` repeats the path and the query it was
+        # asked with, before any handler or guard has run, so a value in
+        # a URL somebody typed comes back in a response header. Every HTTP
+        # route here is registered in both spellings (the route inventory
+        # holds them to it), so nothing needs the redirect, and a spelling
+        # no route has meets this application's own 404. The redirect is
+        # an `http` scope's only, so the websocket path is unchanged.
+        redirect_slashes=False,
     )
     if config is None:
         booted = load_boot_config()
@@ -1343,9 +1354,10 @@ def create_app(
     # of their own, and this is the same mechanism through the same
     # helper.
     #
-    # Registered here rather than turned off for the whole application:
-    # `redirect_slashes` is the router's, and the websocket path is not
-    # this milestone's to change.
+    # Registered in both spellings, which is also what lets the router's
+    # slash redirect be off for the whole application (#613, above): a
+    # route answered in one spelling only would have been reached by the
+    # redirect, and now meets a 404 instead.
     # From the constants `ota_path`'s validator reserves, so that where
     # the probes are served and what an OTA path may not be are one fact
     # rather than two that must agree.
