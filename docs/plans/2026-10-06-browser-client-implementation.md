@@ -933,3 +933,197 @@ Verification after the round, from the worktree's `.logs/`:
   three redaction tests) in 46.2 to 46.8 s, 52 to 53 s wall
 - Link check `0 failures`, fragment check `0 failures`
 - `uv run pytest tests/census -q`, last, after this section: `66 passed in 29.70s`
+
+## M4: the device guide and the rest of the footprint
+
+**Attribution:** anthropic/claude-opus-5-5, thinking high; Claude Code 2.1.291; 2026-10-06.
+
+A documentation milestone: no code, no test and no generated document
+changed.
+
+### What landed
+
+| Footprint item | Where | Commit |
+| --- | --- | --- |
+| The Use door's page (D3, Q4, Q5, D9) | `docs/devices/browser.md` (new) | `Write the browser client's device guide` |
+| A browser-client entry outside the board table, the board-only opening and heading reworded | `docs/devices/README.md` | `List the browser client beside the board table` |
+| The glossary's Device entry, one sentence in concepts | `docs/glossary.md`, `docs/concepts.md` | `Say a device may be a browser` |
+| The Use door | `docs/README.md` (the door, and the "Where knowledge lives" row that named the guide as still to build), `README.md` (the documentation list's `devices/` line) | `Open the browser guide from the Use door` |
+| The `/try/` step (#611's D8) | `docs/run/with-a-coding-agent.md` | `Hand the try link to the person, never the agent` |
+| Changelog | `changelog.d/613-device-guide.md` | `Record the device guide in a changelog fragment` |
+| The manual checkpoint | below, written and not run | this section's commit |
+| The #301 comment (D8) | handed to the orchestrator to post, not posted here | none |
+
+The device guide follows the board guides' house style: every section
+says where its facts come from, **checked in the browser lane**, **read
+from the page's code**, or **not checked at all**. What it claims
+checked is what M3's four lane cases assert; everything else is marked
+as read from `browser/static/` or as unchecked, and echo cancellation
+in a real room is stated as unchecked on any computer.
+
+### Deviations from the plan
+
+1. **The coding agent hands over the step, not the link.** #611's D8
+   says #613 adds "the guide's step that hands it to the person". A
+   try link is a credential until a browser opens it, and the guide's
+   third rule is that a secret the coding agent receives sits in its
+   transcript and its provider's logs for good. So the step makes the
+   link the person's (section 4 lists it beside the other steps that
+   carry a secret): they print it with the same client at their own
+   prompt, unfiltered, and open it; the coding agent starts the event
+   stream first, asks which computer the browser is on, and checks the
+   browser by its `ota_check`, never by the link.
+2. **Every `vinga info` the guide runs is filtered**, which reaches
+   beyond the `/try/` step into sections 1, 3 and 6. Each `vinga info`
+   run issues a new link (see Discoveries), and the guide had the
+   coding agent run it in section 1 and again in the interview, which
+   would put a live link in its transcript every time. The three
+   commands are now `... vinga info | grep -v '/try/#'`: the link sits
+   on a line of its own, so the filter drops it and keeps the label
+   line, which ends in a colon when a link was issued and carries the
+   refusal sentence when none was. Run against a server from this
+   branch, the filtered output held no `/try/#` and the label line,
+   and an unfiltered run in the same session held exactly one link
+   (`.logs/m4-try-step-info-filtered.log`).
+3. **The project README's documentation list** is not in the plan's
+   footprint. Its `devices/` line said "a guide per board"; it now
+   names the browser client's guide too. The hardware table is
+   untouched, since it lists boards alone.
+4. **A changelog fragment, in a documentation milestone.** The house
+   records new guides (the LLM and coding-agent guides have entries),
+   and a coding agent following its guide now behaves differently, so
+   the change is operator-visible on both counts. M3's fragment covers
+   the client itself; this one covers the guide and the step.
+
+No other deviation: the guide's sections are the plan's list, and the
+glossary, concepts, devices index and Use door changes are the ones the
+Documentation footprint names.
+
+### Discoveries
+
+- **`vinga info` issues a try link on every run, and has no way to
+  report without one.** Whatever runs it (a coding agent, a script, a
+  person checking the revision) receives a fresh credential and adds
+  one to the server's 32 live links for ten minutes. The guide works
+  around it with the filter; a way to ask `info` for its report without
+  issuing a link, or issuing links from a command of their own, is a
+  CLI design question and a follow-up candidate for Rafael, not
+  something a documentation milestone decides.
+- **A browser's device name may be read aloud with its MAC in it.**
+  Read from the code, not observed: `is_default_device_name`
+  (`config/models.py`) recognizes only the `Device <mac>` shape, so a
+  record a try link names `Browser <mac>` counts as named
+  (`LiveDevice.named`), and wherever the prompt's device block is
+  assembled (`runtime/prompt.py`, `device_introduction`) the agent is
+  told it is speaking through "a device called Browser <mac>", which
+  `concepts.md` says an agent never does with a MAC. In this
+  milestone's two runs (mock providers, recording and memory off,
+  before and after a `vinga apply`) every `prompt_assembled` event
+  carried the persona alone, so the case was not reached
+  (`.logs/m4-try-step-events.log`,
+  `.logs/m4-try-step-apply-run-events.log`). A follow-up candidate for
+  whoever owns the naming rule: either reserve the browser shape too,
+  or name browsers without the MAC.
+- **Redeeming a link writes no event.** In the run, the stream's first
+  event was the `ota_check` at Start, carrying `board` `vinga-browser`
+  and `firmware` `0.0.0`; the redemption itself is silent, as D7
+  intends. The guide says so, since a coding agent watching the stream
+  would otherwise wait for one.
+
+### The manual checkpoint: written, not run
+
+**Not run.** No laptop and no room were available to this milestone;
+nothing below has been observed, and the device guide claims none of
+it. Whoever runs it records the result here, under this heading, and
+updates the guide's "Which browsers were checked" and "What is not
+claimed" sections in the same change.
+
+*Setup.* A laptop with its built-in microphone and speakers, no
+headphones, in an ordinary room. Desktop Chrome, its version from
+`chrome://version`. A server from this branch's head or later, with
+real providers for VAD and ASR at least (the mock ones hear nothing
+real), on the same laptop so the link names `localhost`, or reached
+over `https://` from it. The speakers at the volume someone would talk
+at.
+
+*Steps, each with what to observe:*
+
+1. In one terminal, `vinga events tail --follow`; in another,
+   `vinga info`, and open the link it prints in Chrome. The page says
+   it is bound to the default agent.
+2. Press Start and allow the microphone. The page says "Listening. Say
+   something." with no "cannot cancel its own echo" sentence, and the
+   server's log says `listening (realtime mode)`. Record the mode; if it
+   is auto, Chrome reported echo cancellation off, which is itself the
+   finding.
+3. Ask for a reply long enough to take ten seconds or more, then stay
+   silent. Observe: the whole reply plays, the stream shows `replied`,
+   and no `barge_in` and no `heard` arrive while it plays. A
+   `barge_in` here means the reply leaked through the echo canceller
+   into the microphone and cut itself off.
+4. Ask again, and speak over the reply partway through. Observe:
+   `barge_in`, the reply stops (estimate by ear how quickly), and the
+   new utterance is answered.
+5. Press Interrupt during a reply. Observe: the reply stops at once and
+   `reply_finished` carries `outcome` `aborted`.
+6. Stay silent for the idle timeout (two minutes by default). Observe:
+   "The conversation ended because nobody spoke for a while." and
+   `session_closed` with `reason` `idle`.
+7. Optionally, step 3 again at the speakers' full volume, and the page
+   in Firefox and Safari: whether it runs, what it says it lacks, and
+   which mode it picks.
+
+*Record:* the date, the laptop and its operating system, the browser
+and its full version, the server's revision, the providers for each
+stage, the volume, and for each step what was observed, including any
+`barge_in` that nobody's speech caused.
+
+### The #301 comment
+
+D8's recommendation is a GitHub write, which this milestone does not
+make: its text was handed to the orchestrator to post on #301.
+
+### Verification
+
+On agentpi, from the worktree, each line quoted from its log in the
+worktree's `.logs/`:
+
+- The commands the pages quote, run where they can be:
+  `vinga info --help`, `vinga device --help`,
+  `vinga device pending claim --help`, `vinga default-agent --help`,
+  `vinga list --help`, `vinga events tail --help` and
+  `vinga simulator --help`, each exit 0 and each naming what the pages
+  say (`m4-*-help.log`).
+- **The coding-agent step, executed** (`m4-try-step-*.log`; the driver
+  scripts are kept beside them as `.py.txt`): a server booted from this
+  worktree on a scratch database with mock providers and a default
+  agent; `vinga events tail --follow` started first; the guide's
+  filtered `vinga info` (no `/try/#` in its output, the label line
+  ending in a colon); an unfiltered `vinga info` (exactly one link,
+  naming `http://localhost:18094`) opened in Chromium 153.0.8010.12 from
+  Playwright 1.63's image with a sound file as the microphone. The page
+  said it was bound, the address held no fragment after load, Start
+  went through "Checking in with the server.", "Listening. Say
+  something.", "Speaking." and "Listening.", the transcript read
+  `You: hello` and `Reply: You said hello.`, End said "You ended the
+  conversation." and offered "Start again". The stream showed
+  `ota_check` (`board="vinga-browser"`), `prompt_assembled`,
+  `session_open`, `turn_started`, `heard`, `llm_round`,
+  `speaking_started`, `reply_finished` (`outcome="completed"`),
+  `replied`, `speaking_finished` and `session_closed`
+  (`reason="client"`), and `vinga list` showed the device as
+  `Browser <mac> -> assistant`. A first run that pressed End mid-reply
+  showed `reply_finished` `aborted` and no `replied`, which is why the
+  guide's step waits for the reply.
+- `python3 scripts/check_doc_links.py .`: `checked 334 files, 0 failures`
+- `python3 scripts/check_run_use_pages.py .`: `checked 37 Run and Use pages, 0 findings`
+- `python3 scripts/fold_changelog.py check .`: `checked 2 fragments, 0 failures`
+- D8c over the lines this milestone added to the seven pages it
+  touched (338 lines), for `will `, `later`, `planned`, `future`,
+  `not yet` and `🚧`: no hit (`m4-d8c-sweep.txt`, positions only);
+  the 29 hits elsewhere in those pages are lines this milestone did not
+  write. No em-dash and no issue reference on an added line.
+- The generated documents: none can have moved, since no code, field
+  description or command changed.
+- The unit, integration and browser lanes were not run: no code
+  changed.
