@@ -263,6 +263,7 @@ historical  vinga reference server
 historical  vinga reload
 historical  vinga schema
 historical  vinga schema provider asr openai
+historical  vinga session
 historical  vinga session as
 historical  vinga session as grouped per-turn
 historical  vinga session delete
@@ -279,6 +280,7 @@ historical  vinga simulator run
 historical  vinga simulator run URL
 historical  vinga status
 historical  vinga status mcp-server
+historical  vinga-server config agent-defaults set
 historical  vinga-server config apply
 historical  vinga-server config check
 historical  vinga-server config cli-reference
@@ -422,6 +424,7 @@ respell  vinga-server config agent set assistant
 respell  vinga-server config agent set house
 respell  vinga-server config agent set kids
 respell  vinga-server config agent set sam
+respell  vinga-server config agent-defaults export
 respell  vinga-server config agent-defaults set
 respell  vinga-server config apply
 respell  vinga-server config check
