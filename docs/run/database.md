@@ -115,9 +115,11 @@ five when it is set, accepting `postgresql://` and
 `postgresql+psycopg://` and refusing everything else, because a second
 storage backend is not a thing this server has.
 
-The server reads all of it at boot, and the config commands read none
-of it: they are clients of the API, and where the rows are kept is the
-server's business.
+The server reads all of it at boot, and the config commands that go
+through the API read none of it: they are clients of the API, and where
+the rows are kept is the server's business. `vinga-server config
+check` is the exception, since it runs a boot's read on the server
+host.
 
 **A database the server cannot reach is a boot that refuses**, with a
 sentence naming those variables and telling a checkout to run `docker

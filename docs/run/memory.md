@@ -147,7 +147,8 @@ agent remembers, what a device's notes hold and what a conversation is
 keeping never leave this deployment as storage: they are rows in the
 database it already owns, they travel in the same `pg_dump` as
 everything else, and no other server is told about them. But they are
-injected into the system prompt on every reply, and `recall` answers a
+read when an agent starts speaking in a conversation and carried in the
+system prompt of every reply after that, and `recall` answers a
 model with more of them on demand, which makes them prompt content: they
 follow the active LLM provider's reach like the transcript and the
 persona do, so an agent on a cloud model sends what it remembered along
