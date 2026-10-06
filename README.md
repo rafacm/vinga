@@ -344,7 +344,7 @@ Any board xiaozhi-esp32 supports can work, since the device runs upstream's firm
 - [**reference/**](docs/reference/): generated from the code and diffed by CI, so it cannot come to describe a server this repository does not build. Every CLI command, every configuration field, the API contract, and the structured events.
 - [**architecture/**](docs/architecture/README.md): the promises vinga makes to whoever runs it, the guidelines that keep them, and the design and CLI standards every change is held to.
 
-The other two READMEs are pages in their own right: [`vinga-server/`](vinga-server/README.md) for the configuration and the security defaults, and [`vinga-esp32/`](vinga-esp32/README.md) for the firmware side.
+The other two READMEs are pages in their own right: [`vinga-server/`](vinga-server/README.md) for the server's conversation behavior and observability, with configuring and securing it in the [task guides](docs/run/README.md), and [`vinga-esp32/`](vinga-esp32/README.md) for the firmware side.
 
 ## Credits
 
