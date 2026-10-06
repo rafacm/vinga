@@ -13,8 +13,25 @@ OTA check. The rejections that come after the accept (a malformed MAC,
 a device bound to no agent) stay where M5 put them, inside the session,
 because by then the device has proved who it is and the useful thing to
 tell it is what is wrong with its configuration.
+
+A device presents its identity and its token in one of two places. A
+board sets the `Authorization`, `Device-Id` and `Client-Id` headers. A
+browser's `WebSocket` cannot set a header, so it offers the same three
+facts as `Sec-WebSocket-Protocol` values instead (#613, Q3): the
+versioned protocol, `vinga.mac.<12 hex>`, `vinga.client.<uuid>` and,
+when the deployment issues tokens, `vinga.token.<token>`. Every
+character of a MAC's hex, a UUID and a token (urlsafe base64 and a
+dot) is legal in a subprotocol. The headers win whenever any of the
+three is present, so nothing a board sends is ever read another way.
+Either reading becomes one `Credential`, checked by the same
+`refusal_reason`, and the session is handed its identity half, which
+carries no token, and accepts selecting the protocol constant, never an
+offered value: the one that carries the token is read here and dropped.
 """
 
+import re
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 
 from fastapi import APIRouter
 from starlette.websockets import WebSocket
@@ -23,6 +40,7 @@ from vinga_server.auth import DeviceAuth
 from vinga_server.composition import Composition
 from vinga_server.config.models import normalize_mac
 from vinga_server.device.boundary import WEBSOCKET_PATH
+from vinga_server.device.handshake import BROWSER_SUBPROTOCOL, Handshake
 from vinga_server.device.recording import recordings
 from vinga_server.device.session import DeviceSession
 from vinga_server.events import ServerEvents
@@ -49,6 +67,19 @@ events = ServerEvents(__name__)
 
 # The scheme both the firmware and xiaozhi-sdk send the token under.
 BEARER = "bearer "
+
+# The three headers a board's identity and token arrive in. Any one of
+# them present makes the request a board's, read off its headers alone.
+CREDENTIAL_HEADERS = ("authorization", "device-id", "client-id")
+
+# The prefixes of a browser's offered subprotocols, one per fact.
+MAC_SUBPROTOCOL = "vinga.mac."
+CLIENT_SUBPROTOCOL = "vinga.client."
+TOKEN_SUBPROTOCOL = "vinga.token."
+
+# What a MAC is in a subprotocol: twelve hex digits and no separators,
+# since a colon is not a legal subprotocol character.
+_BARE_MAC = re.compile(r"[0-9a-fA-F]{12}")
 
 router = APIRouter()
 
@@ -91,14 +122,85 @@ def signed_device_id(device_id: str) -> str:
         return device_id.strip().lower()
 
 
+@dataclass(frozen=True)
+class Credential:
+    """What one upgrade presented: the identity the session will serve,
+    and the token that identity is checked with.
+
+    The token is kept out of the representation, so a credential that
+    reaches a traceback or a debugger's print says who, never with what.
+    """
+
+    handshake: Handshake
+    token: str | None = field(default=None, repr=False)
+
+
+def credential_of(websocket: WebSocket) -> Credential:
+    """The identity and token this upgrade presented, from a board's
+    headers or a browser's subprotocols."""
+    return presented(websocket.headers, websocket.scope.get("subprotocols", ()))
+
+
+def presented(headers: Mapping[str, str], offered: Sequence[str]) -> Credential:
+    """The credential in a set of upgrade headers and offered
+    subprotocols.
+
+    A board's when any of the three credential headers is present, or
+    when the browser protocol is not offered at all: the headers alone,
+    exactly as the gate always read them, so a request that carries
+    neither still meets the refusal it always met. A browser's otherwise.
+
+    In a browser's list each fact is read only when exactly one value
+    offers it. None or two is the fact missing, which the checks that
+    follow answer as they answer a board missing it: no token is
+    `no_token`, an identity that is not one fails the token check, and
+    with device authentication off the session answers an unusable MAC
+    after the accept as it answers a board's header. So a malformed list
+    meets the existing reasons and needs none of its own.
+    """
+    if any(name in headers for name in CREDENTIAL_HEADERS) or (
+        BROWSER_SUBPROTOCOL not in offered
+    ):
+        return Credential(
+            Handshake.of_headers(headers),
+            bearer_token(headers.get("authorization", "")),
+        )
+    mac = _only(offered, MAC_SUBPROTOCOL)
+    return Credential(
+        Handshake(
+            device_id=_colon_form(mac),
+            client_id=_only(offered, CLIENT_SUBPROTOCOL),
+            subprotocol=BROWSER_SUBPROTOCOL,
+        ),
+        _only(offered, TOKEN_SUBPROTOCOL) or None,
+    )
+
+
+def _only(offered: Sequence[str], prefix: str) -> str:
+    """What follows `prefix` in the one offered value that starts with
+    it, or the empty string when none or more than one does."""
+    matching = [value[len(prefix) :] for value in offered if value.startswith(prefix)]
+    return matching[0].strip() if len(matching) == 1 else ""
+
+
+def _colon_form(mac: str) -> str:
+    """A subprotocol's twelve hex digits in the colon form a board sends
+    in `Device-Id`. Anything else passes through as it arrived, to be
+    answered as an unusable `Device-Id` is."""
+    if not _BARE_MAC.fullmatch(mac):
+        return mac
+    return ":".join(mac[at : at + 2] for at in range(0, 12, 2)).lower()
+
+
 def refusal_reason(
-    device_auth: DeviceAuth | None, websocket: WebSocket
+    device_auth: DeviceAuth | None, credential: Credential
 ) -> AuthRejection | None:
     """Why this handshake is refused, or None when it may proceed.
 
     The identity a token is checked against is the pair the OTA reply
-    signed for, read from the headers the firmware sets: `Device-Id`
-    holds the MAC and `Client-Id` the device UUID.
+    signed for, as the credential carries it: the MAC and the device
+    UUID, from a board's `Device-Id` and `Client-Id` headers or from a
+    browser's subprotocols, checked the same way whichever it was.
 
     A member rather than a string, because the answer IS the closed set
     the event declares: a spelling this returned that the set does not
@@ -107,11 +209,11 @@ def refusal_reason(
     """
     if device_auth is None:
         return None
-    token = bearer_token(websocket.headers.get("authorization", ""))
+    token = credential.token
     if token is None:
         return AuthRejection.NO_TOKEN
-    device_id = signed_device_id(websocket.headers.get("device-id", ""))
-    client_id = websocket.headers.get("client-id", "").strip()
+    device_id = signed_device_id(credential.handshake.device_id)
+    client_id = credential.handshake.client_id
     if not device_auth.verify(token, client_id, device_id):
         return AuthRejection.BAD_TOKEN
     return None
@@ -121,7 +223,8 @@ def refusal_reason(
 async def conversation(websocket: WebSocket) -> None:
     comp: Composition = websocket.app.state.composition
 
-    refusal = refusal_reason(comp.device_auth, websocket)
+    credential = credential_of(websocket)
+    refusal = refusal_reason(comp.device_auth, credential)
     if refusal is not None:
         # A fixed sentence and a null device, deliberately (the PR #153
         # review). Nothing is authenticated at this point: the Device-Id
@@ -137,9 +240,10 @@ async def conversation(websocket: WebSocket) -> None:
         return
 
     # Read only now. Past the refusal above the token verified against
-    # this header, so from here it is a device this server established
+    # this identity, so from here it is a device this server established
     # rather than a name a stranger sent.
-    device_id = websocket.headers.get("device-id", "").strip().lower()
+    handshake = credential.handshake
+    device_id = handshake.device_id.lower()
 
     session = DeviceSession(
         websocket,
@@ -151,6 +255,7 @@ async def conversation(websocket: WebSocket) -> None:
         comp.sessions,
         comp.live,
         comp.telemetry,
+        handshake=handshake,
     )
     # Admission is decided after the token, so a full server still answers
     # a bad token with a refusal about the token.

@@ -86,6 +86,7 @@ from vinga_server.device.boundary import (
     RuntimeFactory,
     SessionInput,
 )
+from vinga_server.device.handshake import Handshake
 from vinga_server.device.pacing import ReplyPacer
 from vinga_server.device.recording import RecordingFactory
 from vinga_server.events import SessionEvents, logger
@@ -187,8 +188,18 @@ class DeviceSession:
         sessions: "SessionRegistry | None" = None,
         live: LiveEvents | None = None,
         telemetry: "Telemetry | None" = None,
+        handshake: Handshake | None = None,
     ) -> None:
         self.websocket = websocket
+        # Who the upgrade said it was, as `ws.py` read it: from a board's
+        # headers or from a browser's subprotocols, beside the token
+        # check, so the identity this session serves is the one that was
+        # checked (#613, Q3a). None is a caller with no edge in front of
+        # it, a suite driving a session over a socket of its own, which
+        # gets a board's reading of that socket's headers when the
+        # connection starts: the same function `ws.py` reads a board
+        # with, so there is one reading of a board and not two.
+        self._handshake = handshake
         # The world this server is serving, asked rather than kept: a
         # reload replaces it while sessions are open, and what this
         # class reads out of it is read where it is needed (#191). The
@@ -437,9 +448,26 @@ class DeviceSession:
                 self._events.detach(tap)
 
     async def _converse(self) -> None:
-        device_id = self.websocket.headers.get("device-id", "").strip()
-        client_id = self.websocket.headers.get("client-id", "").strip()
-        await self.websocket.accept()
+        handshake = (
+            self._handshake
+            if self._handshake is not None
+            else Handshake.of_headers(self.websocket.headers)
+        )
+        device_id = handshake.device_id
+        client_id = handshake.client_id
+        if handshake.subprotocol is None:
+            # A board's accept, exactly as it always was: no subprotocol
+            # offered, none selected. Spelled without the argument
+            # rather than with `subprotocol=None`, which is the same
+            # call to starlette, because the sockets the suites drive a
+            # session over accept nothing else.
+            await self.websocket.accept()
+        else:
+            # A browser's, selecting the protocol it offered. Only ever
+            # the constant the handshake carries, never one of the
+            # offered values, so the value that carries a browser's
+            # token is never echoed back in the upgrade's response.
+            await self.websocket.accept(subprotocol=handshake.subprotocol)
         self._opened_at = asyncio.get_running_loop().time()
         # The same origin, handed to the emitter, so the seconds the
         # dropped-frame aggregate counts into are the seconds the
