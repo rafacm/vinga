@@ -1093,10 +1093,10 @@ jobs:
           fi
 
   # The browser lane (#613): the client page the server ships, loaded in
-  # headless Chromium from the built wheel's own install, holding three
+  # headless Chromium from the built wheel's own install, holding four
   # whole conversations with it (realtime with a barge-in and the idle
-  # ending, auto when echo cancellation is unavailable, and the device
-  # tools). `tests/browser/run.sh` is the whole of it, here and locally:
+  # ending, auto when echo cancellation is unavailable, the device
+  # tools, and an unbound browser pairing by its code). `tests/browser/run.sh` is the whole of it, here and locally:
   # it builds the wheel, installs it constrained to the lockfile, and
   # runs the cases against the server it starts from that install. The
   # image job runs the same cases a second time against the image it
@@ -1232,10 +1232,10 @@ jobs:
       VINGA_DB_PORT: "5432"
       VINGA_DB_USER: vinga
       VINGA_DB_PASSWORD: smoke-lane-db-password-not-a-real-deployment
-      # One database per scenario, so the three of them never see each
-      # other's rows: the boots-on-external check, the refusal check and
-      # the seeded smoke server all start their own servers against the
-      # same instance.
+      # One database per scenario, so none of them sees another's rows:
+      # the boots-on-external check, the refusal check, the seeded smoke
+      # server and the browser lane's server all start their own servers
+      # against the same instance.
       SMOKE_NETWORK: vinga-smoke-net
     steps:
       - uses: actions/checkout@v7
@@ -1820,7 +1820,7 @@ jobs:
           docker rm -f vinga-jaeger || true
           docker rm -f vinga-browser || true
 
-      # And the database the three scenarios shared, with the network it
+      # And the database the scenarios shared, with the network it
       # was on. `always()` because a job that failed part way still has
       # a container and a network holding a port and a name, and the
       # next run on the same runner would collide with them.

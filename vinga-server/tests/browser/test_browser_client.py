@@ -1,9 +1,10 @@
-"""The browser client, driven end to end (#613, Q5, Q5a, Q5b, D3a, D9).
+"""The browser client, driven end to end (#613, Q5, Q5a, Q5b, D3a, D4, D9).
 
-Three cases, one Chromium. Each opens a fresh try link, so each is a new
-browser bound by its link, and each speaks through the same fake
-microphone loop (`conftest.py` says what it is and why its timing is
-what it is).
+Four cases, one Chromium. Each is a fresh browser profile, so each is a
+new device: three are bound by a fresh try link, and the fourth starts
+from the onboarding URL and pairs by its code. All of them speak
+through the same fake microphone loop (`lane.py` says what it is and
+why its timing is what it is).
 
 What a case asserts it observes from outside the page wherever it can:
 the server's own events by name, the server's log, the API's record of
