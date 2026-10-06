@@ -9,7 +9,9 @@ Whether an agent remembers is its `memory` section, in the domain
 configuration reference under
 [Memory](../reference/domain-config.md#memory). The commands that read
 and correct what it kept are in the CLI reference under
-[`vinga memory`](../reference/cli.md#vinga-memory).
+[`vinga memory`](../reference/cli.md#vinga-memory). The other tools
+an agent is offered, builtins included, are in
+[Giving an agent tools](tools-and-mcp.md).
 
 ## What an agent keeps
 

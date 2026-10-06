@@ -11,7 +11,10 @@ reference: an agent's `prompt` and `prompt_includes` under
 MCP entry's guidance under
 [MCP server](../reference/domain-config.md#mcp-server). The preview
 command is in the CLI reference under
-[`vinga agent preview`](../reference/cli.md#vinga-agent-preview).
+[`vinga agent preview`](../reference/cli.md#vinga-agent-preview). What
+an MCP entry's guidance is for is in
+[Giving an agent tools](tools-and-mcp.md), and what memory contributes
+in [Configuring what an agent remembers](memory.md).
 
 ## What the model is actually sent
 
