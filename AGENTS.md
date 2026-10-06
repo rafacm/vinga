@@ -26,6 +26,9 @@ display) talk to a Python conversation server over WebSocket. It builds on
   defaults that keep those promises, each with an example and a
   counterexample. Read both before designing a feature or deciding
   direction.
+- `docs/run/with-a-coding-agent.md`: read that page instead of this
+  file when you are asked to run or configure a vinga deployment
+  rather than change this code.
 - `vendor/`: reference clones of the upstream repos. Not committed; recreate
   with the clone commands at the top of `docs/xiaozhi-notes.md`.
 

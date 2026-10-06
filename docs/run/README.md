@@ -8,6 +8,13 @@ rather than restating it. They are grouped by what you are doing.
 Changing the server rather than running it is
 [Contributing to vinga](../contributing.md).
 
+## Handing the work to a coding agent
+
+- [Running vinga with a coding agent](with-a-coding-agent.md): for a
+  coding agent working on a person's behalf, and read before this
+  index: which version of these guides to read, the order of the work,
+  the steps that stay the person's, and proving a reply comes back.
+
 ## Deploying
 
 - [Running vinga in a container](running-in-a-container.md): the
