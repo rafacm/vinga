@@ -19,13 +19,17 @@ Changing vinga's code is a different task with different rules:
 and do not follow this page there.
 
 Work through the sections in order. Each rule says what goes wrong
-without it.
+without it. You may have opened this page at some other revision than
+the server's; section 1 is how to tell, so do it before anything else,
+and reread the page at the server's revision if the two differ.
 
 ## 1. Read the documentation at the server's revision
 
 The documentation changes with the code, so read the version the
 person's server was built from: never a newer one, and never your
-memory of one. Ask the server which build it is. `/healthz` needs no
+memory of one. Each page this one links is read at that revision too,
+when you reach the step that links it. Ask the server which build it
+is. `/healthz` needs no
 token:
 
 ```bash
@@ -54,7 +58,10 @@ where each form comes from):
   a hash of another length. The server runs from a checkout, and the
   revision is `git describe --always --dirty` output, which is not a
   reference GitHub can resolve. Read the checkout itself, at its
-  `HEAD`. If you cannot reach the checkout, take the hash (after `-g`,
+  `HEAD`, after confirming that `git rev-parse --short HEAD` in it is
+  the hash after `-g`; when it is not, the server is running other code
+  than the checkout holds, so say so and ask. If you cannot reach the
+  checkout, take the hash (after `-g`,
   where there is one) and read at it on the checkout's remote only
   after confirming the commit exists there: for this repository,
   `https://github.com/rafacm/vinga/commit/<hash>` answers 200 rather
@@ -98,10 +105,12 @@ uv tool install "vinga-server[sim] @ git+https://github.com/rafacm/vinga@<revisi
 
 A server that runs from a checkout has its client in the same
 checkout. Run it from the directory the deployment's `.env` is in, so
-it finds the address and the token there itself:
+it finds the address and the token there itself, and with `--no-sync`,
+so it uses the environment the server runs from rather than changing
+it:
 
 ```bash
-uv run --project <checkout>/vinga-server vinga info
+uv run --no-sync --project <checkout>/vinga-server vinga info
 ```
 
 From here on this page writes `vinga` for whichever of these you use.
@@ -221,6 +230,9 @@ split it like this:
 [the task guides' index](README.md), read at the revision, and follow
 that guide. The index is the one list of guides; every page it names
 links the generated reference for each field and command it uses.
+When no guide names the task, such as adding one more agent,
+[Configuring a deployment](configuration.md) is the general one, and
+the client's `--help` holds the rest.
 
 ## 6. The interview
 
@@ -248,9 +260,10 @@ Then ask, one question at a time and in this order:
    [Choosing the model an agent thinks with](llm.md),
    [Giving an agent a voice](voices.md), and for hearing,
    [Choosing how an agent hears](speech-recognition.md).
-3. **Keep the agent Getting Started creates, or add their own.** Its
-   is called `assistant`. Their own needs a name and a prompt, and
-   either a binding to their board or becoming the `default_agent`.
+3. **Keep the agents that are stored, or add their own.** Getting
+   Started creates one called `assistant`. Their own needs a name and a
+   prompt, and either a binding to their board or becoming the
+   `default_agent`; which of the two is their choice, not yours.
 
 Four conventions hold for every answer:
 
@@ -310,9 +323,10 @@ so does a workstation client installed as section 1 says; one
 installed without the `sim` extra names the extra and stops
 ([Installing it](../reference/cli.md#installing-it)). It also needs the
 OTA URL. `vinga info` prints one, the onboarding URL, when onboarding
-is on. When it prints a sentence saying onboarding is off instead, the
-URL the boards use is the path `server.ota_path` names on the
-deployment's own host, and the server treats that path as the
+is on, and that URL is yours to use: the API prints it to whoever
+holds its token. When it prints a sentence saying onboarding is off
+instead, the URL the boards use is the path `server.ota_path` names
+on the deployment's own host, and the server treats that path as the
 deployment's secret, so it is a step the person runs (section 4): give
 them the simulator line with the URL left for them to fill in, and
 watch the events while they run it. Never guess the URL.
@@ -341,7 +355,8 @@ speaks the agent's fallback phrase, so the simulator prints it after
 
 Stop the stream once `session_closed` has appeared: Ctrl-C in a
 terminal, or, for a background process, a TERM signal to the process
-id you started it as. A background job of a non-interactive shell
+id you started it as (through `uv run`, that is uv's, and TERM to it
+ends the client too). A background job of a non-interactive shell
 ignores the interrupt Ctrl-C sends, and a pattern match such as
 `pkill -f "events tail"` also matches the shell that runs it. What
 each event carries is the [event reference](../reference/events.md),
