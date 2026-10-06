@@ -326,6 +326,22 @@ server; otherwise it prints no link and one sentence saying to set
 `server.public_url` to an HTTPS address. It never prints the listen
 address, and never a guess.
 
+**D5d. One redemption wins.** The token store's `claim(token)` checks and
+marks the token used in one synchronous step with no `await` between
+them, which on the server's single event loop is linearizable; only
+after it returns a winner does redemption mint and write. A loser gets
+the fixed refusal and causes no write. A test fires several redemptions
+of one token concurrently and asserts exactly one binding and the rest
+refused; a mutation that moves the mark after an `await` must fail it.
+
+**D5e. A restart ends every outstanding link.** The store lives in
+process memory (one replica, as the deployment contract says), so a
+restart or an image upgrade invalidates every unredeemed link before its
+ten minutes are up. Redeeming one afterwards meets the same fixed
+refusal; a test restarts the store and asserts it. The onboarding guide
+and the upgrading guide say so in one sentence each: after a restart,
+issue a fresh link with `vinga info`.
+
 **D6. The try link's lifetime.** Ten minutes and one use, as constants,
 not configuration: the issue says minutes, and a key nobody needs is
 one more thing to document and refuse. The plan review may ask for a
@@ -542,6 +558,8 @@ Reviewed 2026-10-06 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.0
    *Resolution:* Accepted. M2's item now names the inert `GET /try/` page, the fragment read and cleared, and the same-origin `POST /try/redeem`; no `/try/<token>` spelling remains outside the recorded findings.
 
 2. **P1: Single-use redemption has no atomicity requirement or concurrent test.** Evidence: D5 describes an in-process token record with a `used` flag (lines 277-295 (`docs/plans/2026-10-06-browser-client.md:277`)), while D5b makes each redemption mint and bind a device (lines 310-318 (`docs/plans/2026-10-06-browser-client.md:310`)). Two simultaneous POSTs can both observe an unused token unless the token-store operation claims it atomically before any await or database work. The plan should require a linearizable `claim(token)` operation, with one winner only, and a parallel-redemption test proving one binding and one fixed refusal.
+
+   *Resolution:* Accepted. D5d: `claim(token)` checks and marks used in one synchronous step with no await between, which is linearizable on the single event loop; minting and writing happen only for the winner; a concurrent-redemption test asserts one binding and fixed refusals, and a mutation moving the mark after an await must fail it.
 
 3. **P2: Authentication-disabled deployments have no defined browser handshake.** Evidence: Q3 always offers `vinga.token.<token>` (lines 108-117 (`docs/plans/2026-10-06-browser-client.md:108`)), but the existing OTA reply deliberately supplies an empty token with `access: open` when device authentication is disabled (auth.py (`vinga-server/src/vinga_server/auth.py:48`)). The plan should specify that an `open` reply omits the token subprotocol while retaining the version, MAC, and client-id subprotocols, and test both auth-enabled and auth-disabled browser sessions.
 
