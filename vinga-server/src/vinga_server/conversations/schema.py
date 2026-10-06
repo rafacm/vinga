@@ -771,7 +771,10 @@ events = Table(
         "name",
         Text,
         nullable=False,
-        comment="The event name, from the event vocabulary the README's table defines.",
+        comment=(
+            "The event name, from the event vocabulary the generated event schema "
+            "reference (docs/reference/events.md) defines."
+        ),
     ),
     Column(
         "level",

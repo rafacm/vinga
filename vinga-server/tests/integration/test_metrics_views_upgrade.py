@@ -82,7 +82,7 @@ BASELINE = "1006_metrics_views"
 # whether it replaced them or rebuilt them.
 SIBLING_BASELINE = "1008_metrics_views_by_device"
 
-HEAD = "1010_turns_name_their_utterance"
+HEAD = "1011_events_cite_the_reference"
 
 # What an analyst leaves standing on one of the four views, and on one
 # of the four siblings. Named here because two fixtures and one
