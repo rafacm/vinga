@@ -14,8 +14,9 @@
 // server closes it or the person ends it, and Start begins another.
 //
 // Two switches are the browser lane's and do nothing unless the page's
-// own address names them: `test-observe=1` publishes the running sum of
-// what the speaker rendered as an attribute of the document, and
+// own address names them: `test-observe=1` publishes, as attributes of
+// the document, the running sum of what the speaker rendered and the
+// gain it applies, and
 // `test-echo-cancellation=off` makes the page treat its microphone as
 // one without echo cancellation, since a fake capture device always
 // reports it on.
@@ -155,8 +156,9 @@ async function start() {
           sampleRate,
           volume,
           observe: OBSERVE,
-          onSum: (sum) => {
+          onObserved: ({ sum, gain }) => {
             document.documentElement.dataset.vingaPcmSum = String(sum);
+            document.documentElement.dataset.vingaGain = String(gain);
           },
         });
         return speaker;
