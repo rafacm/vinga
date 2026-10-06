@@ -370,7 +370,9 @@ same-origin `POST /try/redeem` carrying the token in the body. Redeeming
 consumes the token (an unknown, expired or used token answers one fixed
 refusal, indistinguishable between the three), mints an identity (D1),
 binds and names the device in one operation (D5b), and answers the
-identity and the onboarding page's path, to which the page moves. The
+identity and the onboarding path in the response body, which the page
+stores and uses only as the target of its OTA, poll and identity
+requests; the page itself stays at `/try/`. The
 routes are outside `/api`, so never behind the operator token; the POST
 body is never logged, and the sentinel tests plant a token through it.
 
@@ -587,7 +589,7 @@ be a browser.
 
 - [ ] **M1: the browser credential and the page's home.** The
   subprotocol credential in `ws.py` (Q3), identity minting (D1), the
-  page and static routes under the onboarding path with a placeholder
+  keyless `/try/` page and its revisioned static routes with a placeholder
   page (D2), the unbound start request (D4), the route-table inventory
   test, and the integration handshake test. A server change a reviewer
   can read alone.
@@ -752,6 +754,8 @@ Say instead: name the pinned Playwright/container version, dependency and lockfi
 10. **P3, settled round-2 finding #5: keyless-page wording still conflicts with D2.**
 Evidence: Q2 and D2 correctly keep the page at keyless `/try/`, but M1 still says page assets are "under the onboarding path," and D5 says the page "moves" to the onboarding path after redemption. That would put the key back into an address/history and proxy request target.
 Say instead: state consistently that the browser remains at `/try/`; redemption returns the alias only in a response body, stores it locally, and uses it only as the target of OTA and activation requests.
+
+   *Resolution:* Accepted. M1's item now names the keyless `/try/` page and its revisioned static routes, and D5 says the redeem response hands over the onboarding path in its body, stored and used only as the target of the OTA, poll and identity requests, while the page stays at `/try/`.
 
 11. **P3: The device-guide footprint does not repair the current board-only index.**
 Evidence: M4 names only "a line" in docs/devices/README.md (`docs/devices/README.md:1`), whose heading, opening claim, and table all say the directory contains one guide per board. The issue requires a browser guide without a hardware-table row.
