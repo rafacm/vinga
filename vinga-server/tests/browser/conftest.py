@@ -19,7 +19,6 @@ AudioWorklet and WebCodecs are all available to it without TLS.
 """
 
 import os
-import shutil
 import subprocess
 from collections.abc import Iterator
 from pathlib import Path
@@ -87,9 +86,13 @@ def server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Any]:
             process.kill()
         kept = os.environ.get("VINGA_BROWSER_KEEP_LOG")
         if kept:
-            # Where a run that failed is read afterwards: CI uploads it,
-            # and a local run names a file outside the container.
-            shutil.copyfile(log, kept)
+            # Where a run that failed is read afterwards: CI prints it,
+            # and a local run names a file outside the container. Kept
+            # redacted, since it is kept to be read.
+            from lane import redact
+
+            text = log.read_text(encoding="utf-8", errors="replace")
+            Path(kept).write_text(redact(text), encoding="utf-8")
 
 
 @pytest.fixture(scope="session")
@@ -117,13 +120,17 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo) -> Any:
     report = yield
     if report.when != "call" or not os.environ.get(LANE_ENV):
         return report
-    from lane import DIAGNOSTICS
+    from lane import DIAGNOSTICS, redact
 
     if report.failed:
         for describe in DIAGNOSTICS:
             try:
-                report.sections.append(("browser lane", describe()))
+                said = describe()
             except Exception as failure:  # a page that has gone says why
-                report.sections.append(("browser lane", f"(no diagnostics: {failure})"))
+                said = f"(no diagnostics: {failure})"
+            report.sections.append(("browser lane", redact(said)))
+        # And the failure itself: an assertion's introspection quotes
+        # whatever it compared.
+        report.longrepr = redact(str(report.longrepr))
     DIAGNOSTICS.clear()
     return report

@@ -1152,7 +1152,11 @@ jobs:
           VINGA_BROWSER_KEEP_LOG="$RUNNER_TEMP/browser-server.log" \
             sh tests/browser/run.sh -v --durations=10
 
-      - name: The server's log
+      # The copy the lane kept, which it wrote redacted: the try and
+      # device tokens it issued or saw, and both token shapes besides,
+      # are replaced before the file is written, so printing it here
+      # republishes no credential.
+      - name: The server's log, redacted
         if: failure()
         run: cat "$RUNNER_TEMP/browser-server.log" || true
 
