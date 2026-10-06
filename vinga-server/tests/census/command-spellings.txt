@@ -202,6 +202,7 @@ historical  vinga conversation
 historical  vinga conversation delete
 historical  vinga conversation list
 historical  vinga conversation show
+historical  vinga default-agent set
 historical  vinga default-agent set assistant
 historical  vinga device
 historical  vinga device bind
