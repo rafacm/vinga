@@ -25,8 +25,8 @@ what each class of page may claim.
   does; its header says what the executor needs and why rerunning it
   is safe.
 - [**vinga-server**](../vinga-server/README.md): the server in full:
-  every provider option, the two halves of the configuration and the
-  security defaults; running it and onboarding a device are task
+  the two halves of the configuration and the security defaults;
+  running it, onboarding a device and choosing its providers are task
   guides under `run/`.
 - [**system-overview.md**](system-overview.md): one conversation turn
   from the wake word to the spoken reply, each concept explained

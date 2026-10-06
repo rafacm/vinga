@@ -13,6 +13,8 @@ table below and the example fragments
 [`tts-openai.yaml`](../../vinga-server/examples/tts-openai.yaml) and
 [`tts-piper.yaml`](../../vinga-server/examples/tts-piper.yaml) are
 where they are written down.
+Which engines exist and what each needs installed is
+[Choosing providers](providers.md).
 
 ## Choosing a voice
 

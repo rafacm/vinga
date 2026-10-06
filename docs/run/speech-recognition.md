@@ -12,6 +12,8 @@ and
 [`asr` options for `type: openai`](../reference/domain-config.md#asr-options-for-type-openai).
 This guide is the measurements behind choosing between them and
 setting them.
+Which engines exist and what each needs installed is
+[Choosing providers](providers.md).
 
 ## Choosing how it hears
 

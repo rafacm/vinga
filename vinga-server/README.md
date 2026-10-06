@@ -43,7 +43,6 @@ request to `/api` carries a bearer token.
 ## On this page
 
 - [Goals](#goals): what this server is for, and what it refuses to become.
-- [Providers](#providers): the four stages, what each engine costs in latency and accuracy, and how to choose between local and vendor at every one.
 - [Tools](#tools): MCP servers and the board's own controls, what the model is actually sent, and installing a change without a restart.
 - [Stack](#stack) and [Development](#development): what it is built on, and the two lanes a change is exercised in before it ships.
 - [Configuration](#configuration): the store, the API in front of it, and where a credential lives.
@@ -53,7 +52,7 @@ request to `/api` carries a bearer token.
 - [Logging](#logging) and [Capturing a session](#capturing-a-session): what a running server says about itself, and how to record a conversation for study.
 - [What a conversation cost](#what-a-conversation-cost): the usage each stage reports, and the model definitions a backend needs before it can price them.
 - [The conversation store](#the-conversation-store): what is kept of a turn after it ends.
-- [Running in a container](#running-in-a-container): a pointer to the task guides in [`docs/run/`](../docs/run/README.md), which cover the image, its database, its limits and exposure, upgrading, recovery and onboarding a device.
+- [Running in a container](#running-in-a-container): a pointer to the task guides in [`docs/run/`](../docs/run/README.md), which cover the image, its database, its limits and exposure, upgrading, recovery, onboarding a device, and choosing the providers an agent hears and speaks with.
 - [Status](#status): what works today, and what is still a promise.
 
 ## Goals
@@ -74,52 +73,6 @@ request to `/api` carries a bearer token.
     the device's own
 - Distributed as a multi-arch container image, deployable on your own
   infrastructure
-
-## Providers
-
-Each pipeline stage is a named provider entry in the configuration, and
-each agent picks one provider per stage. The v1 set:
-
-| Stage | Type                | Runs               | Install                          |
-| ----- | ------------------- | ------------------ | -------------------------------- |
-| vad   | `silero`            | locally            | core (pysilero-vad)              |
-| asr   | `faster_whisper`    | locally            | `uv sync --extra faster-whisper` |
-| asr   | `openai`            | OpenAI or anywhere | core                             |
-| llm   | `anthropic`         | Anthropic          | core                             |
-| llm   | `openai_compatible` | anywhere           | core                             |
-| tts   | `piper`             | locally            | `uv sync --extra piper`          |
-| tts   | `elevenlabs`        | ElevenLabs         | core                             |
-| tts   | `openai`            | OpenAI or anywhere | core                             |
-| any   | `mock`              | in tests           | core (deterministic, keyless)    |
-
-"Anywhere" is a `base_url`: those three types speak a dialect rather
-than name a vendor, so each reaches a self-hosted server implementing
-the same endpoint. That is what keeps a fully local pipeline available
-through them, and it is why they cannot declare their own reach.
-
-Model weights are never shipped: faster-whisper models and Piper voices
-download at server startup into a local cache (`download_dir` on the
-provider entry). A fully local, keyless pipeline is Silero +
-faster-whisper + Ollama (through `openai_compatible`) + Piper, and
-`server.data_boundary: host` makes the server refuse to boot anything
-else (see Security below).
-
-The Install column is a checkout's, since a deployment installs nothing:
-both image variants carry `core`, and the default variant carries the
-two extras as well. "Core" here means the server half, which a checkout
-gets from a plain `uv sync` and the image build gets from the `serve`
-extra it names in its Dockerfile. The configuration CLI is the other
-half and carries none of this.
-
-Cloud providers need no extra. They speak their APIs over HTTP, or
-through an SDK the server install already carries for another stage, so
-they are in every server and cost nothing to carry; what makes a
-provider optional is weight or licensing, and a network client has
-neither.
-
-Licensing note: `piper-tts` (piper1-gpl) is GPL-3.0, which is why it is an
-optional extra and never a core dependency of the MIT server. The same
-applies to any future `edge-tts` provider.
 
 ## Tools
 
