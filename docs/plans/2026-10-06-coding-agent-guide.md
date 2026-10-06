@@ -153,6 +153,23 @@ subagent misread or got stuck; each such point is fixed or recorded.
 This is a smoke test of the page, not #610's walkthrough, and the record
 says so.
 
+**D8. What M1 does not carry, and who carries it.** Three of the
+issue's M1 items cannot be true on a Run page today, and each has an
+owner that adds it when the thing exists:
+- **Getting Started's three stages**: #610 rewrites Getting Started and,
+  in the same change, the guide's "order of the work" line.
+- **The `/try/` handoff**: #613 adds the link to `vinga info` and, in
+  the same change, the guide's step that hands it to the person.
+- **The index**: not deferred but resolved. `AGENTS.md` (merged with
+  #609) makes `docs/run/README.md` the one list a procedure joins, one
+  line per guide; a second copy in this guide would be two lists that
+  must agree. The guide links it as the index it reads next, and a new
+  feature still adds exactly one line, there.
+
+A comment on #610 and on #613 names the line each must add, so the
+follow-up is recorded where the work will happen, not only here. #611
+stays open for M2 regardless.
+
 ## Module layout and design footprint
 
 One page: a person's coding agent stops having to infer how to run vinga
@@ -202,6 +219,8 @@ Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
 ---
 
 1. **P1: M1 omits settled issue requirements.** Evidence: plan, D5 and decision 8 (`docs/plans/2026-10-06-coding-agent-guide.md:80`) replaces the guide's one-line-per-guide index with a link and excludes both Getting Started's three stages and the `/try/` handoff. The pasted issue requires all three in M1. The plan should sequence M1 after #610 and #613, or name explicit follow-up work and leave M1 incomplete until those requirements land.
+
+   *Resolution:* Accepted in part. D8 names the owners: #610 adds the three-stage line and #613 the `/try/` handoff, each in the change that builds the thing, and a comment on each issue records it there. The index is resolved rather than deferred: `AGENTS.md`, merged with #609, makes `docs/run/README.md` the one list a procedure joins, so the guide links it instead of keeping a second list that must agree with the first.
 
 2. **P1: Following Getting Started can put credentials in the coding agent's transcript.** Evidence: plan, D2 and D6 (`docs/plans/2026-10-06-coding-agent-guide.md:96`) directs the coding agent through Getting Started while promising it never receives a secret. The linked README (`README.md:115`) generates secrets through shell expansion, and its NVS recipe (`README.md:276`) places a Wi-Fi password in a command the agent might run. The plan should identify those steps as person-run handoffs and provide safe, editor-based instructions before directing a coding agent through them. A grep over the new page alone cannot catch leaks in linked steps.
 
