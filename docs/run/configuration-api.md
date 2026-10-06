@@ -108,7 +108,7 @@ deliberate crossing rather than a mismatch.
 
 **And the namespaces that read the conversation record**,
 `/api/sessions` and `/api/conversations`, the store
-[The conversation store](../../vinga-server/README.md#the-conversation-store)
+[Recording conversations](conversation-store.md)
 describes.
 
 `GET /api/sessions` lists the sessions, newest first, filtered by
@@ -132,7 +132,7 @@ its recap checkpoints and their count; the turns are its dialogue oldest first, 
 every session it spanned. The three erasures, `DELETE
 /api/sessions/{session}`, `DELETE /api/sessions` and `DELETE
 /api/conversations/{conversation}`, are the verbs
-[Deleting on demand](../../vinga-server/README.md#the-conversation-store)
+[Deleting on demand](conversation-store.md#deleting-on-demand)
 describes: one named session, the selector purge (`?session=`, `?device=`,
 `?before=`, at least one, combined with AND), and one named thread.
 A deployment that never
