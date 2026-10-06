@@ -387,9 +387,23 @@ terminal, or, for a background process, a TERM signal to the process
 id you started it as (through `uv run`, that is uv's, and TERM to it
 ends the client too). A background job of a non-interactive shell
 ignores the interrupt Ctrl-C sends, and a pattern match such as
-`pkill -f "events tail"` also matches the shell that runs it. What
-each event carries is the [event reference](../reference/events.md),
-and when each fires is [Reading logs and traces](logs-and-traces.md).
+`pkill -f "events tail"` also matches the shell that runs it.
+
+**The image's client is the exception.** Through
+`docker compose exec -T`, or Getting Started's shell function, which
+is the same thing, a signal stops the client on your side and leaves
+the stream running inside the container, where it goes on following
+the server with nobody reading it. Either bound it in the container
+with `timeout`, which the image carries:
+
+```bash
+docker compose exec -T vinga timeout 300 vinga events tail --follow
+```
+
+or run it in a terminal without `-T`, where Ctrl-C reaches the stream
+itself. What each event carries is the
+[event reference](../reference/events.md), and when each fires is
+[Reading logs and traces](logs-and-traces.md).
 
 **When the reply is the fallback phrase or nothing**, the stream says
 which stage failed: `provider_failed` names the entry and the kind of
