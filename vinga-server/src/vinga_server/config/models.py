@@ -4076,10 +4076,11 @@ class DeviceRecord(BaseModel):
             "What this device is called, free-form, spoken aloud by the agent. Names "
             "are unique once case and spacing are folded together. Leave it out and "
             "the stored name is kept, or `Device <mac>` is taken for a new record. "
-            "That spelling is reserved: a name of the form `Device <mac>` is refused "
-            "for any device whose own MAC it is not, because it is what the server "
-            "calls a board nobody has named and an agent is told the name rather than "
-            "made to read a MAC address out loud."
+            "That spelling is reserved, and so is `Browser <mac>`, what a try link "
+            "calls the browser it binds: a name of either form is refused for any "
+            "device whose own MAC it is not, because it is what the server calls a "
+            "device nobody has named and an agent is told the name rather than made "
+            "to read a MAC address out loud."
         ),
     )
     location: str | None = Field(
