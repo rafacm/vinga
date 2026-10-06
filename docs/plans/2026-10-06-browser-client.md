@@ -247,6 +247,20 @@ the firmware does, and the operator claims it with
 `vinga device pending claim`. Nothing here anticipates #612; when it
 lands, the page needs no change because it follows the reply.
 
+**D4a. Until #612, a browser cannot pair where a default agent admits
+everything.** Today a default agent admits an unknown MAC without a
+code, which would let a cleared browser reach an agent unbound, against
+the issue's rule. Rather than a browser-only exception to that rule
+(a second rule #612 would then have to absorb), the page's own start
+request (`POST /x/<key>/try/identity`) refuses to mint an identity while
+a default agent is set, and the page tells the person to ask for a try
+link. With no default agent set, it mints, checks in, and pairs with the
+six-digit code as D4 describes. When #612 makes every unbound device
+pairing-only, this refusal is removed in #612's own change and the start
+request always pairs. Tests cover both: cleared storage with a default
+agent set (refused, nothing minted, nothing admitted) and without (a
+code shown).
+
 **D5. The `/try/` link carries its token in the fragment, and a GET
 spends nothing.** `POST /api/runtime/try-links` (operator bearer, like
 every `/api` route) mints a token: 32 random bytes, urlsafe base64, held
@@ -467,6 +481,8 @@ Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    *Resolution:* Accepted, the finding's preferred option: D5a refuses at issuance when no default agent is set, with a fixed sentence naming `vinga default-agent set` that `vinga info` prints in the link's place; a default agent removed between issuance and redemption meets the same fixed refusal with no write.
 
 6. **P2: Cleared browsers can bypass the issue's pairing rule until #612 lands.** D4 explicitly follows today's default-agent behavior, which admits an unknown MAC without a code, while the issue says a cleared browser is new and unbound and gets pairing only (plan:212 (`docs/plans/2026-10-06-browser-client.md:212`)). **State #612 as a release dependency and test the cleared-storage case with a default agent set**, or implement the pairing rule for browser identities here.
+
+   *Resolution:* Accepted, the second option in a form that adds no second admission rule: D4a refuses to mint an identity from the page while a default agent is set (the page asks for a try link instead), so no cleared browser reaches an agent unbound before #612; with no default agent it pairs by code. #612 removes the refusal in its own change. Both cases are tested.
 
 7. **P2: Binding and naming can leave a spent link attached to a partly created device.** D5 uses `bind_device`, then `rename_device` (plan:227 (`docs/plans/2026-10-06-browser-client.md:227`)); those are separate writes (store.py:956 (`vinga-server/src/vinga_server/config/store.py:956`), store.py:1005 (`vinga-server/src/vinga_server/config/store.py:1005`)). Two random MACs can share their last six hex digits, so the unique browser name can fail after binding and token consumption. **Specify one atomic create-and-name operation**, a collision-free naming rule and retry behavior; test failure between the two current writes.
 
