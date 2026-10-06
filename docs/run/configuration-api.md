@@ -96,7 +96,7 @@ each configured MCP server is doing right now, which
 config mcp-server status` prints. `POST /api/runtime/config/reload`
 installs what the stored configuration holds on the running server,
 which
-[Applying a change without a restart](../../vinga-server/README.md#applying-a-change-without-a-restart) describes and
+[Applying a change without a restart](configuration.md#applying-a-change-without-a-restart) describes and
 `vinga-server config apply` prints; it is the only route here that
 changes what the server is doing rather than what is stored. The route
 keeps the mechanism's name and the command names the act, which is a
