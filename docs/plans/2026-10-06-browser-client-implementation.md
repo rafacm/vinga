@@ -186,3 +186,65 @@ the worktree's `.logs/`:
 
 Not verified here: the page in a real browser. The placeholder only
 proves the routes; M3's lane is the first to load it in Chromium.
+
+### PR review round
+
+Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.1, read-only sandbox, runtime 7m24s, at commit c63718b1 ([the round](https://github.com/rafacm/vinga/pull/624#issuecomment-6010633017)). The fixes are by anthropic/claude-opus-5-5, thinking high, a fresh implementer, since M1's own had finished.
+
+1. **P1: a refused module path echoed its input in `Location`.** The
+   static route was registered only in its slashless spelling, so
+   Starlette's slash redirect answered `/try/static/<invalid>/page.js/`
+   with a 307 repeating the invalid version and the query before
+   `Assets.file()` could refuse it. *Resolution:* the route is
+   registered in both spellings through `spellings()`, the idiom the
+   page and the mint already used; a refused module is the stock 404
+   in either spelling with no `Location` and the sentinel query nowhere
+   in the answer, and the inventory gains a check that every HTTP route
+   is served in both spellings, which found no other route with the
+   shape and will hold M2's `/try/redeem` to it. Watched failing: three
+   307s, and the new check naming the static route (`6b48650c`).
+2. **P1: an unreadable bindings answer let the mint proceed.** When
+   the database read fails, `DeviceBindings.resolve` answers from the
+   snapshot with `authoritative=False`, and a snapshot without a
+   default agent let the mint hand out an identity a database default
+   agent would later admit unpaired. *Resolution:* after the D4a check,
+   a non-authoritative answer refuses with 503 and a fixed `no-store`
+   body ("cannot check right now ... try again"), the order and the
+   reasoning of `onboarding/unbound.py`'s `unreadable` arm; 503 rather
+   than D4a's 409 because nothing is known about a default agent and a
+   retry may succeed. The test fails the read, gets the 503 with the
+   failure's sentinel absent, then recovers and mints, or gets the 409
+   with a default agent stored. Watched failing: both cases minted.
+   One survivor, left unpinned: a non-empty non-authoritative answer
+   answered 503 instead of 409 still passes; both refuse and hand
+   nothing over, so the choice is wording (`b67ef060`).
+3. **P1: a default agent set after a mint admits that browser
+   unpaired.** *Resolution:* declined, with the window stated in
+   `browser/router.py`'s docstring. D4a is a product rule (a cleared
+   browser pairs), not an access boundary: under a default agent
+   `onboarding/unbound.py` gives a token to every unknown MAC by
+   design, so whoever holds the onboarding path already reaches the
+   default agent with a made-up MAC through the stock check-in, and an
+   identity minted earlier adds nothing to that. Closing the window
+   here would take a per-MAC pairing marker that admission enforces,
+   which is the second admission rule D4a's plan-review resolution
+   rejected; #612 closes it by making every unbound device pair
+   (`677d4695`).
+4. **P3: the route inventory could not see a duplicate.** *Resolution:*
+   the collector counts, and any route registered more than once fails
+   the inventory by name. Watched: a planted duplicate `GET /try/`
+   passed the set and failed the count (`abc6b115`).
+
+Verification after the round, from the worktree's `.logs/`:
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run pytest tests/unit -q`, serially:
+  `2 failed, 8215 passed, 19 skipped in 1867.44s (0:31:07)`. The two
+  are `test_logs.py::test_without_the_floor_uvicorn_prints_the_query`
+  and `test_what_uvicorn_says_above_info_still_reaches_the_log`, which
+  pass alone (`27 passed`) and fail after `test_drain.py` in the same
+  process at c63718b1 and on `main` at bbc12d6c (`2 failed, 50 passed`), so they predate this
+  round; CI's `--dist loadfile` keeps the two files on separate
+  workers. Recorded as a follow-up candidate.
+- `uv run pytest tests/integration -q`, serially: `354 passed in 632.85s (0:10:32)`
+- `uv run pytest tests/census -q`, last: `66 passed in 30.01s`
