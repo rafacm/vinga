@@ -201,8 +201,17 @@ password, never put one in a command you run, and never open, print or
 search a file one was written into: `.env`, another env file, the
 board's NVS file. The onboarding URL and a try link are secrets too,
 which is why section 1 filters both out of `vinga info`. A secret you
-receive is in your transcript and in
-your provider's logs, and it cannot be taken back from either. The
+receive is in your transcript and in your provider's logs, and it
+cannot be taken back from either.
+
+What the rule protects is the value, not the capability. Running a
+client that reads the API token from the deployment's `.env` is using
+a credential without seeing it, and is yours to do; printing, reading
+or typing the token is not. Where a command you run needs a credential
+as an argument, pass it by command substitution from the command that
+prints it, so it goes from one process to the other and never to your
+screen, and only to a command known not to repeat what it was given:
+section 7 does this for the onboarding URL. The
 server refuses a credential-shaped `key=value` argument, but only after
 it has been in the shell's history and the process list. Section 4 is
 how you hand those steps over instead.
@@ -384,9 +393,14 @@ transcript and the reply. The image's client runs it as it is, and
 so does a workstation client installed as section 1 says; one
 installed without the `sim` extra names the extra and stops
 ([Installing it](../reference/cli.md#installing-it)). It also needs the
-OTA URL. `vinga info` prints one, the onboarding URL, when onboarding
-is on, and that URL is yours to use: the API prints it to whoever
-holds its token. When it prints a sentence saying onboarding is off
+OTA URL, and the onboarding URL is one, which is a credential
+(section 3). So pass it from `vinga info` by command substitution,
+below: it goes straight to the simulator and never to your screen. The
+simulator never repeats the URL it was given, on success or on a
+failure; it says "the supplied OTA endpoint" instead. The URL is in
+the simulator's arguments while it runs, as any argument is, and your
+shell's history keeps the `$(...)` you typed rather than what it
+expanded to. When the filtered `vinga info` says onboarding is off
 instead, the URL the boards use is the path `server.ota_path` names
 on the deployment's own host, and the server treats that path as the
 deployment's secret, so it is a step the person runs (section 4): give
@@ -402,9 +416,19 @@ output goes to a file you read, and only then run the simulator:
 # First, and left running:
 vinga events tail --follow
 
-# Then, with the URL vinga info printed:
-vinga simulator run http://192.168.1.10:8003/x/AB2C4D5E/
+# Then, with the onboarding URL passed straight from vinga info:
+vinga simulator run "$(vinga info | grep '/x/')"
 ```
+
+Through the image's client the substitution runs on your side, so both
+halves are `docker compose exec -T`:
+
+```bash
+docker compose exec -T vinga vinga simulator run "$(docker compose exec -T vinga vinga info | grep '/x/')"
+```
+
+That `vinga info` issues a try link too, which nobody sees and which
+expires unopened in ten minutes.
 
 The simulator prints `heard:` and `said:` lines, and on a turn that
 worked the stream shows, among others and in this order, `ota_check`,
@@ -480,7 +504,9 @@ it reaches. When the person speaks to it, `session_open` names the
 agent that answered, followed by the turn events above. A board that
 never checks in has the wrong address in its NVS, or is not on the
 network; [Onboarding a device](onboarding-a-device.md) says how to
-check what answers at the address it was given.
+check what answers at the address it was given. That check,
+`vinga-server doctor`, prints the address it checked, key included, so
+it is the person's to run (section 4), not yours.
 
 **A browser** lets the person hear the agent themselves, with no board
 and nothing to install: the page the server serves at `/try/` is a

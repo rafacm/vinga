@@ -1009,6 +1009,45 @@ in a real room is stated as unchecked on any computer.
    and a coding agent following its guide now behaves differently, so
    the change is operator-visible on both counts. M3's fragment covers
    the client itself; this one covers the guide and the step.
+5. **The coding agent no longer sees the onboarding URL, which amends
+   #611's guide.** #611 wrote that the onboarding URL "is yours to
+   use", since the API prints it to whoever holds its token, and had
+   the coding agent run `vinga simulator run <that URL>`, which put the
+   key into its transcript and its command line. PR #627's review
+   found it; the principle that now governs, stated in the guide's
+   section 3, is that a credential's value never enters the coding
+   agent's transcript, and that holding a capability through the
+   environment (a client reading the API token from `.env`) is not
+   reading the value. Of the two fixes, the one that keeps the loop
+   closed was adopted: the agent passes the URL by command
+   substitution, `vinga simulator run "$(vinga info | grep '/x/')"`,
+   and the image's form with both halves through
+   `docker compose exec -T`. It was adopted only after measuring that
+   the simulator never prints the URL it was given. Read first: the
+   simulator's CLI half (`config/cli/simulator.py`) names the address
+   only by the stand-in "the supplied OTA endpoint", repeats the
+   reply's fields only through `Endpoint.repeated`, which strips any
+   part of the supplied address, and its refusals are fixed sentences
+   from `device_endpoint.py`, which owns that rule. Then run, against a
+   scratch server keyed and again keyless, with every output searched
+   for `/x/`, the whole URL and the key: the guide's substitution line
+   on success (exit 0, `heard:` and `said:` printed), a wrong key (the
+   404 refusal), the server down (the connection refusal), an
+   unclaimed board under `run` and under `check-in` (the code printed,
+   the address not), a board the deployment would not admit, and an
+   unreadable URL carrying the real one inside it. None of the fourteen
+   outputs carried any of the three
+   (`.logs/r1-keyed-*.log`, `.logs/r1-keyless-*.log`, written with the
+   scratch key replaced, so the logs carry none). The value does sit in
+   the simulator's arguments while it runs, visible to whoever can list
+   that machine's processes, and the guide says so. The board
+   paragraph's pointer to the onboarding guide now says the check there,
+   `vinga-server doctor` with no argument, prints the derived address
+   (read from `doctor.py`, not run),
+   key included, so it is the person's to run. The review's fallback,
+   the person running the simulator line privately, stays for the case
+   the guide already gave it: onboarding off, where the URL is
+   `server.ota_path`'s path.
 
 No other deviation: the guide's sections are the plan's list, and the
 glossary, concepts, devices index and Use door changes are the ones the
