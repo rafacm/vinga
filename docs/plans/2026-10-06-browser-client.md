@@ -223,6 +223,20 @@ sentence naming what is missing and nothing half-working; which engines
 were checked is stated in the guide (Chromium measured; others named as
 unverified until checked).
 
+**D3a. The browser publishes device tools, as a board does.** The page
+advertises MCP in its hello's features, so the server's background
+discovery runs as it does for a board, and it answers the MCP exchange
+the firmware answers: `initialize`, `tools/list` and `tools/call`, over
+the same WebSocket. Its tools are the ones a browser can honestly
+implement, named the way the firmware names its own so agents already
+know them: `self.get_device_status` (the page's volume and whether it
+is listening), `self.audio_speaker.set_volume` (the page's playback
+gain, 0 to 100). Nothing it cannot do (a screen's brightness, a
+battery) is published. M3's lane asserts the server discovered the
+tools (`vinga mcp-server status` does not cover device tools, so the
+assertion reads the discovery the session logs) and that one call made
+by a scripted mock LLM reaches the page and changes its gain.
+
 **D4. An unbound browser pairs.** A browser opening the page with no
 stored identity (cleared storage, or the onboarding URL typed directly)
 asks the server to mint one (`POST /x/<key>/try/identity`), checks in,
@@ -403,6 +417,8 @@ Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    *Resolution:* Accepted. Q3a: `ws.py` builds one verified-identity value (MAC, client id, the subprotocol to select) from headers or subprotocol, and `DeviceSession` takes its identity from that value and accepts with the selected subprotocol; a board yields the same value from its headers, pinned by its existing tests, and M1 tests a complete browser hello through the session.
 
 2. **P1: Device MCP tools are missing.** The issue requires the browser to carry device MCP tools. The proposed `wire.js` and browser lane name hello, listen, audio and server messages, but no MCP initialize, tool listing or tool call (plan:195 (`docs/plans/2026-10-06-browser-client.md:195`), plan:146 (`docs/plans/2026-10-06-browser-client.md:146`)). The server discovers tools only when hello advertises MCP (session.py:981 (`vinga-server/src/vinga_server/device/session.py:981`)). **Amend M3** to name the browser tools it can implement, their MCP exchange and a lane assertion that discovers and calls one.
+
+   *Resolution:* Accepted. D3a: the page advertises MCP in its hello and answers `initialize`, `tools/list` and `tools/call` like the firmware, publishing only tools a browser can honestly implement under the firmware's names (`self.get_device_status`, `self.audio_speaker.set_volume`); M3's lane asserts discovery and one scripted call changing the page's gain.
 
 3. **P1: The try token is not kept out of every log.** The issue makes that a condition of putting the token in `/try/<token>`. The plan relies on uvicorn access logging being off, while acknowledging that a reverse proxy may log the path (plan:44 (`docs/plans/2026-10-06-browser-client.md:44`), plan:246 (`docs/plans/2026-10-06-browser-client.md:246`)). A warning does not satisfy the condition for an exposed deployment. **Amend the deployment procedure** with a required proxy rule that suppresses or redacts this path before access logging, and verify it through the documented proxy setup. Give the token response `Referrer-Policy: no-referrer` and `Cache-Control: no-store` so loading its script cannot repeat the URL in a same-origin `Referer` header or a cache.
 
