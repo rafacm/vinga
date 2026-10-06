@@ -71,7 +71,12 @@ def build_router(key: str | None, assets: Assets | None = None) -> APIRouter:
 
     for spelling in spellings(PAGE_PATH):
         router.get(spelling)(page)
-    router.get(f"{STATIC_PATH}/{{version}}/{{name}}")(static)
+    # Both spellings, so every request for a module reaches `static` and
+    # a refused one meets its 404. With one, the router's slash redirect
+    # would answer the other first, with a `Location` repeating whatever
+    # version and query it was asked with.
+    for spelling in spellings(f"{STATIC_PATH}/{{version}}/{{name}}/"):
+        router.get(spelling)(static)
 
     if key is None:
         for spelling in spellings(f"{onboarding_path(None)}{TRY_IDENTITY_SEGMENT}/"):
