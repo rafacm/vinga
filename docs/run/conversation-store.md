@@ -126,7 +126,7 @@ the session closes, which is what this server always did.
 control vinga has.** There are no per-user controls, so enabling text
 storage on a device a household shares stores what guests say to it,
 which is the same statement
-[Capturing a session](../../vinga-server/README.md#capturing-a-session) makes about audio.
+[Capturing a session](capturing-a-session.md) makes about audio.
 Attributing a session on a shared device to one member needs voiceprint
 identification, which vinga does not do, so the units deletion is
 expressed in are the conversation and the session: the first is what
