@@ -184,12 +184,17 @@ More: [cross-correlation](https://en.wikipedia.org/wiki/Cross-correlation).
 
 ### Device
 
-One physical unit, addressed by its MAC: what `devices.<mac>` names in
-configuration, what a [binding](#binding) binds to an agent, and what
-accrues [memory](#memory) and conversations. Three units of one
-[board](#board) are three devices, and everything a board guide says is
-true of all three. A device reports which board it is at every
-check-in, so a board is observed rather than configured.
+One unit that talks to the server, addressed by its MAC: what
+`devices.<mac>` names in configuration, what a [binding](#binding)
+binds to an agent, and what accrues [memory](#memory) and
+conversations. Most are physical: three units of one [board](#board)
+are three devices, and everything a board guide says is true of all
+three. A web browser can be one too, running the page the server
+serves at `/try/`: it checks in and converses as a board does, under a
+MAC the server made up for it, and a try link records it as
+`Browser <mac>` ([its guide](devices/browser.md)). A device reports
+which board it is at every check-in (a browser says `vinga-browser`),
+so a board is observed rather than configured.
 
 ### Device location
 
