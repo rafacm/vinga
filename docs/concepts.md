@@ -155,8 +155,9 @@ on purpose:
   case and whitespace are folded together. The **location** is context
   a conversation may change, free text, and deliberately not unique,
   because two devices in one room is normal. Binding a board creates
-  its record and calls it `Device <mac>` until somebody names it, so
-  no onboarding flow asks for a name the operator does not yet have.
+  its record and calls it `Device <mac>` until somebody names it, and
+  a try link calls the browser it binds `Browser <mac>`, so no
+  onboarding flow asks for a name the operator does not yet have.
   Both are read when an agent starts speaking on a conversation, with
   its memory, and put in the agent's prompt for the rest of that
   conversation, in the same block as what is remembered about the
@@ -164,11 +165,12 @@ on purpose:
   A board an operator renames or moves mid-conversation is renamed or
   moved for that board's next conversation rather than the next thing
   said in this one, which is what keeps a conversation's prompt the
-  same from reply to reply. A board still called `Device <mac>` is not
-  introduced by that name, so an agent says nothing about a device
-  nobody has named or placed rather than reading a MAC address aloud.
-  The spelling is reserved for the board whose MAC it is, which is what
-  makes it mean "nobody has named this" wherever it is read.
+  same from reply to reply. A device still called `Device <mac>` or
+  `Browser <mac>` is not introduced by that name, so an agent says
+  nothing about a device nobody has named or placed rather than reading
+  a MAC address aloud. Both spellings are reserved for the device whose
+  MAC they name, which is what makes them mean "nobody has named this"
+  wherever they are read.
 
   **A conversation changes the location, and only the location**, with
   the `set_device_location` tool: somebody says the speaker has been
