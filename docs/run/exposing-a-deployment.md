@@ -87,8 +87,8 @@ Two more things, about the surface that writes the configuration. What
 the API is and what it serves is under
 [The configuration API](../../vinga-server/README.md#the-configuration-api)
 in the server README; this is what a deployment has to decide about
-it. Setting its secret before an upgrade is in
-[Upgrading a deployment](upgrading.md).
+it. Its secret, without which the server does not boot, is in
+[Running vinga in a container](running-in-a-container.md#the-container).
 
 **Decide what happens to `/api/` at the edge.** It is on the same port
 as the device endpoints, because the server is one process, so anything

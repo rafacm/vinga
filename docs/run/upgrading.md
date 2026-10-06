@@ -2,9 +2,8 @@
 
 At the end of this guide you will have rolled a new image in the one
 order that works, rerunning the provisioning file before the new image
-boots, with the configuration API's secret already in place, and you
-will be able to tell from outside which build each deployment is
-running.
+boots, and you will be able to tell from outside which build each
+deployment is running.
 
 ## Before rolling a new image
 
@@ -17,17 +16,6 @@ rerun over a database that already has everything is a no-op.
 It runs the way it ran the first time, under
 [Providing the database](database.md#the-configuration-database-in-a-deployment),
 with the same service file and password file.
-
-**Set `VINGA_API_SECRET` before rolling the image, not after.** The API
-is always mounted and always gated, so an image from this release
-started without that variable does not come up. It is the one upgrade
-step this change forces, and the boot error is the safety net rather
-than the plan: it names the variable, prints
-`VINGA_API_SECRET=$(openssl rand -hex 32)`, and says where the value
-goes. Generate one, put it wherever the deployment keeps
-`VINGA_AUTH_SECRET` and `VINGA_MASTER_KEY`, and then roll the image.
-`server.api.secret_env` renames the variable for a deployment whose
-convention is another one.
 
 ## Which build is running
 
@@ -87,3 +75,6 @@ roll. The releases that moved the provisioning file or forced a step:
   which this release leaves where they are.
 - [2026-08-28](../../CHANGELOG.md#2026-08-28): the conversation store's
   schema renamed from `conversations` to `record`.
+- [2026-08-11](../../CHANGELOG.md#2026-08-11): the configuration API
+  always mounted and gated, so every deployment had to set its secret
+  before upgrading, then spelled `SAMTAL_API_SECRET`.

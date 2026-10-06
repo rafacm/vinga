@@ -111,6 +111,13 @@ vinga provider set llm claude -f examples/llm-anthropic.yaml
 - Stop it with `docker stop -t 30 vinga`, above `drain_s`, so
   conversations in flight finish their sentence.
 
+**The container refuses to boot without `VINGA_API_SECRET`.** The
+configuration API is always mounted and always gated, so the boot error
+names the variable and prints a way to generate a value
+(`openssl rand -hex 32`). Keep it wherever the deployment keeps
+`VINGA_AUTH_SECRET`; `server.api.secret_env` renames the variable for a
+deployment whose convention is another one.
+
 Behind a TLS-terminating proxy, either set `server.websocket_url`
 explicitly or pass the proxy's address in `FORWARDED_ALLOW_IPS`, which
 uvicorn honours from the environment.

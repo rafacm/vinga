@@ -14,7 +14,7 @@
 # The configuration database in a deployment, split five ways
 3480	1-6	docs/run/database.md	kinds=procedure,explanation	edited=2,4,5
 3480	7-7	docs/run/upgrading.md	kinds=procedure	edited=7
-# D13: two past releases notes, which the changelog carries and upgrading.md links
+# D13: past releases' notes, which the changelog carries and upgrading.md links
 3480	8-11	DROP
 3480	12-15	docs/run/security.md	kinds=procedure,explanation	edited=14,15
 3480	16-20	docs/run/backups.md	kinds=procedure,explanation
@@ -22,7 +22,7 @@
 3480	24-24	docs/run/configuration.md	kinds=explanation	edited=24
 # The configuration API in a deployment
 3678	1-2	docs/run/exposing-a-deployment.md	kinds=explanation	edited=2
-3678	3-3	docs/run/upgrading.md	kinds=procedure
+3678	3-3	DROP
 3678	4-6	docs/run/exposing-a-deployment.md	kinds=procedure,explanation
 # When the server will not start (D8b reorder; order is not audited)
 3729	docs/run/recovering-a-deployment.md	kinds=procedure,explanation	edited=3,13
