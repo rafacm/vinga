@@ -342,6 +342,18 @@ WebSocket paths already never log a token, the subprotocol values are
 read and dropped, and `/try/<token>` is a path the server does not log
 (access log off) and the exposure guide warns a proxy might.
 
+**D7a. What each value may reach.** Two classes, each tested by the exact
+fields it may appear in. **Device metadata**: the browser's MAC and
+client id, which are bounded identifiers a board's events already carry
+(`ota_check` names the MAC and the client id, the session events name
+the MAC), and which the browser's may carry in exactly those fields and
+no others. **Secrets**: the device token and the try token, which reach
+no log record, event field, exception text, API body beyond the one
+issuing them, or accepted subprotocol, in either log format; sentinel
+tests plant credential-shaped values for both and assert their absence
+everywhere. D7's sentence that nothing the page stores reaches a log is
+replaced by this classification.
+
 **D8. #301 and #305.** #305 is unchanged: the CLI simulator stays the
 operator's probe. #301 is recommended, in a comment on it, to shrink to
 `--from-file` and `--to-file` for the CLI with no live microphone, since
@@ -510,5 +522,7 @@ Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    *Resolution:* Accepted. D5c: `vinga info` prints `server.public_url` when it is https or localhost, else `http://localhost:<port>` when the CLI reached the API on loopback, else no link and a sentence asking for an HTTPS `server.public_url`; never the listen address and never a guess.
 
 10. **P2: The plan's no-leak test asserts an impossible rule for identity.** D1 stores the MAC and client ID in the page; D7 says nothing stored by the page reaches a log, while also requiring the browser MAC in ordinary device events (plan:176 (`docs/plans/2026-10-06-browser-client.md:176`), plan:246 (`docs/plans/2026-10-06-browser-client.md:246`)). OTA already emits the MAC and client ID as device metadata (reply.py:574 (`vinga-server/src/vinga_server/ota/reply.py:574`)). **Classify identity as permitted, bounded device metadata and the token as secret**, then test the exact fields each may reach. If identity itself must remain secret, the proposed reuse of board events needs redesign.
+
+   *Resolution:* Accepted. D7a classifies the MAC and client id as bounded device metadata allowed exactly in the fields a board's events already use, and the device token and try token as secrets that reach no record, field, body or subprotocol; tests assert each class by field, with sentinels for the secrets.
 
 **Verdict: ready after the P1/P2 amendments.**
