@@ -282,7 +282,7 @@ pipe form), `AGENTS.md` (one line), and
 
 ## Milestones
 
-- [ ] **M1: the guide.** Decisions 1 to 9 and D1 to D9, including
+- [x] **[M1: the guide](2026-10-06-coding-agent-guide-implementation.md#m1-the-guide)** (PR TBD). Decisions 1 to 9 and D1 to D9, including
   D9's three parts: Getting Started's secret generation rewritten, the
   secret and NVS steps marked as person-run handoffs on the guide, and
   the credential sweep over every page the guide links, each with its
