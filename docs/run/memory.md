@@ -2,8 +2,8 @@
 
 At the end of this guide you will know what an agent keeps between
 conversations and within one, how to read and correct what it has
-kept, and how to switch remembering off for one agent or for all of
-them.
+kept, where what it keeps is stored and which providers it is sent to,
+and how to switch remembering off for one agent or for all of them.
 
 Whether an agent remembers is its `memory` section, in the domain
 configuration reference under
@@ -139,6 +139,27 @@ old name wrote before an apply caught up. `--all` is how those rows
 leave. Replacing a board is not one of them: a swap moves the device's
 notes to the new address in the same transaction, so nothing is left
 under the old one.
+
+## Where what it keeps goes
+
+**Memory is stored on the host and read out to the model.** What an
+agent remembers, what a device's notes hold and what a conversation is
+keeping never leave this deployment as storage: they are rows in the
+database it already owns, they travel in the same `pg_dump` as
+everything else, and no other server is told about them. But they are
+injected into the system prompt on every reply, and `recall` answers a
+model with more of them on demand, which makes them prompt content: they
+follow the active LLM provider's reach like the transcript and the
+persona do, so an agent on a cloud model sends what it remembered along
+with what was just said. The device scope is worth stating on its own: a
+note about the room or the household is shared by every agent bound to
+that board that may remember, so it reaches every one of their providers
+rather than only the provider of the agent that was told it. An agent
+whose `memory` section is off is read none of it and sends none of it,
+which is the one lever that narrows this. `server.data_boundary` is the
+guard, and it is the same guard: a provider whose reach exceeds the
+declared boundary cannot be booted, and memory rides the boundary that
+draws.
 
 ## Switching it off
 
