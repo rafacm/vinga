@@ -28,12 +28,28 @@ from tests.support.checkin import SYSTEM_INFO
 from tests.support.registry import booted
 from vinga_server.app import create_app
 from vinga_server.browser import REDEEM_PATH
+from vinga_server.device.handshake import BROWSER_SUBPROTOCOL
 
 PREFIX = "/vinga"
 BEARER = {"Authorization": f"Bearer {TEST_API_SECRET}"}
 SAME_ORIGIN = {"Sec-Fetch-Site": "same-origin"}
 
 REFERENCE = re.compile(r'(?:src|href)="([^"]*)"')
+MODULE = re.compile(r'src="([^"]*page\.js)"')
+SOCKET = re.compile(r'<meta name="vinga-socket" content="([^"]*)">')
+
+# How `urls.js` finds the deployment's root: a URL relative to its own
+# address, `<root>try/static/<version>/urls.js`, read out of the module
+# itself so what is resolved here is what the browser resolves.
+URLS_ROOT = re.compile(r'const ROOT = new URL\("([^"]*)", import\.meta\.url\);')
+
+HELLO = {
+    "type": "hello",
+    "version": 1,
+    "features": {"mcp": False},
+    "transport": "websocket",
+    "audio_params": {"format": "opus", "sample_rate": 16000, "channels": 1, "frame_duration": 60},
+}
 
 
 class Stripped:
@@ -81,14 +97,82 @@ def test_every_reference_the_page_makes_stays_under_the_prefix(spelling: str) ->
             assert proxied.get(resolved).status_code == 200, resolved
 
 
-def test_the_page_script_names_no_url_from_the_root() -> None:
-    """The module can only be read, not run, here: what it must not do
-    is name a path from the root, and what it does instead is resolve
-    against its own address."""
-    script = (files("vinga_server.browser") / "static" / "page.js").read_text()
+def test_no_client_module_names_a_url_from_the_root() -> None:
+    """The modules can only be read, not run, here: what they must not
+    do is name a path from the root. What they do instead is resolve
+    through `urls.js`, against the deployment's root read off its own
+    address (`tests/unit/test_browser_client_files.py` holds the other
+    modules to that)."""
+    static = files("vinga_server.browser") / "static"
+    for module in static.iterdir():
+        # `urls.js` takes paths apart (it finds the onboarding mount in
+        # whatever was pasted), so it holds slashes that are not
+        # addresses; what is asked of it is where its root comes from.
+        if module.name.endswith(".js") and module.name != "urls.js":
+            script = module.read_text()
+            assert not re.search(r"""["'`]/(?!/)""", script), (
+                f"a root-relative URL in {module.name}"
+            )
+    assert URLS_ROOT.search((static / "urls.js").read_text())
 
-    assert not re.search(r"""["'`]/(?!/)""", script), "a root-relative URL in page.js"
-    assert "import.meta.url" in script
+
+def client_root(proxied: TestClient, page_url: str) -> str:
+    """The deployment's root as the client computes it: `urls.js`'s
+    `ROOT`, resolved against the address the page loads it from."""
+    page = proxied.get(page_url).text
+    module = urljoin(page_url, MODULE.search(page).group(1))
+    urls = urljoin(module, "urls.js")
+    assert proxied.get(urls).status_code == 200, urls
+    relative = URLS_ROOT.search(proxied.get(urls).text)
+    assert relative is not None, "urls.js no longer says where its root is"
+    return urljoin(urls, relative.group(1))
+
+
+@pytest.mark.parametrize("spelling", ["/try/", "/try"])
+def test_the_client_s_root_is_the_deployment_s_under_the_prefix(spelling: str) -> None:
+    with behind_a_prefix() as proxied:
+        root = client_root(proxied, f"http://testserver{PREFIX}{spelling}")
+
+        assert urlsplit(root).path == f"{PREFIX}/"
+        assert urlsplit(urljoin(root, "try/redeem")).path == f"{PREFIX}{REDEEM_PATH}"
+
+
+def test_the_browser_s_whole_way_in_stays_under_the_prefix() -> None:
+    """Redeem, check in and connect, each at the address the client
+    resolves: the redemption beside the page, the check-in under the
+    onboarding path the redemption handed over, and the socket at the
+    path the page names, all against the root the client reads off its
+    own module, with the identity and the token offered as a browser
+    offers them."""
+    with behind_a_prefix() as proxied:
+        page_url = f"http://testserver{PREFIX}/try/"
+        page = proxied.get(page_url).text
+        root = client_root(proxied, page_url)
+        token = proxied.post(f"{PREFIX}/api/runtime/try-links", headers=BEARER).json()["page"]
+        body = proxied.post(
+            urljoin(root, "try/redeem"),
+            json={"token": token.removeprefix("/try/#")},
+            headers=SAME_ORIGIN,
+        ).json()
+        reply = proxied.post(
+            urljoin(root, body["onboarding_path"]),
+            json={"board": {"type": "vinga-browser"}},
+            headers={"Device-Id": body["mac"], "Client-Id": body["client_id"]},
+        ).json()
+        socket = urljoin(root, SOCKET.search(page).group(1))
+
+        assert urlsplit(socket).path.startswith(f"{PREFIX}/")
+        with proxied.websocket_connect(
+            urlsplit(socket).path,
+            subprotocols=[
+                BROWSER_SUBPROTOCOL,
+                f"vinga.mac.{body['mac'].replace(':', '')}",
+                f"vinga.client.{body['client_id']}",
+                f"vinga.token.{reply['websocket']['token']}",
+            ],
+        ) as connected:
+            connected.send_json(HELLO)
+            assert connected.receive_json()["type"] == "hello"
 
 
 def test_the_onboarding_path_a_redemption_hands_over_resolves_under_the_prefix() -> None:
