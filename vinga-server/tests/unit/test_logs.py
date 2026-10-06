@@ -365,10 +365,10 @@ async def uvicorn_serving() -> AsyncIterator[int]:
     writes the request line it sends at DEBUG, and what is under test is
     what the server prints. A line of the server's own is written once
     uvicorn has stopped, for the reason `OWN_LINE` gives."""
-    served = serving.uvicorn_config(handshake_app(), Config())
-    served.host, served.port = "127.0.0.1", 0
-    server = uvicorn.Server(served)
     with uvicorn_loggers_as_served():
+        served = serving.uvicorn_config(handshake_app(), Config())
+        served.host, served.port = "127.0.0.1", 0
+        server = uvicorn.Server(served)
         task = asyncio.create_task(server.serve())
         try:
             while not server.started:
@@ -393,15 +393,24 @@ UVICORN_LOGGERS = ("uvicorn", "uvicorn.error", "uvicorn.access")
 
 @contextlib.contextmanager
 def uvicorn_loggers_as_served() -> Iterator[None]:
-    """uvicorn's loggers as a served process has them: no handlers of
-    their own, propagating to the root, so its lines meet the handler
-    `logs.configure` installed. Without this, a test that finds nothing
-    printed may only have found that nothing reached the root, and the
-    two that expect a line fail. Levels are left alone, since the floor
-    under test sets them; handlers and propagation are given back."""
-    saved = [(logging.getLogger(name), name) for name in UVICORN_LOGGERS]
-    state = [(log, list(log.handlers), log.propagate) for log, _ in saved]
-    for log, _ in saved:
+    """uvicorn's loggers as a served process has them, for a
+    `uvicorn.Config` built inside this block: `uvicorn` and
+    `uvicorn.error` with no handlers of their own and propagating to the
+    root, so their lines meet the handler `logs.configure` installed.
+    Without this, a test that finds nothing printed may only have found
+    that nothing reached the root, and the two that expect a line fail.
+
+    `uvicorn.access` is the configuration's to set, not this block's:
+    `access_log=False` clears its handlers and stops it propagating, and
+    a propagating access logger is uvicorn's access log switched back on,
+    request lines and their queries included. So the config is built
+    after the reset, and this never touches that logger. Levels are left
+    alone too, since the floor under test sets them. On the way out all
+    three get back the handlers and propagation they came in with."""
+    loggers = [logging.getLogger(name) for name in UVICORN_LOGGERS]
+    state = [(log, list(log.handlers), log.propagate) for log in loggers]
+    for name in ("uvicorn", "uvicorn.error"):
+        log = logging.getLogger(name)
         for handler in list(log.handlers):
             log.removeHandler(handler)
         log.propagate = True
@@ -409,6 +418,41 @@ def uvicorn_loggers_as_served() -> Iterator[None]:
         yield
     finally:
         for log, handlers, propagate in state:
+            for handler in list(log.handlers):
+                log.removeHandler(handler)
+            for handler in handlers:
+                log.addHandler(handler)
+            log.propagate = propagate
+
+
+async def test_serving_keeps_the_access_log_off_and_gives_the_loggers_back(
+    restore_vendor_levels,
+) -> None:
+    """The serving helper leaves uvicorn's loggers as a deployment has
+    them while it serves, the access log included, which
+    `serving.uvicorn_config` turns off and nothing here may turn back on:
+    an access line is a request line, query and all. Afterwards each
+    logger has exactly the handlers and propagation it came in with."""
+    planted = logging.NullHandler()
+    loggers = [logging.getLogger(name) for name in UVICORN_LOGGERS]
+    before = [(list(log.handlers), log.propagate) for log in loggers]
+    access = logging.getLogger("uvicorn.access")
+    access.addHandler(planted)
+    access.propagate = True
+    came_in_with = list(access.handlers)
+    try:
+        async with uvicorn_serving():
+            assert access.handlers == []
+            assert access.propagate is False
+            for name in ("uvicorn", "uvicorn.error"):
+                assert logging.getLogger(name).handlers == []
+                assert logging.getLogger(name).propagate is True
+        assert access.handlers == came_in_with
+        assert planted in access.handlers
+        assert access.propagate is True
+    finally:
+        access.removeHandler(planted)
+        for log, (handlers, propagate) in zip(loggers, before, strict=True):
             for handler in list(log.handlers):
                 log.removeHandler(handler)
             for handler in handlers:
