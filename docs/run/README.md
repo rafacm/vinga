@@ -54,6 +54,10 @@ Changing the server rather than running it is
 - [Choosing providers](providers.md): which engine can serve each
   stage, which run on your host and which reach a vendor, and what an
   install carries for each.
+- [Choosing the model an agent thinks with](llm.md): what a model has
+  to do for a voice agent, the local default and its measurements, and
+  pointing an agent at Ollama, another local runner, Anthropic, OpenAI
+  or a compatible service, with its key kept out of every command.
 - [Choosing how an agent hears](speech-recognition.md): the local and
   the cloud transcription engines measured against each other, and
   setting OpenAI's vocabulary and languages.

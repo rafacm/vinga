@@ -7,9 +7,10 @@ a vendor, and what an install has to carry for each.
 The fields every provider entry shares are in the domain configuration
 reference under [Provider](../reference/domain-config.md#provider),
 followed by the option tables of the types that declare them and an
-example fragment for every type. Choosing the engine that hears is
-[Choosing how an agent hears](speech-recognition.md), and the one that
-speaks [Giving an agent a voice](voices.md).
+example fragment for every type. Choosing the model that thinks is
+[Choosing the model an agent thinks with](llm.md), the engine that
+hears [Choosing how an agent hears](speech-recognition.md), and the one
+that speaks [Giving an agent a voice](voices.md).
 
 ## Providers
 
