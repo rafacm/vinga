@@ -101,6 +101,11 @@ the device record's and travels with it when the board underneath is
 replaced, and what anybody told an assistant about themselves was never
 the hardware's to lose.
 
+A device may also be a web browser, running the page the server serves
+at `/try/`: it speaks the protocol a board speaks, with the computer's
+microphone and speakers, and the runtime treats it as it treats a
+board ([the browser client's guide](devices/browser.md)).
+
 A device joins a deployment before any of this matters: the board is
 pointed at the server, the server's OTA endpoint answers its check-in,
 and an unclaimed board is claimed through the 6-digit activation
