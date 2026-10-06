@@ -174,11 +174,15 @@ install (`uv tool install` of the package with the extra, at the
 worktree's commit) as well as from the image.
 
 **D4b. Watch before acting, and assert what should appear.** The event
-stream keeps nothing and joins at the present, so the guide starts
-`vinga events tail` (for a board, `--device <mac>`) before the
-simulator run or the board's power-on, not after; where recording is
+stream keeps nothing and joins at the present, and without `--follow`
+`vinga events tail` prints one event and exits. So the guide starts
+`vinga events tail --follow` (for a board, `--follow --device <mac>`)
+in a second terminal before the simulator run or the board's power-on,
+not after, and stops it (Ctrl-C) once the turn's last expected event
+has appeared; where recording is
 on, the conversation and session records are the retained check. D7
-asserts the events by name: `ota_check` and `session_open` for a
+captures that `--follow` stream to a file and asserts the events in it
+by name: `ota_check` and `session_open` for a
 check-in and a conversation, then `heard`, `replied` or the failure
 events the logs guide lists, never merely that the command ran.
 
@@ -331,6 +335,8 @@ The plan should say: use the canonical GitHub URL only for a published-image SHA
 2. **P2: The event procedure still exits after the first event.**
 Evidence: D4/D4b prescribe `vinga events tail`, then claim D7 will observe `ota_check`, `session_open`, `heard`, and `replied` (plan:149-178 (`docs/plans/2026-10-06-coding-agent-guide.md:149`)). Without `--follow`, the command prints one event and exits (CLI reference:2761 (`docs/reference/cli.md:2761`)).
 The plan should require `vinga events tail --follow` (and `--device <mac>` for a board) to start before the action, state how it is stopped after the expected terminal event, and have D7 capture and assert that stream.
+
+   *Resolution:* Accepted. D4b now uses `vinga events tail --follow` (with `--device <mac>` for a board), started in a second terminal before the action and stopped once the turn's last expected event appears; D7 captures that stream and asserts the events in it by name.
 
 3. **P2: The milestone does not commit the secret-safety prerequisite it depends on.**
 Evidence: D9 requires this PR to rewrite Getting Started's shell-expanded secrets and run a linked-page credential sweep (plan:222-234 (`docs/plans/2026-10-06-coding-agent-guide.md:222`)). But the sole M1 checklist ends at D7 (plan:273-276 (`docs/plans/2026-10-06-coding-agent-guide.md:273`)), and the footprint characterizes README work as only "one sentence" (plan:266-271 (`docs/plans/2026-10-06-coding-agent-guide.md:266`)).
