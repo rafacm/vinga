@@ -1092,6 +1092,70 @@ jobs:
             exit 1
           fi
 
+  # The browser lane (#613): the client page the server ships, loaded in
+  # headless Chromium from the built wheel's own install, holding three
+  # whole conversations with it (realtime with a barge-in and the idle
+  # ending, auto when echo cancellation is unavailable, and the device
+  # tools). `tests/browser/run.sh` is the whole of it, here and locally:
+  # it builds the wheel, installs it constrained to the lockfile, and
+  # runs the cases against the server it starts from that install. The
+  # image job runs the same cases a second time against the image it
+  # built.
+  #
+  # On every event this workflow runs on, with no path filter of its
+  # own. The page depends on the websocket edge, the session, the OTA
+  # reply, the protocol models and the packaging, so a narrower trigger
+  # would let any of those break it unseen; if it is slow it is made
+  # faster, never narrower.
+  #
+  # The job container is Playwright's own image at the version the
+  # `browser` dependency group locks, so the browser build and its
+  # system libraries are the ones that Playwright release was tested
+  # with; the two move together. Postgres is a service container, which
+  # a job container reaches by the service's name. `--ipc=host` because
+  # Chromium's shared memory outgrows a container's default.
+  browser:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright/python:v1.63.0-noble
+      options: --ipc=host
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: vinga
+          POSTGRES_USER: vinga
+          POSTGRES_PASSWORD: vinga
+        options: >-
+          --health-cmd "pg_isready -U vinga -d vinga"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      VINGA_DB_HOST: postgres
+      VINGA_DB_PORT: "5432"
+      VINGA_DB_USER: vinga
+      VINGA_DB_PASSWORD: vinga
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "vinga-server/uv.lock"
+          save-cache: false
+
+      # `$RUNNER_TEMP` rather than `runner.temp`: inside a job container
+      # only the variable names the path the container sees.
+      - name: The browser lane, against the built wheel
+        run: |
+          VINGA_BROWSER_KEEP_LOG="$RUNNER_TEMP/browser-server.log" \
+            sh tests/browser/run.sh -v --durations=10
+
+      - name: The server's log
+        if: failure()
+        run: cat "$RUNNER_TEMP/browser-server.log" || true
+
   # One architecture of one variant, built once and proved once: four
   # jobs, `{default,slim} x {amd64,arm64}`. Nothing here publishes.
   # Each build pushes its bytes to the registry addressed by their own
@@ -1242,7 +1306,7 @@ jobs:
       - name: Provision the scenario databases
         if: matrix.arch == 'amd64'
         run: |
-          for name in vinga_slim_boot vinga_slim_refuse vinga_smoke; do
+          for name in vinga_slim_boot vinga_slim_refuse vinga_smoke vinga_browser; do
             docker run --rm --network "$SMOKE_NETWORK" \
               -e PGPASSWORD="$VINGA_DB_PASSWORD" \
               postgres:17-alpine \
@@ -1679,6 +1743,43 @@ jobs:
       # Deliberately not `if: always()` and deliberately not masked with
       # `|| true`: this asserts that the shutdown ran, and a cleanup
       # command that cannot fail cannot assert anything.
+      # The browser lane a second time, against this image rather than
+      # the wheel: the page and its modules as the image serves them,
+      # from a server of their own on a database of their own. The lane
+      # seeds it over the API and reads its events from the API's
+      # stream; its log is streamed into a file the lane's container
+      # mounts, since the lane reads that too. The idle timeout is the
+      # lane's own (`tests/browser/lane.py`, IDLE_TIMEOUT_S), which a
+      # different value here would show as the idle ending never
+      # arriving. The default variant only: the client is the same
+      # bytes in both.
+      - name: The browser lane, against the built image
+        if: matrix.arch == 'amd64' && matrix.variant == 'default'
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/browser"
+          docker run -d --name vinga-browser -p 8013:8003 \
+            --network "$SMOKE_NETWORK" \
+            -e VINGA_AUTH_SECRET \
+            -e VINGA_API_SECRET \
+            -e VINGA_DB_HOST -e VINGA_DB_PORT -e VINGA_DB_USER -e VINGA_DB_PASSWORD \
+            -e VINGA_DB_NAME=vinga_browser \
+            -e VINGA_SERVER__LOG_FORMAT=json \
+            -e VINGA_SERVER__LOG_LEVEL=DEBUG \
+            -e VINGA_SERVER__LIMITS__IDLE_TIMEOUT_S=2 \
+            -v browser-data:/data \
+            -v "$PWD/tests/smoke/config.yaml:/config/config.yaml:ro" \
+            vinga-server:ci-amd64
+          docker logs -f vinga-browser > "$RUNNER_TEMP/browser/server.log" 2>&1 &
+          docker run --rm --network host --ipc=host \
+            -v "$PWD:/work" -w /work \
+            -v "$RUNNER_TEMP/browser:/logs" \
+            -e VINGA_API_SECRET \
+            -e VINGA_BROWSER_URL=http://127.0.0.1:8013 \
+            -e VINGA_BROWSER_SERVER_LOG=/logs/server.log \
+            mcr.microsoft.com/playwright/python:v1.63.0-noble \
+            sh tests/browser/run.sh -v --durations=10
+
       - name: Stop the container and check it drained
         if: matrix.arch == 'amd64'
         run: |
@@ -1717,6 +1818,7 @@ jobs:
         run: |
           docker rm -f vinga-smoke || true
           docker rm -f vinga-jaeger || true
+          docker rm -f vinga-browser || true
 
       # And the database the three scenarios shared, with the network it
       # was on. `always()` because a job that failed part way still has
@@ -1742,6 +1844,8 @@ jobs:
   # makes publishing conditional on the suite. Both lanes are named,
   # and both have to be, since between them they hold every check the
   # suite is made of; naming one would publish on half a green suite.
+  # The browser lane is named beside them for the same reason: an image
+  # whose client page cannot hold a conversation is not one to tag.
   # `image` is named too, so a variant whose smoke failed gets no tag
   # either.
   #
@@ -1755,7 +1859,7 @@ jobs:
   # to be wrong. Not on a pull request, which pushes no digests to
   # assemble.
   image-publish:
-    needs: [unit, integration, image]
+    needs: [unit, integration, browser, image]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:

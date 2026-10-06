@@ -66,7 +66,11 @@ committed compose file against it. A pull request is the exception to
 the pushing: it builds the image into the runner's own daemon and
 smokes that, so it needs no registry credential and leaves nothing
 behind, which is what lets a fork's pull request run the job at all.
-A fourth, `image-publish`,
+A fourth, `browser`, runs the browser
+lane (`tests/browser/`): the client page in headless Chromium, inside
+Playwright's own image, served by the built wheel's install; the amd64
+default `image` job runs the same lane against the image it built. A
+fifth, `image-publish`,
 assembles one manifest per variant from those digests and tags it,
 building nothing; it is the one that waits on the test lanes, and it
 pushes tags only on a push to `main`. The workflow
