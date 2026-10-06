@@ -49,6 +49,7 @@ response, the redeeming browser's request body, and nothing else (D7a).
 import asyncio
 import base64
 import ipaddress
+import logging
 import secrets
 import threading
 import time
@@ -61,6 +62,7 @@ from urllib.parse import urlsplit
 # one, the rule `pending` states: a suite moves them on the name they
 # live on, and a name imported from the package would be a snapshot.
 import vinga_server.onboarding as onboarding
+from vinga_server.class_names import failure_name
 from vinga_server.config.loader import (
     DeviceAlreadyBoundError,
     SnapshotOnlyError,
@@ -110,6 +112,25 @@ SNAPSHOT_ONLY = (
     "store, so a browser bound by a try link would be written to a store this server "
     "does not read its devices from. Nothing was issued, and making the request again "
     "will not help; a server started from a store issues them."
+)
+
+logger = logging.getLogger(__name__)
+
+# What a redemption that spent its link and bound nothing says to the
+# operator, who would otherwise not know: the browser was told, and the
+# log is the one place the person running the server hears of it. A log
+# line rather than an event, since the browser client adds no event
+# type (D7). Fixed sentences: the one argument the first takes is the
+# failure's class, through `failure_name`, and never its message, the
+# token or the MAC that was drawn.
+SPENT_UNENROLLED = (
+    "a try link was spent, but the browser that opened it could not be enrolled "
+    "(%s), so nothing was written; a new link can be printed for it"
+)
+
+SPENT_ALL_TAKEN = (
+    "a try link was spent, but every identity drawn for the browser that opened it "
+    "was already taken, so nothing was written; a new link can be printed for it"
 )
 
 # What an issuance that minted a token and then could not answer with
@@ -301,20 +322,24 @@ async def redeem(
         return None
     for _ in range(onboarding.TRY_LINK_MINTS):
         identity = mint(randomness)
-        failed = False
+        failed: str | None = None
         try:
             await asyncio.to_thread(store.enroll_device, identity.mac, browser_name(identity.mac))
         except DeviceAlreadyBoundError:
             continue
-        except Exception:
+        except Exception as exc:
             # Every other failure, the store's own refusals and anything
             # a layer under it raised alike, is the one answer: nothing
             # bound. Contained rather than raised, because this frame
             # holds the token and what a lower layer says is not this
             # module's to vouch for, so nothing of it may escape; the
             # same belt `ota.reply` wears on its unauthenticated path.
-            failed = True
-        if failed:
+            # Only its class is kept, and the line is written outside
+            # the handler, so no record carries the exception.
+            failed = failure_name(exc)
+        if failed is not None:
+            logger.warning(SPENT_UNENROLLED, failed)
             return None
         return identity
+    logger.warning(SPENT_ALL_TAKEN)
     return None
