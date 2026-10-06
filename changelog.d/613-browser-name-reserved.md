@@ -4,6 +4,6 @@
 
 ### Changed
 
-- **`Browser <mac>` is reserved like `Device <mac>`** (#613). `vinga device rename`, `vinga apply` and the configuration API refuse a name of the form `Browser <mac>` for any device whose own MAC it is not, however it is capitalized or spaced, with the same `devices: names of the form ...` refusal the board's spelling already had. A device may still be given either of its own two spellings, which is what keeps an exported document applying back unchanged.
+- **`Browser <mac>` is reserved like `Device <mac>`** (#613). `vinga device rename`, `vinga apply` and the configuration API refuse a name of the form `Browser <mac>` for any device whose own MAC it is not, however it is capitalized or spaced, with the same `devices: names of the form ...` refusal the board's spelling already had. A device may still be given either of its own two spellings, in any capitalization or spacing, which is what keeps an exported document applying back unchanged, including one from a device that took such a spelling before either was reserved; a board swap now moves those spellings too, writing the new address's canonical one.
 
   Upgrade: a device somebody already named in the `Browser <mac>` shape keeps its name, and the agent now treats it as unnamed; rename it with `vinga device rename <mac> <name>` if the agent should say it.
