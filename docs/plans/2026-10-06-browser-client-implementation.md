@@ -820,7 +820,7 @@ every line is in `.logs/m3-mutations-lane.log` and
 | Inventory | a stray file; `urls.js` dropped from the allowlist | `test_the_allowlist_is_exactly_the_client_that_ships`, and the loaded-modules test for the second |
 | Socket path | the marker left unrendered | `test_the_page_connects_to_the_socket_the_boundary_names` |
 
-**One survivor, reported:** removing the speaker's flush on Interrupt
+**One survivor, reported (killed in the PR review round below):** removing the speaker's flush on Interrupt
 passes the realtime case. The driver reaches the condition (Interrupt
 is pressed mid-reply and the server records the aborted reply); what
 differs is the at most 120 ms or so of audio the jitter buffer held,
@@ -862,3 +862,74 @@ real timing (CI's), the page in any engine but Chromium, and the
 manual checkpoint on a laptop in a real room with a real barge-in,
 which is M4's. Echo cancellation's effect is not exercised by the lane
 at all: the fake device's input is a file, not a room.
+
+### PR review round
+
+Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.1, read-only sandbox, runtime 5m22s, at commit 709bdb85 ([the round](https://github.com/rafacm/vinga/pull/626#issuecomment-6014004651)). The fixes are by anthropic/claude-opus-5-5, thinking high, M3's own implementer.
+
+Three facts above are superseded by this round: the lane now has five
+browser cases (a microphone that fails to start is the fifth), it has
+no surviving mutation, and the inert-by-default pin moved from the
+device-tool case to the pairing case, which now opens with no switch.
+
+1. **P1: the lane's failure report could repeat the credential it
+   detected.** *Resolution:* `lane.Redactor` replaces every token the
+   lane issued or saw, and both token shapes the server issues even
+   unseen; every diagnostic section and the failure text pass through
+   it, the kept server log is written redacted and is what CI prints,
+   and a failed navigation to the fragment-bearing link re-raises
+   without its URL. `tests/browser/test_lane_redaction.py` failed first
+   on the missing redactor (`5a5ea016`).
+2. **P1: pasting another deployment's onboarding URL sent its key to
+   this server.** *Resolution:* `urls.pasted` accepts only a whole URL
+   at the page's own origin whose path sits directly under the
+   deployment root at `x/`, and refuses anything else with a fixed
+   sentence before any request. A bare path is refused too: it cannot
+   say which deployment it came from, and `vinga info` prints a whole
+   URL. The pairing case pastes a foreign URL and a bare path, asserts
+   both refused with no request carrying the key, then pastes the real
+   one; it timed out waiting for the refusal first. The prefix half of
+   the rule is not driven by the lane, which has no prefix proxy
+   (`167ef202`).
+3. **P1: a failed microphone setup left capture running.**
+   *Resolution:* `Microphone.open` closes the partial microphone,
+   stopping every track, on any setup failure. Driven by the fifth case
+   through `tests/browser/instrument.js`, which runs before the page's
+   own scripts and makes `AudioWorklet.addModule` reject, so the client
+   ships no test seam for it; first failure `['live'] == ['ended']`
+   (`4f8130b7`).
+4. **P2: the no-leak check left out request and socket URLs.**
+   *Resolution:* both are recorded and checked against both token
+   classes; the mutation putting the device token in the socket query
+   passed the old check and fails the new one (`5eec94fc`).
+5. **P2: the tool case did not prove the speaker's gain changed.**
+   *Resolution:* with the observe switch on, the playback processor
+   reports the gain it applies and the case waits for 0.37; dropping the
+   gain message, or the page not handing the volume to the speaker, is
+   killed (`ca1844cf`).
+6. **P2: the auto case did not prove re-arming waits for playback to
+   drain.** *Resolution:* the instrumentation stamps the processor's
+   `idle` and the socket's frames on the page's clock, and every
+   `listen start` after the first must follow an `idle` reported after
+   the preceding `tts stop`; `Speaker.idle()` resolving at once is
+   killed. The same instrumentation kills M3's one survivor: the
+   realtime case waits for a `flush` after the last `abort` and before
+   the socket closes, a bound that mattered, since without it the idle
+   ending's own flush satisfied the wait (`d86f92f7`).
+
+The descriptions in `docs/contributing.md`, the workflow comment, the
+changelog fragment and the lane docstring follow (`f2ec4a1d`). All
+twelve of M3's earlier lane mutations were re-run on this tree and all
+still fail; no mutation survives.
+
+Verification after the round, from the worktree's `.logs/`:
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run pytest tests/unit -q -n auto --dist loadfile`:
+  `8355 passed, 19 skipped in 1041.74s (0:17:21)`
+- `uv run pytest tests/integration -q -n auto --dist loadfile`:
+  `354 passed in 221.96s (0:03:41)`
+- The browser lane, five runs: each `8 passed` (five browser cases and
+  three redaction tests) in 46.2 to 46.8 s, 52 to 53 s wall
+- Link check `0 failures`, fragment check `0 failures`
+- `uv run pytest tests/census -q`, last, after this section: `66 passed in 29.70s`
