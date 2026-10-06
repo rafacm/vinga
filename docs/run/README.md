@@ -5,8 +5,7 @@ what you will have at the end and linking the generated
 [reference](../reference/) for every key, route and event it names
 rather than restating it. They are grouped by what you are doing.
 
-The server's configuration API, security defaults, conversation
-behavior and observability are in the
+The server's conversation behavior and observability are in the
 [server README](../../vinga-server/README.md).
 
 ## Deploying
@@ -15,8 +14,9 @@ behavior and observability are in the
   single container and what it needs, one replica, the two mounts, and
   which image variant and tag to deploy.
 - [Providing the database](database.md): the Postgres a deployment
-  brings, what the server role needs, the provisioning file, and
-  reading the conversation record as `vinga_ro`.
+  brings, what the server role needs, the provisioning file, how the
+  server is told where it is, and reading the conversation record as
+  `vinga_ro`.
 - [Exposing a deployment](exposing-a-deployment.md): one port for
   everything, what a reverse proxy has to get right, and what happens
   to the configuration API at the edge.
@@ -24,8 +24,10 @@ behavior and observability are in the
   conversations one server holds and for how long, how a shutdown
   drains, and which probe an orchestrator restarts on and which it
   routes traffic by.
-- [Securing a deployment](security.md): the master key that encrypts
-  stored credentials, where it is escrowed, and rotating it.
+- [Securing a deployment](security.md): where each credential is
+  kept, the master key and its rotation, the hosts a configuration
+  reaches, device authentication and the OTA endpoint, everything the
+  server exposes, and the data boundary.
 
 ## Keeping a deployment running
 
@@ -41,6 +43,14 @@ behavior and observability are in the
 
 ## Configuring
 
+- [Configuring a deployment](configuration.md): the server half in a
+  file and the domain half in the database, writing a whole deployment
+  from one document, when an edit takes effect, and installing it
+  without a restart.
+- [Using the configuration API](configuration-api.md): the bearer
+  token, the families of routes and where each is specified, what a
+  write's answer and a refusal carry, and how the `vinga` client finds
+  a server.
 - [Choosing providers](providers.md): which engine can serve each
   stage, which run on your host and which reach a vendor, and what an
   install carries for each.
@@ -54,13 +64,11 @@ behavior and observability are in the
   and which servers are connected.
 - [Configuring what an agent remembers](memory.md): facts, device notes
   and the conversation ledger, reading and correcting them with
-  `vinga memory`, and switching memory off.
+  `vinga memory`, which providers they are sent to, and switching
+  memory off.
 - [Composing what an agent is told](agents-and-prompts.md): previewing
   the whole system prompt block by block, and sharing text between
   agents as fragments.
-- [Changing the configuration](configuration.md): why an edit to a
-  running deployment is stored and not yet in effect, and the two ways
-  it becomes effective.
 - [Onboarding a device](onboarding-a-device.md): the short URL a board
   is given, checking what answers there, and binding the board by the
   code it shows.
