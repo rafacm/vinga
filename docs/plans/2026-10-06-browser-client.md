@@ -351,14 +351,18 @@ is answered by minting again, up to a small bound, inside the same
 redemption; failing that bound refuses with no write. A test injects a
 failure between what are today two writes and asserts nothing remains.
 
-**D5c. Which origin the link names.** The link must open a secure
-context. `vinga info` prints `server.public_url` when it is set and is
-`https://` or names `localhost`; otherwise, when the CLI reached the API
-on a loopback address, it prints `http://localhost:<port>/try/#…` from
-the port it used, which is a secure context on the machine running the
-server; otherwise it prints no link and one sentence saying to set
-`server.public_url` to an HTTPS address. It never prints the listen
-address, and never a guess.
+**D5c. Which origin the link names, and who decides it.** The link must
+open a secure context. The server and the CLI each know one half, so
+each owns one: the issuance response carries the configured public
+origin when `server.public_url` is set and is `https://` or names
+`localhost` (validated server-side), and nothing otherwise; the CLI then
+uses that origin, or, when the response carries none, derives
+`http://localhost:<port>` only from its own API target when that target
+is a loopback address, and otherwise prints no link and one sentence
+asking for an HTTPS `server.public_url`. Never the listen address, never
+a guess. Tests cover both sides, including a server listening on
+`0.0.0.0` with no public URL reached by a CLI on a non-loopback address
+(no link printed).
 
 **D5d. One redemption wins.** The token store's `claim(token)` checks and
 marks the token used in one synchronous step with no `await` between
@@ -660,6 +664,8 @@ Say instead: `try_links.py` owns expiry removal, including a bounded pruning str
 3. **P2: The origin rule has no implementable owner.**
 Evidence: D5c says the link uses `localhost:<port>` "when the CLI reached the API on a loopback address," but the server cannot know the address the CLI used. Existing `RuntimeInfo` exposes an onboarding URL, not the safe public-origin value needed for this rule.
 Say instead: define the issuance response and responsibility explicitly: the server returns a validated configured public origin when one exists; otherwise the CLI derives only a loopback origin from its own API target. Refuse all other cases. Test both sides, including a server listening on `0.0.0.0`.
+
+   *Resolution:* Accepted. D5c now splits ownership: the server returns a validated configured origin (https or localhost) or none, and the CLI derives `http://localhost:<port>` only from its own loopback API target, refusing every other case; tests cover both halves, including a `0.0.0.0` server reached from a non-loopback CLI.
 
 4. **P2: Try-link issuance is undefined when onboarding is disabled.**
 Evidence: D2 mounts `/try/` only when onboarding is enabled; D5a refuses only for a missing default agent. A link could be issued even though redemption cannot return the required alias for OTA.
