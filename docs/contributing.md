@@ -149,8 +149,8 @@ into something checked rather than remembered.
 Both containers below have to reach the same database, and a container
 does not reach the development instance at `127.0.0.1`, since that
 address is its own. Join them to the network compose made for it
-(`docker network ls` lists it as your project's `_default`) and name
-the service instead, which is what `VINGA_DB_HOST` is doing here; CI
+(named after the project's directory, with `_default` after it, which
+the block below asks compose for) and name the service instead, which is what `VINGA_DB_HOST` is doing here; CI
 does the same thing with a network and a database container of its
 own. The lane also gets a database of its own, `vinga_smoke`, because
 the seed below writes a whole configuration and would otherwise replace
@@ -163,9 +163,10 @@ docker compose exec postgres createdb -U vinga vinga_smoke
 
 docker build -t vinga-server:local .
 
-# The network compose made for the database, named after the directory
-# the compose file is in: `docker network ls` says which it is.
-net=vinga_default
+# The network compose made for the database. Compose names it after
+# the project, which is the directory the compose file is in, so a
+# checkout under another name has another network; ask compose.
+net=$(docker compose config --format json | jq -r '.networks.default.name')
 
 # Throwaway values for this run alone, never a deployment's. They reach
 # the containers by name (-e NAME, value from this environment) rather
