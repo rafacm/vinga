@@ -40,7 +40,10 @@ from tests.support.registry import booted, store_at
 from vinga_server.app import create_app
 from vinga_server.browser import REDEEM_PATH, REDEEM_REFUSED
 from vinga_server.config.loader import StorageError
-from vinga_server.config.store import ConfigStore
+from vinga_server.config.models import DatabaseConfig
+from vinga_server.config.store import ConfigStore, read_live_attachment
+from vinga_server.db import read_engine
+from vinga_server.memory.store import PromptMemory
 from vinga_server.onboarding import onboarding_key, onboarding_path
 from vinga_server.onboarding.browser import CLIENT_ID_NAMESPACE
 from vinga_server.onboarding.try_links import (
@@ -49,6 +52,7 @@ from vinga_server.onboarding.try_links import (
     TryLinks,
     redeem,
 )
+from vinga_server.runtime import prompt
 
 ISSUE = "/api/runtime/try-links"
 BEARER = {"Authorization": f"Bearer {TEST_API_SECRET}"}
@@ -464,6 +468,36 @@ def test_the_draws_are_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
         assert asyncio.run(redeem(links, links.issue(), store, taken)) is None
 
     assert drawn == [6, 6]
+
+
+def test_a_redeemed_browser_is_not_introduced_by_its_mac() -> None:
+    """The name a link gives a browser is a placeholder the server
+    minted, exactly as `Device <mac>` is for a board, and the agent is
+    told the name of the device it speaks through. Read the way a
+    connect reads it and put in a prompt the way a reply builds one, it
+    has to say nothing, or a model asked which speaker it is reads a MAC
+    address aloud."""
+    booted(default_agent="assistant")
+    with store_at() as store:
+        links = TryLinks()
+        identity = asyncio.run(redeem(links, links.issue(), store, repeating(FREE)))
+    assert identity is not None
+    engine = read_engine(DatabaseConfig())
+    try:
+        device = read_live_attachment(engine, identity.mac).device
+    finally:
+        engine.dispose()
+    assert device is not None and device.name == f"Browser {identity.mac}"
+
+    sent = prompt.with_scopes(
+        prompt.know_how("POET"),
+        PromptMemory(state="", agent="", device=""),
+        device,
+        remembering=False,
+    )
+
+    assert identity.mac not in sent.text
+    assert device.named is False
 
 
 def test_a_refusal_that_is_not_a_collision_is_not_drawn_again() -> None:

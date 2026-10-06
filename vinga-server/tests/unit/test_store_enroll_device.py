@@ -117,16 +117,20 @@ def test_with_no_default_agent_nothing_is_created(store: ConfigStore) -> None:
 
 def test_a_name_that_cannot_be_given_leaves_no_device_behind(store: ConfigStore) -> None:
     """The failure between what used to be two writes, injected: the
-    name the browser is to be given is already another device's. With a
+    name the device is to be given is already another device's. With a
     bind followed by a rename, the bind would have committed and left
     a device bound to the default agent under the wrong name, with the
-    link that made it already spent. One transaction leaves nothing."""
+    link that made it already spent. One transaction leaves nothing.
+
+    Planted with a name a person chose, because the browser's own
+    `Browser <mac>` is reserved to the device whose MAC it is and no
+    writer can put it on another one."""
     _agents(store)
     store.bind_device(OTHER_MAC, ["sam"])
-    store.rename_device(OTHER_MAC, NAME)
+    store.rename_device(OTHER_MAC, "Hall Speaker")
 
     with pytest.raises(ConfigError) as refused:
-        store.enroll_device(MAC, NAME)
+        store.enroll_device(MAC, "hall  speaker")
 
     assert not isinstance(refused.value, DeviceAlreadyBoundError)
     with pytest.raises(UnknownEntityError):

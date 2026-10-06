@@ -281,6 +281,18 @@ def test_a_board_named_back_to_its_own_default_is_unnamed_again(
     assert attached(lookup).named is False
 
 
+def test_a_browser_a_try_link_bound_is_unnamed(store: ConfigStore, lookup: Engine) -> None:
+    """The browser's placeholder, read the way the board's is: what the
+    enroll path writes is a name nobody chose."""
+    store.set_agent("sam", {"prompt": "You are Sam."})
+    store.set_default_agent("sam")
+    store.enroll_device(MAC, f"Browser {MAC}")
+
+    record = attached(lookup)
+
+    assert record.name == f"Browser {MAC}" and record.named is False
+
+
 # The address a conversation must not be re-read by
 
 

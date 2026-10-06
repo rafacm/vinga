@@ -71,6 +71,10 @@ OTHER_MAC = "11:22:33:44:55:66"
 # shares them.
 DEFAULT_NAME = f"Device {MAC}"
 
+# The name a try link gives the browser it binds, the second spelling
+# the server mints and so the second one it reserves.
+BROWSER_NAME = f"Browser {MAC}"
+
 
 # The token the API is built with, which every request here carries.
 TOKEN = "tok-test-6d1c8b47-never-a-real-secret"
@@ -654,6 +658,76 @@ def test_binding_a_board_still_mints_the_reserved_name(store: ConfigStore) -> No
     store.bind_device(MAC, ["sam"])
 
     assert _record(store).name == DEFAULT_NAME
+
+
+# A browser a try link binds is called `Browser <mac>` for the same
+# reason a board is called `Device <mac>`, and an agent told that name
+# reads a MAC aloud just the same, so the shape is reserved alongside
+# the board's: the same refusal, the same fold, the same exemption.
+
+
+def test_a_device_may_not_take_another_devices_browser_name(store: ConfigStore) -> None:
+    _agents(store)
+    store.bind_device(MAC, ["sam"])
+    store.bind_device(OTHER_MAC, ["sam"])
+
+    with pytest.raises(ConfigError) as caught:
+        store.rename_device(OTHER_MAC, BROWSER_NAME)
+
+    assert str(caught.value) == DEVICE_NAME_RESERVED
+    assert _record(store, OTHER_MAC).name == DEFAULT_NAME.replace(MAC, OTHER_MAC)
+
+
+def test_the_browser_shape_is_reserved_however_it_is_spelled(store: ConfigStore) -> None:
+    """Read through the fold, like the board's: a capital and some
+    padding do not get a placeholder past."""
+    _agents(store)
+    store.bind_device(MAC, ["sam"])
+    store.bind_device(OTHER_MAC, ["sam"])
+
+    for spelling in (f"  BROWSER   {MAC.upper()} ", f"browser\t{MAC}", f"bRoWsEr {MAC}"):
+        with pytest.raises(ConfigError) as caught:
+            store.rename_device(OTHER_MAC, spelling)
+        assert str(caught.value) == DEVICE_NAME_RESERVED
+
+
+def test_a_document_may_not_name_a_device_after_another_browser(store: ConfigStore) -> None:
+    _agents(store)
+    store.bind_device(OTHER_MAC, ["sam"])
+
+    with pytest.raises(ConfigError) as caught:
+        store.apply(_document(agents=["sam"], name=BROWSER_NAME.replace(MAC, OTHER_MAC)))
+
+    assert DEVICE_NAME_RESERVED in str(caught.value)
+
+
+def test_a_device_may_be_given_its_own_browser_name(store: ConfigStore) -> None:
+    """The exemption covers both spellings a device's own MAC mints,
+    because an export cannot say which one a device was minted with
+    except by carrying it: a document exported from a store holding a
+    browser carries `Browser <its mac>`, and applying it back has to
+    write the record it came from. What this admits is a board an
+    operator labels a browser, which is misleading in a listing and
+    harmless in a room: the name still reads as nobody's, so the agent
+    still says nothing."""
+    _agents(store)
+    store.bind_device(MAC, ["sam"])
+
+    store.rename_device(MAC, BROWSER_NAME)
+
+    assert _record(store).name == BROWSER_NAME
+
+
+def test_an_export_of_a_browser_applies_and_writes_nothing(store: ConfigStore) -> None:
+    _agents(store)
+    store.set_default_agent("sam")
+    store.enroll_device(MAC, BROWSER_NAME)
+    minted = _record(store)
+
+    applied = store.apply({"devices": {MAC: minted.model_dump()}})
+
+    assert [entry.wrote for entry in applied] == [False]
+    assert _record(store) == minted
 
 
 # --- what a stored string may carry ------------------------------------
