@@ -310,3 +310,23 @@ Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    *Resolution:* Accepted. D4b starts `vinga events tail` before the action it watches, uses the records where recording is on, and D7 asserts `ota_check`, `session_open` and the reply or failure events by name.
 
 **Verdict: not ready.** The P1 scope, secret-handling, and apply behavior need amendments before implementation.
+
+## Plan review round 2
+
+Reviewed 2026-10-06 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.0, read-only sandbox, runtime 3m59s, at commit b2825184, plan blob 53c1db3b.
+
+---
+
+1. **P1: Revision rule fails for checkout builds and contradicts its safe fallback.**
+Evidence: plan D1 says every revision can be inserted into a canonical GitHub blob URL and sends `unknown` to `main` (plan:87-94 (`docs/plans/2026-10-06-coding-agent-guide.md:87`)); D1b instead forbids treating `main` as the install (plan:108-116 (`docs/plans/2026-10-06-coding-agent-guide.md:108`)). Checkout builds expose raw `git describe --always --dirty` output (build_info.py:73 (`vinga-server/src/vinga_server/build_info.py:73`)); this checkout currently returns `spike/openapi-ts-client-2445-gb2825184`, which is neither a blob ref nor a tag. A clean fork or locally committed checkout has the same problem.
+The plan should say: use the canonical GitHub URL only for a published-image SHA; for any checkout-derived value, read the accessible checkout, or resolve `HEAD` with its configured remote and verify it exists there. If neither is available, stop and ask. Remove D1's `unknown` to `main` fallback.
+
+2. **P2: The event procedure still exits after the first event.**
+Evidence: D4/D4b prescribe `vinga events tail`, then claim D7 will observe `ota_check`, `session_open`, `heard`, and `replied` (plan:149-178 (`docs/plans/2026-10-06-coding-agent-guide.md:149`)). Without `--follow`, the command prints one event and exits (CLI reference:2761 (`docs/reference/cli.md:2761`)).
+The plan should require `vinga events tail --follow` (and `--device <mac>` for a board) to start before the action, state how it is stopped after the expected terminal event, and have D7 capture and assert that stream.
+
+3. **P2: The milestone does not commit the secret-safety prerequisite it depends on.**
+Evidence: D9 requires this PR to rewrite Getting Started's shell-expanded secrets and run a linked-page credential sweep (plan:222-234 (`docs/plans/2026-10-06-coding-agent-guide.md:222`)). But the sole M1 checklist ends at D7 (plan:273-276 (`docs/plans/2026-10-06-coding-agent-guide.md:273`)), and the footprint characterizes README work as only "one sentence" (plan:266-271 (`docs/plans/2026-10-06-coding-agent-guide.md:266`)).
+The plan should include D9's README rewrite, handoff validation, and whole linked-page leak sweep in M1's checklist and documentation footprint, with their outcomes required in the implementation record.
+
+Verdict: **ready after the P1/P2 amendments.**
