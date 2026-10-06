@@ -147,7 +147,7 @@ the numbers mean. An idle conversation pays nothing extra to resume.
 is: the API is billed by character. The type is marked `reach:
 internet` accordingly, so a `server.data_boundary` of `host` or
 `network` refuses to boot it (see
-[Security](../../vinga-server/README.md#security)). Nothing else in the pipeline moves: VAD, ASR and the
+[The data boundary](security.md#the-data-boundary)). Nothing else in the pipeline moves: VAD, ASR and the
 LLM stay wherever you configured them.
 
 ## OpenAI
@@ -250,5 +250,5 @@ one key is worth something. If what you want is the best voice per
 millisecond, ElevenLabs is the better buy.
 
 **It sends your replies wherever `base_url` points**, which by default
-is OpenAI. See [Security](../../vinga-server/README.md#security) for how
+is OpenAI. See [The data boundary](security.md#the-data-boundary) for how
 `server.data_boundary` treats it.

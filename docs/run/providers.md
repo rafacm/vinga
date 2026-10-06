@@ -38,7 +38,7 @@ download at server startup into a local cache (`download_dir` on the
 provider entry). A fully local, keyless pipeline is Silero +
 faster-whisper + Ollama (through `openai_compatible`) + Piper, and
 `server.data_boundary: host` makes the server refuse to boot anything
-else (see [Security](../../vinga-server/README.md#security)).
+else (see [The data boundary](security.md#the-data-boundary)).
 
 The Install column is a checkout's, since a deployment installs nothing:
 both image variants carry `core`, and the default variant carries the

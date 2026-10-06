@@ -275,5 +275,5 @@ authenticates still names its variable there and the key is sent, so
 **It sends the microphone audio wherever `base_url` points**, which by
 default is OpenAI, and that is a stronger claim than the TTS types
 make: what leaves is what was said in the room, not what the assistant
-answered. See [Security](../../vinga-server/README.md#security) for how
+answered. See [The data boundary](security.md#the-data-boundary) for how
 `server.data_boundary` treats it.
