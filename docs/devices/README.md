@@ -1,9 +1,10 @@
-# Board guides
+# Device guides
 
-One guide per board vinga targets, describing the hardware in front of
-you: which button starts a conversation, whether a wake word is
+One guide per device vinga talks to, describing what is in front of
+you: which control starts a conversation, whether a wake word is
 listening and which word it is, what you can ask the device itself to
-do by voice, and what the display is telling you.
+do by voice, and what its screen is telling you. The boards vinga
+targets are in the table, one guide per model of hardware:
 
 | Board | Guide | Status |
 | --- | --- | --- |
@@ -11,9 +12,18 @@ do by voice, and what the display is telling you.
 | Waveshare ESP32-S3-ePaper-1.54 | [guide](waveshare-esp32-s3-epaper-1.54.md) | not working 🚧 |
 | Waveshare ESP32-S3-Touch-AMOLED-2.16 | [guide](waveshare-esp32-s3-touch-amoled-2.16.md) | not working 🚧 |
 
+Beside them, and not hardware, is the
+[**browser client**](browser.md): a page your server serves that makes
+a web browser on a computer a device, with the computer's microphone
+and speakers. It joins by a try link or by pairing with a code, and it
+has been checked in headless Chromium alone; its guide says what that
+covers.
+
 The rest of this page is the behavior every board running the upstream
 firmware shares, so that each guide can stay short and cover only what
-is specific to its own board.
+is specific to its own board. The browser client listens in the same
+two modes and publishes its own controls the same way, and its guide
+says where it differs.
 
 ## On this page
 
