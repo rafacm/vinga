@@ -58,10 +58,12 @@ user=postgres
 ```
 
 and `~/.pgpass`, readable by you alone (`chmod 0600`), holds that
-role's password on one line of the form
-`host:port:database:user:password`. The same two files serve every
-`psql`, `pg_dump` and `pg_restore` an administrator runs against this
-instance.
+role's password on one line of the form `host:port:*:user:password`.
+The `*` matches any database name, which the role needs because
+`dropdb` and `createdb` connect to a maintenance database (`postgres`)
+rather than to the one they act on. The same two files serve every
+`psql`, `pg_dump`, `pg_restore`, `dropdb` and `createdb` an
+administrator runs against this instance.
 
 The executor needs to be able to create roles and to create schemas in
 that database (a superuser, or the database's owner with `CREATEROLE`);

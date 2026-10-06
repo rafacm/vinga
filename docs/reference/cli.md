@@ -548,7 +548,11 @@ recorded.
 docker stop vinga && docker rm vinga
 
 # 2. Take the database away and make it again, owned by the server role.
-dropdb "$VINGA_DB_NAME" && createdb --owner "$VINGA_DB_USER" "$VINGA_DB_NAME"
+#    Both connect to a maintenance database, named here, as the admin
+#    role of the vinga-admin service, with its password in ~/.pgpass.
+PGSERVICE=vinga-admin dropdb --maintenance-db=postgres "$VINGA_DB_NAME" &&
+  PGSERVICE=vinga-admin createdb --maintenance-db=postgres \
+    --owner "$VINGA_DB_USER" "$VINGA_DB_NAME"
 
 # 3. Rerun the provisioning file. Dropping the database took the two
 #    schemas and their default privileges with it; vinga_ro is an

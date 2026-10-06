@@ -77,8 +77,14 @@ server, import, re-enter the credentials and apply.
 # and memory. Stop the container that will not serve, and take the
 # database away. Nothing is connected to it while the server is down,
 # which is what lets it be dropped rather than emptied table by table.
+# dropdb and createdb connect to a maintenance database rather than the
+# one they act on, so it is named; the host, the admin role and its
+# password come from the vinga-admin service and ~/.pgpass, exactly as
+# for psql below, and never from the defaults of the machine you type on.
 docker stop vinga && docker rm vinga
-dropdb "$VINGA_DB_NAME" && createdb --owner "$VINGA_DB_USER" "$VINGA_DB_NAME"
+PGSERVICE=vinga-admin dropdb --maintenance-db=postgres "$VINGA_DB_NAME" &&
+  PGSERVICE=vinga-admin createdb --maintenance-db=postgres \
+    --owner "$VINGA_DB_USER" "$VINGA_DB_NAME"
 
 # Rerun the provisioning file: dropping the database took the two
 # schemas and their default privileges with it, while vinga_ro, which
