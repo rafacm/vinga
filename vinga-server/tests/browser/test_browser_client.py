@@ -21,9 +21,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
-from lane import DIAGNOSTICS, LANE_AGENT, Server
+from lane import DIAGNOSTICS, LANE_AGENT, Server, redact
 from lane import wait_for as poll
 from playwright.sync_api import Browser, Page, WebSocket
+from playwright.sync_api import Error as PlaywrightError
 
 PLAIN_REPLY = {"type": "mock", "reply": "You said {text}."}
 
@@ -101,6 +102,7 @@ def open_link(browser: Browser, server: Server, switches: str, link: bool = True
     onboarding URL opens it."""
     if link:
         path, _, token = server.api("POST", "/runtime/try-links")["page"].partition("#")
+        redact.register(token)
     else:
         path, token = "/try/", ""
     context = browser.new_context(permissions=["microphone"])
@@ -118,6 +120,7 @@ def open_link(browser: Browser, server: Server, switches: str, link: bool = True
                 return
             token = body.get("websocket", {}).get("token") if isinstance(body, dict) else None
             if token:
+                redact.register(token)
                 visit.device_tokens.append(token)
 
     page.on("response", checked_in)
@@ -140,7 +143,11 @@ def open_link(browser: Browser, server: Server, switches: str, link: bool = True
 
     DIAGNOSTICS.append(describe)
     query = f"?{switches}" if switches else ""
-    page.goto(f"{server.base}{path}{query}" + (f"#{token}" if token else ""))
+    try:
+        page.goto(f"{server.base}{path}{query}" + (f"#{token}" if token else ""))
+    except PlaywrightError:
+        # Playwright's message quotes the address, fragment and all.
+        raise RuntimeError("the page did not load from its try link") from None
     ready = "#start" if link else "#pair"
     visit.wait_for("the page to be ready", lambda: page.locator(ready).is_visible())
     return visit

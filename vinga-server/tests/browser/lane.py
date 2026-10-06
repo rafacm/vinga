@@ -10,6 +10,7 @@ separate install, or a container.
 """
 
 import json
+import re
 import socket
 import subprocess
 import threading
@@ -52,6 +53,48 @@ TAIL_S = 9.0
 REPLY_MS_PER_CHAR = 200
 
 LANE_AGENT = "assistant"
+
+# What stands in for a credential in anything the lane prints.
+REDACTED = "[redacted]"
+
+# The two token shapes this server issues, found whether or not the
+# lane ever saw the value: a try token is 32 random bytes in unpadded
+# urlsafe base64, 43 characters; a device token is a signature of the
+# same shape, a dot, and the second it was issued. Bounded on both
+# sides, so a longer run (a hex digest) is not mistaken for one.
+_TOKEN_SHAPES = (
+    re.compile(r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{43}(?:\.[0-9]+)?(?![A-Za-z0-9_-])"),
+    re.compile(r"vinga\.token\.[A-Za-z0-9_.-]+"),
+)
+
+
+class Redactor:
+    """Takes every credential out of a text before the lane prints it.
+
+    The lane's diagnostics carry the server's log, the page's console and
+    the websocket record, which are exactly where a leak the lane exists
+    to catch would sit; printing them raw would republish it. So every
+    value the lane issued or saw is registered here, the two shapes the
+    server issues are matched besides, and what is printed is the text
+    with each replaced by `REDACTED`."""
+
+    def __init__(self) -> None:
+        self.known: set[str] = set()
+
+    def register(self, secret: str) -> None:
+        if secret:
+            self.known.add(secret)
+
+    def __call__(self, text: str) -> str:
+        for secret in sorted(self.known, key=len, reverse=True):
+            text = text.replace(secret, REDACTED)
+        for shape in _TOKEN_SHAPES:
+            text = shape.sub(REDACTED, text)
+        return text
+
+
+# The one the whole run registers into and prints through.
+redact = Redactor()
 
 # What a failed case prints about itself: each entry answers a section
 # of text, and the conftest's report hook reads them on a failure and
