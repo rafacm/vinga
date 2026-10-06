@@ -665,6 +665,8 @@ Say instead: define the issuance response and responsibility explicitly: the ser
 Evidence: D2 mounts `/try/` only when onboarding is enabled; D5a refuses only for a missing default agent. A link could be issued even though redemption cannot return the required alias for OTA.
 Say instead: refuse `POST /api/runtime/try-links` when onboarding is disabled, with a fixed actionable message, and cover it in `vinga info` and API tests.
 
+   *Resolution:* Accepted. D6b: with onboarding disabled, issuance refuses with a fixed sentence naming `server.onboarding.enabled`, which `vinga info` prints in the link's place; API and CLI tests cover it.
+
 5. **P2: The static-cache strategy can serve stale protocol code after an upgrade.**
 Evidence: D2 serves fixed asset paths such as `/try/static/page.js`, while only saying `Cache-Control` is "tied to the server's revision." The page is `no-store`, but its module imports may remain cached under unchanged URLs.
 Say instead: choose and specify either revisioned or content-hashed asset URLs, or `no-cache` plus a revision-derived validator. Add an upgrade/cache test showing a fresh `/try/` page cannot load an older module set.
