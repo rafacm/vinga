@@ -21,7 +21,7 @@ cheapest shape of the client itself was measured in Step 0 and chosen:
 the browser's own WebCodecs Opus codec rather than a 844 KB libopus
 build or Pyodide (Q7).
 
-**Operator surface:** a new route family (`/try/<token>`, the page under
+**Operator surface:** a new route family (`/try/` with its token in the fragment, the page under
 the onboarding path) and a new line in `vinga info` (the try link); no
 new configuration key in M1 to M3 unless the plan review asks for one
 (D6 names the one candidate); a device guide `docs/devices/browser.md`
@@ -103,7 +103,7 @@ served beside by a relative URL and the key is never typed, never put
 in the page's source by the server for a different path, and never
 printed beyond where it is today. Anyone holding the onboarding URL can
 already check in as a board; loading the page grants nothing more. The
-`/try/<token>` link (D5) redirects there after binding.
+`/try/` link (D5) moves the page there after redeeming its token.
 
 **Q3. The credential on the WebSocket handshake.** The
 `Sec-WebSocket-Protocol` header, which is the one header a browser's
@@ -207,7 +207,7 @@ clear, so it can never be a real board's address) and a client id by
 UUIDv5 under a namespace of its own, the simulator's rule applied to a
 different namespace so the two never collide. The page stores both in
 `localStorage`. Minting happens in exactly two places, both server-side:
-the `/try/<token>` route (D5) and the page's own "start" request when it
+the `/try/redeem` request (D5) and the page's own "start" request when it
 holds no identity (D4). No JavaScript mints a MAC.
 
 **D2. The page and its assets.** `GET /x/<key>/try/` serves
@@ -339,7 +339,7 @@ operator tells it apart. The page sends `board.type` `vinga-browser` in
 its check-in body so the observed-facts surfaces name it, and nothing
 the page stores (identity, the token) reaches any log: the OTA and
 WebSocket paths already never log a token, the subprotocol values are
-read and dropped, and `/try/<token>` is a path the server does not log
+read and dropped, and the try token travels in a URL fragment, which no server or proxy ever receives
 (access log off) and the exposure guide warns a proxy might.
 
 **D7a. What each value may reach.** Two classes, each tested by the exact
@@ -391,8 +391,9 @@ The seam is the existing one: the browser is a device behind
   when both are present; the token value never echoed in the accepted
   subprotocol; a sentinel token absent from every log record); the page
   routes (wrong key 404, allowlist, no traversal, CSP present); the
-  `/try/` route (binds once, names the device, answers 404 to reuse,
-  refuses without a default agent); `vinga info` printing the link.
+  `/try/` routes (a GET spends nothing; redeeming binds and names once
+  in one transaction; a reused, expired or unknown token gets one fixed
+  refusal; issuance refuses without a default agent); `vinga info` printing the link.
   Written first and watched failing; mutations of the guards (single
   use, expiry, header precedence, the echo) each named with the test
   that catches it.
