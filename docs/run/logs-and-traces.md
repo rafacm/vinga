@@ -302,12 +302,19 @@ whole conversations. The walkthrough defaults to 100 percent so its topology
 is complete.
 
 For direct Langfuse, supply the v4 OTLP endpoint and both required headers to
-the SDK-owned transport. The Authorization value is the word `Basic`, one
-URL-encoded space, then base64 of `public-key:secret-key`. The three
-variables belong in the environment the server runs with, which for a
-container is the environment file it is started with, and the encoded
-pair is a credential, so build that file through a pipe rather than in
-a command line:
+the SDK-owned transport. The endpoint is your Langfuse deployment's own
+address, `LANGFUSE_HOST` with no trailing slash (`https://cloud.langfuse.com`
+for the hosted one, or wherever you run your own), followed by
+`/api/public/otel`. The recording upload (`export_audio`) reads the same
+`LANGFUSE_HOST`, so both paths name one deployment: an endpoint written
+for one Langfuse and a host for another would send the traces and their
+Basic header to the first and the recordings to the second. The
+Authorization value is the word `Basic`, one URL-encoded space, then
+base64 of `public-key:secret-key`. These variables belong in the
+environment the server runs with, which for a container is the
+environment file it is started with, and the encoded pair is a
+credential, so build that file through a pipe rather than in a command
+line:
 
 ```bash
 # Once: two files only you can read. Write one line into the first in
@@ -317,8 +324,12 @@ install -m 600 /dev/null ~/.langfuse-pair
 "${EDITOR:-vi}" ~/.langfuse-pair
 install -m 600 /dev/null langfuse.env
 
+# Your Langfuse deployment's address, which is no secret.
+LANGFUSE_HOST=https://cloud.langfuse.com
+
 {
-  echo 'OTEL_EXPORTER_OTLP_ENDPOINT=https://cloud.langfuse.com/api/public/otel'
+  printf 'LANGFUSE_HOST=%s\n' "$LANGFUSE_HOST"
+  printf 'OTEL_EXPORTER_OTLP_ENDPOINT=%s/api/public/otel\n' "$LANGFUSE_HOST"
   echo 'OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf'
   printf 'OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic%%20'
   tr -d '\n' < ~/.langfuse-pair | base64 | tr -d '\n'
@@ -328,8 +339,12 @@ install -m 600 /dev/null langfuse.env
 
 The pair goes from the editor to `base64` to the file without the shell
 ever holding it, so it is in no command's arguments and no expansion
-that tracing (`set -x`) would print. Hand the file to the container
-with `--env-file langfuse.env`, or `env_file:` in Compose.
+that tracing (`set -x`) would print; the host is expanded, and it is
+only an address. Hand the file to the container with
+`--env-file langfuse.env`, or `env_file:` in Compose. The recording
+upload reads the pair from the same environment as
+`LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`; the recordings
+themselves are [Capturing a session](capturing-a-session.md)'s.
 
 Fanout applies one policy decision and gives both exporters the same records.
 It is not a transaction across two backends. A backend outage can still make
