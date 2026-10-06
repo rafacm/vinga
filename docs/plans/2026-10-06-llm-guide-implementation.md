@@ -142,11 +142,11 @@ retries, converts or logs, with its evidence (lines in
 | The request gives up after 30 s without a byte, not configurable | `providers/kit.py` L48, L61; `openai_llm.py` L171 | `turn-ollama-*-w60-*.txt` |
 | A quoted argument is converted only where exact, with `tool_arguments_coerced` | `tools/arguments.py` L71; `runtime/tool_execution.py` L70, L131 | not triggered in these runs |
 | A sentence shaped like an offered call is withheld | `docs/system-overview.md`, Flow 2 | `turn-ollama-llama31-w60-1.txt` (`sentence_withheld`) |
-| A `key=value` named like a credential is refused before it is sent | `config/models.py` L63, L2424 | `probes-write.txt` |
-| `base_url` is required on `openai_compatible` | options model | `probes-write.txt` |
+| A credential-shaped `key=value` is refused by the server, after the CLI has sent it (corrected in the review round) | `config/cli/entities.py` L476, `config/cli/acts.py` L199, `config/models.py` L63, L2424 | `probes-write.txt` |
+| `base_url` is required on `openai_compatible`, refused at the write with nothing stored | `config/store.py` L3416 | `probes-write.txt` |
 | An unset `api_key_env` variable refuses the apply, naming the entry | `providers/kit.py` L173 | `probes-reach.txt`, `run-boundary-2.txt` |
 | A stored secret wins and the reference is not read | `providers/kit.py` L166 | `run-openai-2.txt` (`OPENAI_API_KEY` unset, apply served) |
-| Storing a secret needs `VINGA_MASTER_KEY` | `config/secrets.py` L236 | read, not exercised |
+| Storing a secret needs `VINGA_MASTER_KEY`, and an entry that exists | `config/secrets.py` L236, `config/store.py` L3182 | read, not exercised |
 | `secret set` prompts without echo at a terminal, reads stdin plainly otherwise | `config/cli/input.py` L553, L558 | `pty-prompt.txt` (prompt shown, dummy value not echoed) |
 | `reach` on `anthropic` is refused at the apply | `boundary.py` L123 | `run-anthropic-reach.txt` |
 | `anthropic` and `internet` reach refused under `host`; every `openai_compatible` entry must state `reach` under any boundary | `boundary.py` L135, L141, L151 | `run-boundary-5.txt` |
@@ -236,3 +236,39 @@ On agentpi, from the worktree root unless noted:
   this section; its outcome is in the hand-back rather than here.
 - Not run: `uv run ruff check .` and the unit lane, since M1 changes no
   code and no test.
+
+### PR review round
+
+Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, read-only sandbox, runtime 4m34s, at commit c5e87e83 ([the round](https://github.com/rafacm/vinga/pull/622#issuecomment-6008730096)).
+
+1. **P2: a key stored before its entry exists.** The key section
+   offered `vinga provider secret set llm claude api_key` before the
+   recipe that writes `claude`, and the store refuses a secret for a
+   missing entry (`config/store.py` L3182, `UnknownEntityError`).
+   *Resolution:* the section says the entry comes first, and its block
+   and both vendor recipes give one order: provider set, secret set,
+   point an agent at it, apply, which is the order the OpenAI recipe
+   was executed in (`75b98c88`).
+2. **P2: a write-time refusal described as an apply-time one.** A
+   missing required option on `openai_compatible` is refused when
+   `vinga provider set` validates the fragment (`config/store.py`
+   L3416), with nothing stored, as `probes-write.txt` shows.
+   *Resolution:* the paragraph names the two moments, the write (stores
+   nothing; correct and write again, and an agent naming a missing
+   entry is refused here too) and the apply (an unset key variable, a
+   `reach` on a type that knows its own, a reach outside the boundary;
+   the refused write stays stored and the next start refuses unless it
+   is put back), each with its own recovery (`53ddfd46`).
+3. **P2: an inline credential "refused before it is sent".** The CLI
+   builds and sends the pairs (`config/cli/entities.py` L476,
+   `acts.py` L199) and the server's model refuses the value
+   (`config/models.py` L2424), by which time the argument is in shell
+   history and was in the process list. *Resolution:* the guide says the
+   server refuses the write, that the refusal stores and protects
+   nothing, and that a key typed into an argument should be treated as
+   exposed and replaced (`a2175d39`). The claims table above is
+   corrected for this row and for findings 1 and 2.
+
+After the fixes, the link check reports `checked 328 files, 0
+failures` and the Run and Use check `checked 35 Run and Use pages, 0
+findings`; the census ran last, and its outcome is in the hand-back.
