@@ -74,6 +74,9 @@ what each class of page may claim.
   authoring tool.
 - [**system-overview.md**](system-overview.md): one conversation turn
   end to end, the walk the diagrams illustrate.
+- [**contributing.md**](contributing.md): running the server from a
+  checkout, what it is built on, and the unit, integration, local and
+  smoke lanes a change is exercised in.
 - [**vinga-esp32**](../vinga-esp32/README.md): the thin firmware
   customization and the boards it targets.
 - [**xiaozhi-notes.md**](xiaozhi-notes.md): the device↔server protocol,
@@ -182,6 +185,7 @@ be revised given new evidence, provided the promises still hold:
 and are corrected when it moves:
 [`system-overview.md`](system-overview.md),
 [`deployment.md`](deployment.md),
+[`contributing.md`](contributing.md),
 the whole [`run/`](run/README.md) directory (its index and one task
 guide per page),
 [`concepts.md`](concepts.md), [`glossary.md`](glossary.md),
