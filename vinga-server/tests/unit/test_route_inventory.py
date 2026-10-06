@@ -121,6 +121,48 @@ def test_every_http_route_is_served_in_both_spellings(client: TestClient) -> Non
     assert not lonely, f"routes served in one spelling only: {lonely}"
 
 
+# A query value shaped so a substring search for it cannot match by
+# accident, standing for whatever a caller put in a URL it typed.
+REDIRECT_SENTINEL = "sentinel-6c1f9a3e-never-in-an-answer"
+
+
+def test_no_http_route_redirects_a_doubled_slash(client: TestClient) -> None:
+    """The router's slash redirect answers a path one slash away from a
+    registered one with a 307 whose `Location` repeats the path and the
+    query it was asked with, before any handler or guard has run. Every
+    HTTP route is served in both spellings (the case above), so nothing
+    needs the redirect, and a doubled trailing slash is the spelling no
+    route has: it must meet an answer of the application's own, never a
+    redirect echoing what was typed. Driven from the route table, so a
+    route added later is held to it by existing."""
+    table = served(client.app)
+    http = sorted({(path, method) for (kind, path, method) in table if kind == "http"})
+    assert http
+
+    echoed = []
+    for path, method in http:
+        concrete = path.format(key="WRONGKEY", version="0000", name="page.js")
+        asked = f"{concrete.rstrip('/')}//?s={REDIRECT_SENTINEL}"
+        answer = client.request(method, asked, follow_redirects=False)
+        if (
+            300 <= answer.status_code < 400
+            or "location" in answer.headers
+            or REDIRECT_SENTINEL in answer.text
+            or REDIRECT_SENTINEL in str(answer.headers)
+        ):
+            echoed.append((method, asked, answer.status_code))
+    assert not echoed, f"answered with a redirect or an echo: {echoed}"
+
+
+def test_the_websocket_does_not_take_a_doubled_slash_either(client: TestClient) -> None:
+    """The slash redirect is an `http` scope's: a websocket upgrade one
+    slash away from the route is refused, not redirected."""
+    ((_, path, _),) = [key for key, guard in EXPECTED.items() if guard == DEVICE_TOKEN]
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect(f"{path.rstrip('/')}//?s={REDIRECT_SENTINEL}"):
+            pass
+
+
 KEY_GUARDED = sorted(
     (path, method) for (_, path, method), guard in EXPECTED.items() if guard == ONBOARDING_KEY
 )
