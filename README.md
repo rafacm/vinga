@@ -120,18 +120,20 @@ Create the `.env` file that the vinga server and the CLI both read:
 # Stop here rather than write a half-configured file
 : "${LAN_IP:?empty; set it to the address this machine has on the local network}"
 
-# .env holds secrets, so create it readable only by you
+# .env holds secrets, so it is built in a new file only you can read
+# and moved into place once it is whole: an existing .env, whatever its
+# mode, is replaced rather than written into
 umask 077
+env_new=$(mktemp .env.XXXXXX)
 
 # The bearer token for the configuration API, then the secret that
 # signs device tokens. openssl writes each straight into the file, so
 # neither is printed, held in a variable or traced by the shell.
 {
-  printf 'VINGA_API_SECRET='; openssl rand -hex 32
-  printf 'VINGA_AUTH_SECRET='; openssl rand -hex 32
-} > .env
-
-cat >> .env <<EOF
+  printf 'VINGA_API_SECRET=' && openssl rand -hex 32 &&
+  printf 'VINGA_AUTH_SECRET=' && openssl rand -hex 32
+} > "$env_new" &&
+cat >> "$env_new" <<EOF && mv "$env_new" .env
 
 # Where the CLI reaches that API, which is this machine. Loopback
 # because the token above grants every write, and plain http is
