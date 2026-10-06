@@ -81,7 +81,10 @@ class Malformed(Exception):
 def read(path: str, what: str) -> str:
     try:
         return Path(path).read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
+    except (OSError, ValueError) as exc:
+        # ValueError covers a file that is not UTF-8 (UnicodeDecodeError
+        # is one) and a path no file can have, such as one carrying a NUL
+        # byte, which the operating system refuses before any open.
         raise Malformed(f"cannot read {what}") from exc
 
 

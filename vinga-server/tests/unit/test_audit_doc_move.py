@@ -463,6 +463,13 @@ def test_an_unreadable_destination_exits_2(tmp_path: Path) -> None:
     bad(tmp_path, f"{BETA}\tdocs/missing.md\tkinds=procedure\n", "cannot read the destination")
 
 
+def test_a_destination_no_file_can_have_exits_2(tmp_path: Path) -> None:
+    """A NUL byte in a destination path is refused by the operating
+    system before any file is opened, as a ValueError rather than an
+    OSError; it is still a malformed mapping, not a library traceback."""
+    bad(tmp_path, f"{BETA}\tdocs/be\x00ta.md\tkinds=procedure\n", "cannot read the destination")
+
+
 def test_a_line_that_is_not_a_heading_exits_2(tmp_path: Path) -> None:
     one = line_of(OLD, "Alpha one.")
     bad(tmp_path, f"{one}\tdocs/a.md\tkinds=procedure\n", f"line {one} is not a heading")
@@ -508,3 +515,9 @@ def test_a_rewrapped_paragraph_is_still_verbatim(tmp_path: Path) -> None:
     guide = BETA_GUIDE.replace("Beta one.", "Beta\n   one.")
     done = audit(tmp_path, OLD, without_beta(OLD), mapping, {"docs/beta.md": guide})
     assert done.returncode == 0, done.stdout
+
+
+def test_a_destination_that_is_not_utf8_exits_2(tmp_path: Path) -> None:
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "latin.md").write_bytes(b"# Beta\n\nBeta \xff one.\n")
+    bad(tmp_path, f"{BETA}\tdocs/latin.md\tkinds=procedure\n", "cannot read the destination")
