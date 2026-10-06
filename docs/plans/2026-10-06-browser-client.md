@@ -169,6 +169,19 @@ room, a real barge-in) is a manual checkpoint on a laptop, recorded in
 the implementation doc; the capability statement claims only what the
 lane drives, and says which parts were checked by hand.
 
+**Q5a. The lane covers what ships, and runs on every server change.**
+The lane installs the built wheel into a fresh environment and serves
+the page from that install, so a static file missing from the wheel
+fails it; one variant also runs against the image CI built. The page
+exposes, for the lane only through an attribute set when the URL says
+so, a running sum of the absolute PCM values the playback worklet has
+rendered, and the lane asserts it is nonzero after a reply, which is the
+proof that decoded audio reached the sink. The CI job runs on every
+event the server workflow runs on, not on a path filter: the page
+depends on `ws.py`, the session, OTA, the protocol models and the
+packaging, and a filter narrower than those would let one of them break
+it unseen. Its cost per run is measured in M3 and stated in the PR.
+
 **Q6. #81's measurement harness.** Not built here. The browser client
 produces realtime, echo-cancelled sessions that the server records like
 any device's (capture and the conversation store are server-side), so
@@ -489,6 +502,8 @@ Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, re
    *Resolution:* Accepted. D5b: one store method creates the row bound and named `Browser <full MAC>` in a single transaction, refusing rather than merging an existing MAC; a collision is re-minted within a small bound, else refused with no write; a test injects a failure between the two former writes and asserts nothing remains.
 
 8. **P2: The browser lane does not cover the shipped client or its claimed playback.** It starts a server from the checkout and asserts events plus page state (plan:301 (`docs/plans/2026-10-06-browser-client.md:301`)); that cannot catch missing static files in the wheel, nor prove decoded PCM reached the playback worklet. The proposed CI shortcut would also skip changes in `device/session.py`, OTA, protocol or packaging (plan:323 (`docs/plans/2026-10-06-browser-client.md:323`)). **Load the installed artifact in one lane, assert nonzero PCM at the playback sink, and run the browser lane for changes to its server dependencies.**
+
+   *Resolution:* Accepted. Q5a: the lane serves the page from the built wheel installed fresh (one variant against the CI image), asserts a nonzero running PCM sum at the playback sink after a reply, and runs on every server-workflow event with no path filter, its cost measured in M3.
 
 9. **P2: The printed link may be unusable on the default local deployment.** D5 derives its origin like the onboarding URL (plan:226 (`docs/plans/2026-10-06-browser-client.md:226`)). With no configured public URL, that derivation can print the listen address `http://0.0.0.0:8003`, explicitly marked as a guess by the current code (origin.py:178 (`vinga-server/src/vinga_server/onboarding/origin.py:178`)). That does not provide the promised `localhost` secure context. **Specify how `vinga info` obtains a reachable `localhost` URL for a local trial, or refuse link issuance until a usable HTTPS public URL is configured.**
 
