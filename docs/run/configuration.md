@@ -65,10 +65,14 @@ command's help.
 
 A whole deployment, from an empty database, is one document and two
 commands. [`examples/presets/`](../../vinga-server/examples/presets/) holds two of them, a
-deployment that reaches no vendor and the same thing on vendor APIs:
+deployment that reaches no vendor and the same thing on vendor APIs.
+The client installed on its own has no checkout beside it, so fetch
+the one you want first (from a checkout, `cd vinga-server` and name
+`examples/presets/cloud-stack.yaml` instead):
 
 ```bash
-vinga import -f examples/presets/cloud-stack.yaml
+curl -fsSLO https://raw.githubusercontent.com/rafacm/vinga/main/vinga-server/examples/presets/cloud-stack.yaml
+vinga import -f cloud-stack.yaml
 vinga apply
 vinga device bind aa:bb:cc:dd:ee:ff assistant
 vinga list
