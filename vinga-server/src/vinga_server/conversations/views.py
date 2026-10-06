@@ -894,8 +894,8 @@ BY_DEVICE_COLUMNS: tuple[Column, ...] = (
             "is written at the session open and never rewritten, so this is the "
             "label the rows under it were recorded with and not the one the board "
             "carries today. Null wherever no name was recorded, which covers a "
-            "board nobody has named, a MAC no device record stands behind, and "
-            "every session that opened before the column existed."
+            "board or a browser nobody has named, a MAC no device record stands "
+            "behind, and every session that opened before the column existed."
         ),
         units="none",
         nullable=True,
@@ -1005,8 +1005,8 @@ GROUP BY 1, 2, 3, 4""",
 # Ordinary equality is what would be wrong, and quietly. Two of the
 # three keys are nullable: the device is null for a session rejected
 # before a device was understood, and the name is null for every session
-# recorded before `sessions.device_name` existed and for every board
-# nobody has named. Two SQL nulls are not equal to each other, so an
+# recorded before `sessions.device_name` existed and for every board or
+# browser nobody has named. Two SQL nulls are not equal to each other, so an
 # equality join would leave every stream of such a group unmatched by
 # every other, and that group would come back with one stream's number
 # and zeroes where the others should have been, its rates null or wrong.

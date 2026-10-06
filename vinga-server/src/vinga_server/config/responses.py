@@ -1696,9 +1696,9 @@ class SessionDetail(BaseModel):
     device_name: str | None = Field(
         description=(
             "What that device was called when this session opened, or null where no "
-            "name is recorded for it: a board nobody has named, a MAC a default agent "
-            "covers with no record behind it, and every session that opened before "
-            "the column existed. Dated rather than current: renaming the device or "
+            "name is recorded for it: a board or a browser nobody has named, a MAC a "
+            "default agent covers with no record behind it, and every session that "
+            "opened before the column existed. Dated rather than current: renaming the device or "
             "replacing its board does not change what a recorded session says."
         )
     )

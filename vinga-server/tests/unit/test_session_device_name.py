@@ -185,3 +185,19 @@ def test_a_board_nobody_has_named_records_no_name(store: ConfigStore) -> None:
     (row,) = recorded()
     assert row["device"] == MAC
     assert row["device_name"] is None
+
+
+def test_a_browser_nobody_has_named_records_no_name(store: ConfigStore) -> None:
+    """`Browser <mac>` is what a try link calls the browser it binds,
+    the same placeholder as a board's `Device <mac>`, and the session
+    row records null for it just the same."""
+    config = recording_server(store)
+    store.rename_device(MAC, f"Browser {MAC}")
+
+    with TestClient(create_app(config, from_store=True)) as client:
+        opened(client)
+
+    assert store.read_device(MAC).entry.name == f"Browser {MAC}"
+    (row,) = recorded()
+    assert row["device"] == MAC
+    assert row["device_name"] is None

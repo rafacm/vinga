@@ -486,9 +486,9 @@ LLM_INVOCATION_ID = "vinga.llm.invocation.id"
 # The bounded copy `session_open` carries and never a configuration
 # read: the value is sanitized at the decision site, and a board
 # renamed after a session ran must not change what that session's spans
-# say. A board nobody has named contributes NO attribute rather than a
-# null one, which is what `_attributes` already does for an absent
-# value.
+# say. A board or a browser nobody has named contributes NO attribute
+# rather than a null one, which is what `_attributes` already does for
+# an absent value.
 DEVICE_NAME = "vinga.device.name"
 
 # The name a turn is addressed by after it is over, and the one fact the
@@ -1819,8 +1819,8 @@ def _named(pinned: "_Pinned") -> dict[str, Any]:
     builds its attributes by hand: `reference_media` and
     `_after_the_close` would otherwise be two
     copies of one absence rule, and the rule is exactly the one
-    `_attributes` keeps for a live span, that an unnamed board
-    contributes no attribute rather than a null.
+    `_attributes` keeps for a live span, that an unnamed board or
+    browser contributes no attribute rather than a null.
 
     Takes any pinned context, a turn's as readily as its session's: the
     name is a fact about the board the session ran on, and a turn under

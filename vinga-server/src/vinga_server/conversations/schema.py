@@ -150,8 +150,9 @@ sessions = Table(
             "so a rename splits a per-device series here rather than retitling the "
             "sessions the device already had, and replacing its board does not "
             "touch it either. Null wherever no name is recorded for the session: a "
-            "board nobody has named, a MAC a default agent covers with no record "
-            "behind it, and every session that opened before this column existed."
+            "board or a browser nobody has named, a MAC a default agent covers with "
+            "no record behind it, and every session that opened before this column "
+            "existed."
         ),
     ),
     Column(
