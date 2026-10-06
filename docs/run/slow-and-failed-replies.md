@@ -19,10 +19,19 @@ The silence between the end of an utterance and the first audio of the
 reply is where the assistant feels dead: healthy field turns run 1.5
 to 3 s of it, and a slow provider stretches it well past the point
 where users ask "are you there?". Humans hold exactly this gap with a
-filled pause, and an agent can too:
+filled pause, and an agent can too. `set` replaces the whole
+`agent_defaults` entry, the stage fields it names included, so the
+section is added to the entry as it stands rather than written alone,
+and nothing changes until it is applied:
 
 ```bash
-vinga-server config agent-defaults set -f - <<'YAML'
+vinga-server config agent-defaults export > agent-defaults.yaml
+"${EDITOR:-vi}" agent-defaults.yaml    # add the filler section below
+vinga-server config agent-defaults set -f agent-defaults.yaml
+vinga-server config apply
+```
+
+```yaml
 filler:
   # off by default
   enabled: true
@@ -30,7 +39,6 @@ filler:
   phrases:
     - "Hmm, let me see..."
     - "Good question..."
-YAML
 ```
 
 When a reply's first audio has not started within `delay_ms` of the
@@ -77,15 +85,14 @@ provider that is down or a model that never answers, used to be
 silence: the failure was logged and nothing reached the speaker or the
 display, so from the couch a broken pipeline and a slow one were the
 same turn. Every agent therefore has a fixed phrase for it, cached the
-same way the filled pauses above are:
+same way the filled pauses above are, and written the same way, into
+the exported entry:
 
-```bash
-vinga-server config agent-defaults set -f - <<'YAML'
+```yaml
 fallback:
   # on by default
   enabled: true
   phrase: "I ran into a problem and could not answer. The server log has the details."
-YAML
 ```
 
 It is spoken and shown: the sentence goes out as a `tts sentence_start`,
@@ -118,13 +125,16 @@ seconds of startup, and, on a metered voice, a few seconds of billed
 synthesis, paid again at every restart, redeploy and container
 replacement. Nothing is cached across processes: a start has no previous
 world to keep a clip from. What reuse there is lives inside one running
-process, across `vinga apply`: an agent whose `fallback` section and
-whose voice are both unchanged keeps the clip it already had, and each
-of the two kinds of clip is re-synthesized only when its own section or
-its voice moves, so applying a prompt edit costs no synthesis at all.
-Synthesis is bounded per phrase, so a provider that hangs delays a start
-by seconds rather than indefinitely; a phrase that will not synthesize
-in time, or at all, degrades to the display alone, with a
+process, across `vinga-server config apply`: an agent whose `fallback`
+section and whose voice are both unchanged keeps the clip it already
+had, and each of the two kinds of clip is re-synthesized only when its
+own section or its voice moves, so applying a prompt edit costs no
+synthesis at all. Fallback synthesis is bounded, ten seconds per agent
+and one agent after another, so a provider that hangs delays a start by
+seconds per agent rather than indefinitely; the filler's synthesis is
+not bounded, so with the filler on, a voice that hangs can hold a start
+or an apply open. A fallback phrase that will not synthesize in time,
+or at all, degrades to the display alone, with a
 `fallback_degraded` event naming the agent. That turn still shows the
 sentence and still closes with its `tts stop`, and only the audio is
 lost.

@@ -52,11 +52,12 @@ the second is worth nothing.
 
 Usage is not a cost. A backend turns one into the other with a model
 definition, which is a match pattern, a unit and a price per unit, and
-**those are yours to enter.** This server never writes one. It holds no
-admin credential for your backend, the OTLP path carries none, and a
-deployment that provisioned prices at boot would be mutating a
-third-party system on the strength of telemetry credentials, which is a
-larger claim on your infrastructure than anything else here makes.
+**those are yours to enter.** This server never writes one. The key
+pair a direct Langfuse export or the recording upload is given could
+write one, and this server uses it for neither: a deployment that
+provisioned prices at boot would be mutating a third-party system on
+the strength of telemetry credentials, which is a larger claim on your
+infrastructure than anything else here makes.
 
 ### The generation stage usually needs nothing
 
@@ -152,8 +153,10 @@ no price beside it, however carefully it was measured.
 
 ### With none of them entered
 
-Usage is present on every span, and every cost the backend cannot price
-on its own reads zero. That is correct rather than broken: the server
+Usage is present on every stage span that reported it (an `asr` span
+from a local engine, and a round whose endpoint reported no counts,
+carry none), and every cost the backend cannot price on its own reads
+zero. That is correct rather than broken: the server
 measured what it was given and the backend was never told what a
 millisecond of audio is worth. Enter the definitions before the run
 whose cost you want to read, because whether a backend goes back and
@@ -176,6 +179,9 @@ is a number a report adds up.
   there is no list price to enter at all.
 - **Piper and faster-whisper** run in this process. There is no rate
   because there is no vendor, which is a true answer rather than a gap:
-  what a local voice costs is the machine it runs on. They also report
-  no usage: a local engine does not count what it was sent, and this
-  server will not count it on the engine's behalf.
+  what a local voice costs is the machine it runs on. Piper's spans
+  still carry the characters it was handed, which this server counts
+  for every voice, and with no definition they price at nothing;
+  faster-whisper reports no usage, because a local engine does not say
+  what audio it was sent, and this server will not count it on the
+  engine's behalf.

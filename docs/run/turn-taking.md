@@ -51,8 +51,12 @@ that, and it turned out to catch only users finishing their own
 sentence, since half a second of classified speech cannot come out of
 the fraction of a second of reply the room has heard by then.
 Every one of these decisions is a structured log event, which is what
-the threshold is tuned from. A manual `listen stop` mid-reply is the
-user holding the button and speaking, so it cancels unconditionally.
+the threshold is tuned from, apart from a confirmation whose
+transcription failed: that resumes the reply, and what says so is the
+`provider_failed` beside it and a plain log line. A manual
+`listen stop` mid-reply is the user holding the button and speaking, so
+with `barge_in` on it cancels unconditionally; with it off, that
+utterance is dropped like any other that arrives during a reply.
 
 **Where a turn ends is one number, and it belongs to the agent rather
 than to the server.** The endpointer ends an utterance after
