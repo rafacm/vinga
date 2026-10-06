@@ -136,6 +136,15 @@ echoing a value that carries the token. Chosen over the alternatives:
 The token's lifetime and verification are unchanged; nothing about a
 board's handshake changes.
 
+**Q3b. With device authentication off.** The OTA reply then says
+`access: open` with an empty token, and a board sends no
+`Authorization`. The page follows the reply: it offers
+`vinga.device.v1`, `vinga.mac.*` and `vinga.client.*` and no
+`vinga.token.*`, and `ws.py`'s subprotocol path then behaves exactly as
+its header path does with auth off (no token check, the identity read
+from the offered values). Tests cover a browser session with auth on and
+with auth off.
+
 **Q3a. The verified identity reaches the session.** `DeviceSession`
 reads `Device-Id` and `Client-Id` from the headers and accepts without a
 subprotocol, so authenticating in `ws.py` alone would let a browser pass
@@ -564,6 +573,8 @@ Reviewed 2026-10-06 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.0
    *Resolution:* Accepted. D5d: `claim(token)` checks and marks used in one synchronous step with no await between, which is linearizable on the single event loop; minting and writing happen only for the winner; a concurrent-redemption test asserts one binding and fixed refusals, and a mutation moving the mark after an await must fail it.
 
 3. **P2: Authentication-disabled deployments have no defined browser handshake.** Evidence: Q3 always offers `vinga.token.<token>` (lines 108-117 (`docs/plans/2026-10-06-browser-client.md:108`)), but the existing OTA reply deliberately supplies an empty token with `access: open` when device authentication is disabled (auth.py (`vinga-server/src/vinga_server/auth.py:48`)). The plan should specify that an `open` reply omits the token subprotocol while retaining the version, MAC, and client-id subprotocols, and test both auth-enabled and auth-disabled browser sessions.
+
+   *Resolution:* Accepted. Q3b: when the OTA reply says `access: open`, the page omits `vinga.token.*` and keeps the version, MAC and client-id values, and the subprotocol path behaves as the header path does with auth off; browser sessions are tested with auth on and off.
 
 4. **P2: The amended no-leak rules still contradict the redeem flow and each other.** Evidence: D7a says secrets reach no API body beyond the issuing one (lines 345-354 (`docs/plans/2026-10-06-browser-client.md:345`)), yet the try token must reach `POST /try/redeem` in its request body (line 292 (`docs/plans/2026-10-06-browser-client.md:292`)). It also permits browser MAC/client ID in ordinary device event fields, while the standing lens still says identity never reaches a log or event (lines 431-433 (`docs/plans/2026-10-06-browser-client.md:431`)). The plan should explicitly allow the try token only in the issuance response and the inbound redeem body, neither logged, retained, echoed, or returned; it should replace the standing-lens sentence with D7a's metadata-versus-secret classification.
 
