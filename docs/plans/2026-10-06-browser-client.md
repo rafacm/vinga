@@ -581,7 +581,10 @@ subprotocol token as it would a board's `Authorization`),
 `docs/devices/browser.md` (new, the Use door: what the page does, which
 browsers were checked, realtime and auto, the ending), the glossary's
 Device entry, `docs/run/with-a-coding-agent.md` (the `/try/` step, #611's
-D8), `docs/devices/README.md` (a line), `docs/README.md`'s Use door, and
+D8), `docs/devices/README.md` (a browser-client entry outside the board
+table, with the page's board-only opening and heading reworded so the
+directory reads as one guide per device, boards in the table and the
+browser beside it), `docs/README.md`'s Use door, and
 the changelog fragments. `concepts.md` gains a sentence that a device may
 be a browser.
 
@@ -760,5 +763,7 @@ Say instead: state consistently that the browser remains at `/try/`; redemption 
 11. **P3: The device-guide footprint does not repair the current board-only index.**
 Evidence: M4 names only "a line" in docs/devices/README.md (`docs/devices/README.md:1`), whose heading, opening claim, and table all say the directory contains one guide per board. The issue requires a browser guide without a hardware-table row.
 Say instead: add a separate browser-client entry outside the board table and revise the surrounding board-only wording so the new guide is discoverable without claiming it is hardware.
+
+   *Resolution:* Accepted. The footprint now gives `docs/devices/README.md` a browser-client entry outside the board table and rewords its board-only opening and heading, so the guide is discoverable without claiming to be hardware.
 
 **Verdict: not ready. Address the P1 and P2 amendments before implementation.**
