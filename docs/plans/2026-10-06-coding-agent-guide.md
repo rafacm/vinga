@@ -84,14 +84,19 @@ The issue's M1, as Step 0 re-scoped it:
 
 ## Smaller decisions
 
-**D1. Reading at the revision is a URL rule the agent can follow.** The
-guide gives the form
+**D1. Reading at the revision, by where the revision came from.** A
+published image reports a 12-character commit, the suffix of its `sha-`
+tag; that commit is on GitHub, so the guide gives the form
 `https://github.com/rafacm/vinga/blob/<revision>/docs/run/with-a-coding-agent.md`
-and the three cases: a published image's revision is a commit to read
-at; a checkout's `-dirty` revision means the person's tree is ahead of
-any commit, so the agent reads that tree's own files; `unknown` means a
-build with no revision, and the agent says so to the person and reads
-`main` with that caveat stated rather than silently.
+for it, and the same revision in every raw URL it fetches. Anything
+else the server reports came from a checkout, as `git describe --always
+--dirty` output (a branch-relative name, a `-dirty` suffix, a fork's
+commit), which is not a reference GitHub can resolve. For those the
+agent reads the checkout the person has, at its `HEAD`; if it has no
+access to the checkout, it may resolve the commit against the
+checkout's configured remote and read there only after confirming the
+commit exists on that remote; if neither works, it stops and asks the
+person. `unknown` is the same: ask, never fall back to `main` (D1b).
 
 **D1a. Artifacts follow the same revision, and the CLI is the image's.**
 Getting Started fetches the compose file and the provisioning SQL from
@@ -320,6 +325,8 @@ Reviewed 2026-10-06 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.0
 1. **P1: Revision rule fails for checkout builds and contradicts its safe fallback.**
 Evidence: plan D1 says every revision can be inserted into a canonical GitHub blob URL and sends `unknown` to `main` (plan:87-94 (`docs/plans/2026-10-06-coding-agent-guide.md:87`)); D1b instead forbids treating `main` as the install (plan:108-116 (`docs/plans/2026-10-06-coding-agent-guide.md:108`)). Checkout builds expose raw `git describe --always --dirty` output (build_info.py:73 (`vinga-server/src/vinga_server/build_info.py:73`)); this checkout currently returns `spike/openapi-ts-client-2445-gb2825184`, which is neither a blob ref nor a tag. A clean fork or locally committed checkout has the same problem.
 The plan should say: use the canonical GitHub URL only for a published-image SHA; for any checkout-derived value, read the accessible checkout, or resolve `HEAD` with its configured remote and verify it exists there. If neither is available, stop and ask. Remove D1's `unknown` to `main` fallback.
+
+   *Resolution:* Accepted. D1 now distinguishes a published image (a 12-character commit, read on GitHub) from every checkout-derived value (`git describe` output, a fork, `-dirty`), which is read from the checkout itself, or from its remote after confirming the commit exists there, or the agent stops and asks. The `unknown` fallback to `main` is gone, consistent with D1b.
 
 2. **P2: The event procedure still exits after the first event.**
 Evidence: D4/D4b prescribe `vinga events tail`, then claim D7 will observe `ota_check`, `session_open`, `heard`, and `replied` (plan:149-178 (`docs/plans/2026-10-06-coding-agent-guide.md:149`)). Without `--follow`, the command prints one event and exits (CLI reference:2761 (`docs/reference/cli.md:2761`)).
