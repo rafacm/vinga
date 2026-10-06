@@ -14,9 +14,13 @@ type: elevenlabs
 # name, and account-specific even for the stock voices. Browse and pick
 # one in the ElevenLabs app, or list yours with:
 #
-#   curl -s -H "xi-api-key: $ELEVENLABS_API_KEY" \
-#     https://api.elevenlabs.io/v1/voices \
+#   printf 'header = "xi-api-key: %s"\n' "$ELEVENLABS_API_KEY" \
+#     | curl -s -K - https://api.elevenlabs.io/v1/voices \
 #     | jq -r '.voices[] | "\(.voice_id)  \(.name)"'
+#
+# The key reaches curl on standard input, written by the shell's builtin
+# printf, rather than in its arguments, where the process table would
+# show it.
 #
 # The current listing endpoint, with search and filtering:
 # https://elevenlabs.io/docs/api-reference/voices/search
