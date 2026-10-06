@@ -39,6 +39,7 @@ from vinga_server.config.loader import ConfigError
 from vinga_server.config.models import ServerConfig
 from vinga_server.config.responses import RuntimeInfo
 from vinga_server.onboarding.origin import onboarding_url
+from vinga_server.onboarding.try_links import Issuer, TryLinks
 
 # Not a real secret, and shaped so a substring check for what is derived
 # from it cannot match by accident.
@@ -525,7 +526,10 @@ def test_two_runs_against_one_state_are_the_same_bytes(
 ) -> None:
     """What is filtered off the line is a function of the stored state,
     so filtering is not a determinism violation: two runs against one
-    state answer the same bytes.
+    state answer the same bytes, but for the one line that is new on
+    purpose. Since #613 each run issues a try link, and a link is a
+    fresh single-use token every time, so that line differs and is the
+    only one that does.
 
     Both streams, because the claim is about the invocation rather than
     about the artifact, and stderr's half of it is that `info` writes
@@ -533,6 +537,7 @@ def test_two_runs_against_one_state_are_the_same_bytes(
     run.
     """
     run.runtime["identity"] = identity(monkeypatch)
+    run.runtime["try_links"] = Issuer(TryLinks(), ServerConfig(), False)
     configured(run)
     capsys.readouterr()
 
@@ -541,7 +546,13 @@ def test_two_runs_against_one_state_are_the_same_bytes(
     assert run("info") == 0
     second = capsys.readouterr()
 
-    assert first.out == second.out
+    differing = [
+        (one, other)
+        for one, other in zip(first.out.splitlines(), second.out.splitlines(), strict=True)
+        if one != other
+    ]
+    assert len(differing) == 1
+    assert all("/try/#" in line for line in differing[0])
     assert first.err == second.err == ""
 
 
@@ -750,8 +761,9 @@ def test_both_acts_are_answered_by_the_address_the_banner_named(
 
     printed = capsys.readouterr().out
     assert len(reads) == 1, reads
-    # Both requests, and the line that named where they would go.
-    assert len(run.reached) == 2, run.reached
+    # All three requests (the identity, the try link, the counts), and
+    # the line that named where they would go.
+    assert len(run.reached) == 3, run.reached
     assert set(run.reached) == {run.reached[0]}
     assert f"configuration API: {run.reached[0]}" in printed
 

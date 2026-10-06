@@ -805,8 +805,8 @@ Commands:
   default-agent    the agent an unbound device reaches
   info             what deployment this is: the API this CLI reached, the
                    running server's version and revision, the URL to type into a
-                   device's captive portal, and how much of each kind is
-                   configured
+                   device's captive portal, a new try link a browser opens to
+                   join as a device, and how much of each kind is configured
   import           write a whole document to the store in one transaction,
                    refused whole if anything in it will not resolve; additive,
                    never deleting, and waiting for the answer however long the
@@ -2214,8 +2214,9 @@ Options:
 Usage: vinga info [OPTIONS]
 
   what deployment this is: the API this CLI reached, the running server's
-  version and revision, the URL to type into a device's captive portal, and how
-  much of each kind is configured
+  version and revision, the URL to type into a device's captive portal, a new
+  try link a browser opens to join as a device, and how much of each kind is
+  configured
 
 Options:
   --config PATH  path to the YAML config file naming server.port and
