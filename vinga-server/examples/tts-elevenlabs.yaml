@@ -14,13 +14,14 @@ type: elevenlabs
 # name, and account-specific even for the stock voices. Browse and pick
 # one in the ElevenLabs app, or list yours with:
 #
-#   printf 'header = "xi-api-key: %s"\n' "$ELEVENLABS_API_KEY" \
-#     | curl -s -K - https://api.elevenlabs.io/v1/voices \
+#   install -m 600 /dev/null ~/.elevenlabs-curlrc
+#   "${EDITOR:-vi}" ~/.elevenlabs-curlrc
+#   curl -s -K ~/.elevenlabs-curlrc https://api.elevenlabs.io/v1/voices \
 #     | jq -r '.voices[] | "\(.voice_id)  \(.name)"'
 #
-# The key reaches curl on standard input, written by the shell's builtin
-# printf, rather than in its arguments, where the process table would
-# show it.
+# The file holds one line, header = "xi-api-key: <your key>", typed in
+# the editor, so the key is in no command's arguments and in no shell
+# expansion that tracing (set -x) would print.
 #
 # The current listing endpoint, with search and filtering:
 # https://elevenlabs.io/docs/api-reference/voices/search
