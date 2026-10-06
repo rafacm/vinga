@@ -19,7 +19,11 @@ own, about the identity just minted: would this MAC resolve to an
 agent with nobody having bound it? A minted MAC is new, so it does
 exactly when a default agent covers it, and asking the bindings rather
 than reading the default agent keeps one rule rather than two that
-could disagree. A refusal hands nothing over and writes nothing.
+could disagree. When the database cannot be read, the bindings answer
+from the served configuration instead, and an empty answer from there
+cannot say no default agent is set, only that none was when it was
+loaded; the mint refuses that too, with a 503 a retry may outlive. A
+refusal hands nothing over and writes nothing.
 """
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -43,6 +47,17 @@ TRY_LINK_NEEDED = (
     "This server connects every new device to its default agent, so a browser "
     "joins it through a try link rather than by pairing. Ask the person who "
     "runs it for one."
+)
+
+# What the mint answers when it cannot find out whether a new browser
+# would be admitted unbound: the database could not be read, and the
+# served configuration answering in its place cannot be trusted about a
+# default agent it does not name. Fixed, saying nothing of the failure,
+# which the bindings view has already logged; a retry may succeed, which
+# is why it is a 503 and not the try-link refusal.
+TRY_IDENTITY_UNAVAILABLE = (
+    "This server cannot check right now whether a new browser may start here. "
+    "Try again in a moment."
 )
 
 # An identity is the browser's own from the moment it is handed over:
@@ -89,13 +104,21 @@ def build_router(key: str | None, assets: Assets | None = None) -> APIRouter:
 
 async def try_identity(request: Request) -> Response:
     """A fresh identity for a browser that holds none, or the fixed
-    refusal while a default agent would admit it unbound."""
+    refusal while a default agent would admit it unbound, or while this
+    server cannot find out whether one would."""
     comp: Composition = request.app.state.composition
     bindings: DeviceBindings = comp.bindings
     identity = mint()
     bound = await bindings.resolve(identity.mac)
     if bound.names:
         return JSONResponse({"error": TRY_LINK_NEEDED}, status_code=409, headers=_NO_STORE)
-    return JSONResponse(
-        {"mac": identity.mac, "client_id": identity.client_id}, headers=_NO_STORE
-    )
+    if not bound.authoritative:
+        # The activation ceremony's `"unreadable"` arm, for the same
+        # reason: an empty answer from the snapshot fallback is not the
+        # database saying no default agent is set, it is this server not
+        # having been able to read it. A default agent set since the
+        # snapshot was loaded would admit the identity minted here at
+        # its next check-in, with no code. The warning naming the
+        # failure is already in the log, from the view itself.
+        return JSONResponse({"error": TRY_IDENTITY_UNAVAILABLE}, status_code=503, headers=_NO_STORE)
+    return JSONResponse({"mac": identity.mac, "client_id": identity.client_id}, headers=_NO_STORE)
