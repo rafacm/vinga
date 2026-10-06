@@ -370,3 +370,269 @@ After the fixes: the check's tests `28 passed`; `uv run ruff check .`
 passes; `python3 scripts/check_run_use_pages.py .` reports
 `checked 11 Run and Use pages, 0 findings`; the link check and the
 census ran last, and their outcome is in the hand-back.
+
+## M3a: the task-guide directory and the deployment guides
+
+**Attribution:** anthropic/claude-opus-5-5, thinking high; Claude Code 2.1.289; 2026-10-06.
+
+### What landed
+
+| Decision | Where | Commit |
+| --- | --- | --- |
+| The move audit's tests, written first and watched failing (21 of 31 red; the ten exit-2 cases pass with the script absent, since Python exits 2 too) | `vinga-server/tests/unit/test_audit_doc_move.py` | `Test the page-move audit before writing it` |
+| The move audit: the prototype with the exit policy, `edited=`, `DROP`, `README` and a required `kinds=` | `scripts/audit_doc_move.py` | `Audit a page move by paragraph, without its text` |
+| Q1: `docs/run/` and its index, in the maintained-maps class and the index pages, linked from the Run door; Limits as the first guide | `docs/run/README.md`, `docs/run/limits-and-probes.md`, `docs/README.md` | `Move Limits into the first task guide` |
+| Running in a container and Choosing an image; the permanent stub (D10) | `docs/run/running-in-a-container.md`, the server README | `Move the container and its image choice to a guide` |
+| Backups | `docs/run/backups.md` | `Move backups and restores to their own guide` |
+| D8b: recovery, decision before the destructive command | `docs/run/recovering-a-deployment.md` | `Move recovery to a guide that decides before it drops` |
+| The master key into `security.md` | `docs/run/security.md` | `Start the security guide with the master key` |
+| "An edit is stored" into `configuration.md` | `docs/run/configuration.md` | `Start the configuration guide with applying an edit` |
+| D13: Which build is running, the rerun-then-boot rule, the API secret, Past releases as changelog links | `docs/run/upgrading.md` | `Move upgrading to a guide that links past releases` |
+| Providing the database and reading as `vinga_ro` | `docs/run/database.md` | `Move providing the database to its own guide` |
+| Ports and topology, Behind a reverse proxy, the API at the edge | `docs/run/exposing-a-deployment.md` | `Move ports, the proxy and the API's edge to a guide` |
+| Onboarding a device | `docs/run/onboarding-a-device.md` | `Move onboarding a device to its own guide` |
+| Transports, with D8c's two rewrites | `docs/system-overview.md` | `Move Transports into the system overview` |
+| D8a outside the README | `docs/deployment.md`, `deploy/postgres-init.sql`, `docs/reference/cli.md` | `Keep the admin connection out of psql's arguments` |
+| The index in reading order; the Run door, root README and server README pointers | `docs/run/README.md`, `docs/README.md`, `README.md`, the server README | `Point the indexes and READMEs at the task guides` |
+| The operator-surface rule names `docs/run/` | `AGENTS.md` | `Name docs/run/ as the home a plan's procedure lands in` |
+| D14's last two sentences | `docs/deployment.md` | `Make deployment.md defer to the guides throughout` |
+| The mapping | `docs/plans/2026-10-05-three-doors-and-task-guides-moves/m3a.tsv` | `Record where M3a's move units went` |
+| D12 | `changelog.d/609-deployment-guides.md` | `Add the changelog fragment for the deployment guides` |
+
+Each guide commit moved its units out of the README and retargeted
+every inbound link and by-name pointer to them in the same commit, so
+the link checker passed after each one (D10). The README went from
+4,176 lines to 3,231 (957 removed, 12 added: the stub's sentence, the
+retargeted pointers and the "On this page" entry).
+
+The audit against the README at this branch's base (`7bf6f82b`, whose
+README is byte-identical to `3073d08b`'s), exit 0
+(`.logs/m3a-audit.txt` in the implementer's worktree):
+
+```text
+19 units, 135 paragraphs moved, 22 declared edited, 4 declared dropped, 1 kept in the page, 0 findings
+```
+
+The 22 declared edits, by mapping row and paragraph, and what each
+became:
+
+- Row 8 (Limits) 15: the "When a reply fails" link, which was wrapped
+  across two lines, on one line and pointed at the README section it
+  still lives in; `config.example.yaml` made a link.
+- Row 13 (the container) 2 and 3: "this section is the one home"
+  becomes this guide and the others in `docs/run/`, links made
+  relative; 9: the `examples/` link.
+- Row 15 (database) 2: "Eight things" becomes "Three things" and links
+  the guides that took the rest; 4: the provisioning file's link;
+  5: the provisioning command (D8a).
+- Row 16 (upgrading) 7: "Rerun it when a release moves the file, too"
+  leaned on the paragraph before it; its opening is now
+  self-contained, and its link relative.
+- Row 19 (security) 14: the wrapped rebuild link names the recovery
+  guide; 15: rotation's "this release cannot retire one" and "the
+  interim path until a re-encrypt command exists" stated as present
+  fact (D8c).
+- Row 22 (configuration) 24: "And the operational one, said again
+  because" dropped from the opening.
+- Row 24 (exposing) 2: "Four more things" becomes two, the README link
+  made explicit, a pointer to the upgrading guide added.
+- Row 28 (recovery) 3: the whole-database block says what it deletes
+  first, its provisioning rerun takes a service file (D8a), and "the
+  run command from above" names the container guide; 13: the `cli.md`
+  link. The reorder itself (D8b) changes no paragraph and the audit
+  does not see order.
+- Row 30 (Choosing an image) 13: the licenses link.
+- Row 32 (onboarding) 16, 17 and 29: four links made relative.
+- Row 34 (Transports) 2 and 3: D8c, below.
+- Row 36 (ports) 2: `server.port` links the reference (D8); 10: the
+  Limits link names the limits guide.
+
+The 4 declared drops are D13's two past releases' four paragraphs,
+all of which the changelog carries (2026-08-30 for the `memory`
+schema's rerun, stopping before starting, and the memory files left
+on disk; 2026-08-28 for the `record` rename's rerun); `upgrading.md`
+links both sections. The one kept paragraph is the stub's heading.
+
+Replaced blocks (D8's table rule): none. M3a's units hold no table or
+list whose every row is a key, route, event or column a generated
+reference states. The `/readyz` status table is in no reference (the
+OpenAPI document does not describe the probes), the variant table is
+not a contract, and the Limits YAML block is a worked example. Where a
+moved sentence leans on a key's default or bound, the guide gains a
+link rather than losing the sentence: a paragraph in
+`limits-and-probes.md` linking `server` and `server.limits`, one in
+`database.md` linking `server.database`, and `server.port` in
+`exposing-a-deployment.md`.
+
+### Deviations from the plan
+
+- **The rerun-then-boot paragraph is in `upgrading.md`.** The plan's
+  table lists "the rerun-then-boot rule" in the `database.md` row,
+  while D13 calls it a procedure that "moves whole" in the paragraph
+  about `upgrading.md`, and the milestone's brief places it in
+  `upgrading.md`. It is the step an upgrade takes, so it is there;
+  `database.md` links it, and `upgrading.md` links back for how the
+  file is run. `database.md` keeps "rerun that file after any database
+  reset", which is in the server-role paragraph.
+- **The configuration API subsection's heading and opening sentence
+  went to `exposing-a-deployment.md`.** No row of the table names them.
+  They introduce the two edge decisions, so they moved with them, with
+  "Four more things" made two and the README link explicit.
+- **The index has three groups, not Q1's three.** Deploying, Keeping a
+  deployment running, and Configuring. M3a has no observing guide, and
+  upgrading, backups and recovery are neither deploying nor
+  configuring.
+- **The taxonomy's "Three directories hold one class each" became
+  "Some".** It was already four before `run/` (reference, adr, plans,
+  features), not counting the diagrams tree. `run/README.md` is also
+  added to the index pages, the same double listing `devices/` has.
+- **The audit requires `kinds=` on every moved unit**, since D8 says
+  each row states it; a missing or unknown kind is a malformed mapping
+  (exit 2), and `DROP` and `README` units take none. Destinations are
+  paths relative to the directory the audit runs in, the repository
+  root. `--list` marks a heading paragraph. A finding says "left behind
+  in the page" and a kept unit "kept in the page", since the audit is
+  not README-specific; the `README` keyword is the plan's.
+- **Beyond the plan's inventory**, found by untruncated greps
+  (`.logs/m3a-by-name-before.txt`, `.logs/m3a-by-name-after.txt`,
+  `.logs/m3a-tests-reading-readme.txt`): `deploy/k8s/ingress.yaml` and
+  `deploy/k8s/job-postgres-init.yaml` each named the README's answer or
+  upgrade order; deployment.md's Kubernetes routing notes called the
+  edge decisions "the README's", its contract section and its closing
+  section named the README; the root README's Documentation section
+  listed the container and onboarding as the server README's; and
+  `tests/unit/test_config_cli_onboarding.py` read the onboarding
+  walkthrough by splitting the README on its heading, which would have
+  raised `IndexError` once the section moved. It reads the guide now.
+- **The API secret paragraph moved verbatim, "this release" and all.**
+  The table puts it in `upgrading.md`. Its rule is standing (the API is
+  always gated, so the secret precedes the image), but "an image from
+  this release" and "the one upgrade step this change forces" read
+  like a release's note. D13 names four notes and not this one, so it
+  is left for review to decide rather than rewritten.
+
+### Resolutions
+
+- **Q1.** `docs/run/` with `docs/run/README.md`, one line per guide.
+  Recommendation for #611's plan: its coding-agent guide should link
+  `docs/run/README.md` for the task-guide index rather than keep a
+  second list, since two lists that must agree are one list with a bug
+  pending. The operator-surface rule in `AGENTS.md` already names the
+  index.
+- **`docs/reference/cli.md` L556 is hand-written.** The recipe sits
+  above the `generated: cli reference` marker (L641), and the drift
+  checks compare only the regions between the markers, so it was
+  edited directly.
+- **The changelog's anchor.** The stub is
+  `## Running in a container` over one sentence linking the guide and
+  `docs/run/`; `CHANGELOG.md`'s link still resolves.
+
+### Discoveries
+
+- **The same credential-in-arguments defect exists outside D8a's
+  pattern**, which looks for `psql`, `pg_dump`, `pg_restore` or `curl`
+  expanding `$NAME`. Eleven positions
+  (`.logs/m3a-d8a-outside-pattern.txt`): the Kubernetes provisioning
+  Job passes `$(ADMIN_URL)` to psql as an argument inside its pod
+  (`deploy/k8s/job-postgres-init.yaml:82`), and `kubectl create secret
+  ... --from-literal=NAME="$VALUE"` puts secrets in kubectl's
+  arguments in `docs/deployment.md` (L317-319, L397, L399),
+  `deploy/k8s/secret.yaml.example` (L16-18) and
+  `deploy/k8s/secret-init.example` (L17, L19). Not fixed here: the Job
+  is a deployed artifact `test_deploy_manifests.py` holds to the code,
+  and `--from-file`/`--from-env-file` changes the documented lane. It
+  wants its own issue.
+- **"Separating the two later" in Behind a reverse proxy** (now
+  `exposing-a-deployment.md`) describes running the image twice behind
+  one database, which the one-replica record says is not a supported
+  topology. It moved verbatim, since it is an operator's option and
+  not a commitment (D8c); the contradiction predates this move and is
+  worth a look.
+- **Two mutation survivors on the first round**, both findings about
+  the tests: dropping fence tracking survived because the fixture's
+  fence happened to split into the same paragraph count, and
+  accepting a non-heading line survived because the test's missing
+  destination exited 2 first. The fixture now splits differently
+  without fence tracking, and every exit-2 test names the refusal it
+  expects with its destinations present. Second round: all 21
+  mutations killed (`.logs/m3a-audit-mutations-2.txt`): the
+  left-behind check (5 tests), occurrence consumption, the named-twice
+  check, the stale-edit check, a kept unit naming two paragraphs or a
+  body paragraph, a kept heading's presence, printing text for the
+  digest (2), fence tracking (7), kinds required and validated, unknown
+  fields, edits outside the unit, the range bound, an empty mapping,
+  the not-a-heading refusal, comparing headings with their #s (3),
+  whitespace collapsing, exit 0 always (12), `DROP` not claimed, and a
+  missing destination read as empty (14).
+- **The planted faults, rerun on the real README with the committed
+  script** (`.logs/m3a-planted-faults.txt`): five units over `## Tools`
+  into three destinations, 68 paragraphs, 0 findings, exit 0; one
+  paragraph deleted from a split unit's destination, exactly that
+  paragraph reported, exit 1; a credential-shaped sentinel in the
+  moved heading, 0 matches in the output of a passing run and of a
+  68-finding failing run; two overlapping units, both shared
+  paragraphs reported as named twice, exit 1; the section also left in
+  the page, 68 left-behind findings, exit 1.
+
+### Inventories
+
+Untruncated, positions only, under `.logs/` in the implementer's
+worktree.
+
+- D8a (`.logs/m3a-d8a-before.txt`, `.logs/m3a-d8a-after.txt`): 8
+  positions at the base outside the dated records, plus the two-line
+  Langfuse form at the README's Langfuse section. M3a's five are fixed:
+  `deploy/postgres-init.sql:11`, `docs/deployment.md:192`,
+  `docs/reference/cli.md:556`, `vinga-server/README.md:3507` and
+  `:3751`. Three remain, all assigned to later milestones:
+  `vinga-server/README.md:479` (L483 at the base, M3b), `:1773` (L1777,
+  M3c), `vinga-server/examples/tts-elevenlabs.yaml:17` (M3b), and the
+  Langfuse form at `vinga-server/README.md:2942` (L3055-3056 at the
+  base, M3d). The
+  guides under `docs/run/` have none.
+- D8c over the text M3a writes onto Run pages
+  (`.logs/m3a-d8c-guides.txt`, dispositions in
+  `.logs/m3a-d8c-dispositions.txt`): 27 positions under `docs/run/`,
+  none about vinga's own future: 13 are a guide's "you will have" end
+  state, 4 a present conditional ("will not open", "will not match"),
+  4 a title or heading naming a server that "will not start", 3
+  "later" in the sense of time, 1 "not yet in effect" describing an
+  edit, 1 what this build never reads, and the operator's option
+  above. Before the move, three sentences in M3a's
+  units were about vinga's future and were rewritten: Transports' "or
+  plans for v1" and "Supporting it later is additive", and rotation's
+  re-encrypt command. The Transports section on `system-overview.md`
+  has no hit after them.
+- Prose pointers (`.logs/m3a-prose-pointers.txt`): 15 `above` or
+  `below` in the guides, every one pointing within its own page.
+- Anchored links into the server README from outside it
+  (`.logs/m3a-server-readme-links-before.txt`), by `git grep`: every
+  one to an anchor M3a moved now points at a guide, apart from
+  `CHANGELOG.md`'s `#running-in-a-container`, which the stub keeps.
+
+### Verification
+
+On agentpi, from the worktree root unless noted:
+
+- `python3 scripts/check_doc_links.py .`: `checked 311 files, 0 failures`, exit 0.
+- `python3 scripts/check_run_use_pages.py .`: `checked 22 Run and Use pages, 0 findings`, exit 0 (the ten guides and their index joined the eleven pages M2 counted).
+- `python3 scripts/fold_changelog.py check .`: `checked 2 fragments, 0 failures`, exit 0.
+- `python3 scripts/audit_doc_move.py` over `m3a.tsv`: exit 0, quoted above.
+- `uv run ruff check .` from `vinga-server/`: All checks passed.
+- `uv run pytest tests/unit -q -n auto --dist loadfile` from
+  `vinga-server/`: `8112 passed, 19 skipped in 888.96s (0:14:48)`,
+  exit 0 (M2's 8080 plus the audit's 32).
+- The compose file's two resolutions, the `unit` job's first step, run
+  by hand on a copy of `docker-compose.yml` and `deploy/` (so its
+  `.env` could not reach the unit lane running beside it): the
+  profile-less invocation is the database alone, the server profile
+  refuses with no secrets and resolves to both services with dummy
+  ones. The step's telemetry and production-file arms were not run
+  locally; M3a changes no file they read beyond comments.
+- `uv run pytest tests/census -q` from `vinga-server/`: run last,
+  after this section; its outcome is in the hand-back rather than
+  here.
+- Not run: the integration lane, since M3a changes no code it
+  exercises and adds no migration; the image job and kubeconform,
+  which run in CI on the pull request because M3a touches `deploy/`,
+  `docker-compose.yml` and the Dockerfile (comments only).
