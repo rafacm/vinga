@@ -65,6 +65,12 @@ def packaged(name: str) -> bytes:
     return (files("vinga_server.browser") / "static" / name).read_bytes()
 
 
+def client(page: bytes) -> dict[str, bytes]:
+    """Every allowlisted file as it ships, with `page.js` replaced: a
+    whole client standing for another release."""
+    return {name: packaged(name) for name in ALLOWLIST} | {"page.js": page}
+
+
 # --- the page ------------------------------------------------------------
 
 
@@ -218,8 +224,8 @@ def test_a_new_version_is_a_new_path_and_the_old_one_is_refused() -> None:
     second refuses the first's. A browser holding the old module cached
     can never be told to import it by a new page (D2b)."""
     index = (files("vinga_server.browser") / "static" / "index.html").read_text()
-    before = Assets(index, {"page.js": b"// the old client\n"})
-    after = Assets(index, {"page.js": b"// the new client\n"})
+    before = Assets(index, client(b"// the old client\n"))
+    after = Assets(index, client(b"// the new client\n"))
 
     old_app, new_app = FastAPI(), FastAPI()
     old_app.include_router(build_router(None, before))
@@ -236,11 +242,11 @@ def test_a_new_version_is_a_new_path_and_the_old_one_is_refused() -> None:
 
 def test_the_version_is_the_served_bytes_and_nothing_else() -> None:
     index = "<script src='{{assets}}/page.js'></script>"
-    one = Assets(index, {"page.js": b"a"})
+    one = Assets(index, client(b"a"))
 
-    assert Assets(index, {"page.js": b"a"}).version == one.version
-    assert Assets("<p>another page</p>", {"page.js": b"a"}).version == one.version
-    assert Assets(index, {"page.js": b"b"}).version != one.version
+    assert Assets(index, client(b"a")).version == one.version
+    assert Assets("<p>another page</p>", client(b"a")).version == one.version
+    assert Assets(index, client(b"b")).version != one.version
 
 
 def test_assets_outside_the_allowlist_cannot_be_served() -> None:

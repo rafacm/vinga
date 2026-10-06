@@ -31,6 +31,7 @@ from collections.abc import Mapping
 from importlib.resources import files
 
 from vinga_server.config.models import BROWSER_MOUNT_PATH
+from vinga_server.device.boundary import WEBSOCKET_PATH
 
 # Where the page is served, and where its modules are served under it.
 # From the constant `ota_path`'s validator reserves, so where the client
@@ -40,14 +41,28 @@ STATIC_PATH = f"{BROWSER_MOUNT_PATH}/static"
 
 # Every file served under `STATIC_PATH`, with its media type. The whole
 # set: adding a module to the client means adding its name here.
+_MODULE = "text/javascript; charset=utf-8"
 ALLOWLIST: Mapping[str, str] = {
-    "page.js": "text/javascript; charset=utf-8",
+    "page.js": _MODULE,
+    "identity.js": _MODULE,
+    "ota.js": _MODULE,
+    "wire.js": _MODULE,
+    "tools.js": _MODULE,
+    "audio.js": _MODULE,
+    "audio-worklet.js": _MODULE,
+    "urls.js": _MODULE,
+    "page.css": "text/css; charset=utf-8",
 }
 
-# The page's own file, and the marker in it that names where its
-# modules are served this version.
+# The page's own file, the marker in it that names where its modules
+# are served this version, and the one that names the device socket's
+# path, relative to the deployment's root as the client resolves every
+# address it reaches. From the boundary's own constant, so the path a
+# board is sent to and the path a browser connects to are one fact.
 INDEX = "index.html"
 ASSETS_MARKER = "{{assets}}"
+SOCKET_MARKER = "{{socket}}"
+SOCKET_PATH = WEBSOCKET_PATH.lstrip("/")
 
 # How many hex digits of the digest a version is. Sixty-four bits: the
 # question is only ever whether two module sets differ.
@@ -116,9 +131,13 @@ class Assets:
         # the directory above.
         relative = STATIC_PATH.removeprefix(PAGE_PATH)
         mount = PAGE_PATH.strip("/").rsplit("/", 1)[-1]
+        # The socket's path is the same in both: the client resolves it
+        # against the deployment's root, read off its own module's
+        # address, never against the page.
+        page = index.replace(SOCKET_MARKER, SOCKET_PATH)
         self._pages = {
-            True: index.replace(ASSETS_MARKER, f"{relative}/{self.version}").encode(),
-            False: index.replace(ASSETS_MARKER, f"{mount}/{relative}/{self.version}").encode(),
+            True: page.replace(ASSETS_MARKER, f"{relative}/{self.version}").encode(),
+            False: page.replace(ASSETS_MARKER, f"{mount}/{relative}/{self.version}").encode(),
         }
 
     @classmethod

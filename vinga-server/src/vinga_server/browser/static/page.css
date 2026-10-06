@@ -1,0 +1,70 @@
+/* The browser client's page (#613): one column, readable on a phone. */
+
+:root {
+  color-scheme: light dark;
+  --text: #1b1f24;
+  --muted: #59636e;
+  --surface: #ffffff;
+  --accent: #1f6feb;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text: #e6edf3;
+    --muted: #9198a1;
+    --surface: #0d1117;
+    --accent: #4493f8;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--text);
+  font: 16px/1.5 system-ui, sans-serif;
+}
+
+main {
+  max-width: 36rem;
+  margin: 0 auto;
+  padding: 1.5rem 1rem;
+}
+
+.code {
+  font-size: 2.5rem;
+  letter-spacing: 0.3em;
+  font-variant-numeric: tabular-nums;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+button {
+  font: inherit;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--accent);
+  border-radius: 0.375rem;
+  background: var(--accent);
+  color: #ffffff;
+}
+
+input {
+  font: inherit;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0.25rem 0 0.5rem;
+  padding: 0.5rem;
+}
+
+#volume,
+#no-interrupt {
+  color: var(--muted);
+}
+
+[hidden] {
+  display: none !important;
+}

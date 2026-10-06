@@ -1,84 +1,241 @@
-// The browser client's page (#613). Two things so far: it proves a page
-// served at /try/ can import a module from its versioned static path
-// under the page's Content-Security-Policy, and it redeems a try link.
+// What the person sees, and the order things happen in (#613, D3).
 //
-// A try link is `<origin>/try/#<token>`. The token is in the fragment,
-// which the browser sends to no server, so this script is the only
-// thing that ever reads it: it takes it, clears it from the address bar
-// and from this history entry before doing anything else, and spends it
-// with one same-origin POST. What comes back is this browser's identity
-// and the onboarding path it checks in at, kept in this browser's own
-// storage and nowhere else. The page's address stays /try/ throughout.
-document.documentElement.dataset.vingaAssets = "loaded";
+// The page is inert until its script runs. A try link is
+// `<origin>/try/#<token>`; the token is in the fragment, which the
+// browser sends to no server, so this script is the only thing that
+// ever reads it: it takes it and clears it from the address bar and
+// from this history entry before anything else, then spends it once.
+//
+// After that: a browser that cannot run the client says what it lacks
+// and does nothing more; one without an identity is asked for the
+// onboarding URL; one with an identity offers Start. Start opens the
+// microphone, checks in, shows a six-digit code while the browser waits
+// to be claimed, connects, and listens. The conversation ends when the
+// server closes it or the person ends it, and Start begins another.
+//
+// Two switches are the browser lane's and do nothing unless the page's
+// own address names them: `test-observe=1` publishes the running sum of
+// what the speaker rendered as an attribute of the document, and
+// `test-echo-cancellation=off` makes the page treat its microphone as
+// one without echo cancellation, since a fake capture device always
+// reports it on.
 
-// Where the identity is kept. One key, so clearing it is clearing the
-// device: a cleared browser is a new, unbound one.
-const STORAGE_KEY = "vinga.browser";
-
-// Every URL this page uses is resolved against where it was served
-// rather than named from the root, so a deployment a proxy serves under
-// a path prefix keeps it. This module is at `<base>static/<version>/`,
-// the page's base is two levels up, and the deployment's root is one
-// level above that.
-const PAGE_BASE = new URL("../../", import.meta.url);
-const DEPLOYMENT_ROOT = new URL("../", PAGE_BASE);
-const REDEEM_URL = new URL("redeem", PAGE_BASE);
-
-function say(sentence) {
-  const status = document.getElementById("status");
-  if (status !== null) {
-    status.textContent = sentence;
-  }
-}
-
-async function redeem(token) {
-  let answer;
-  try {
-    answer = await fetch(REDEEM_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token }),
-      cache: "no-store",
-      credentials: "omit",
-      referrerPolicy: "no-referrer",
-    });
-  } catch {
-    say("This page could not reach the server. Check the connection and open the link again.");
-    return;
-  }
-  let body = null;
-  try {
-    body = await answer.json();
-  } catch {
-    body = null;
-  }
-  if (!answer.ok || body === null || typeof body.mac !== "string") {
-    say(body !== null && typeof body.error === "string" ? body.error : "This try link cannot be used.");
-    return;
-  }
-  try {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({
-        mac: body.mac,
-        client_id: body.client_id,
-        // Handed over relative to the deployment's root, and kept as
-        // the path it resolves to on this origin, prefix included.
-        onboarding_path: new URL(body.onboarding_path, DEPLOYMENT_ROOT).pathname,
-      }),
-    );
-  } catch {
-    say("This browser will not keep what the server handed it, so it cannot join. Allow this site to store data and ask for a new link.");
-    return;
-  }
-  document.documentElement.dataset.vingaBound = "true";
-  say("This browser is now a device of this server, bound to its default agent.");
-}
+import { Microphone, missing, Speaker } from "./audio.js";
+import * as identity from "./identity.js";
+import * as ota from "./ota.js";
+import { Conversation } from "./wire.js";
 
 const token = window.location.hash.slice(1);
 if (token !== "") {
   // Before anything else, so the token is gone from the address bar and
   // from the history entry whatever happens next.
   window.history.replaceState(null, "", window.location.pathname + window.location.search);
-  redeem(token);
 }
+
+const switches = new URLSearchParams(window.location.search);
+const OBSERVE = switches.get("test-observe") === "1";
+const ASSUME_NO_ECHO = switches.get("test-echo-cancellation") === "off";
+
+// Where a board's volume starts.
+const DEFAULT_VOLUME = 70;
+
+const ENDINGS = {
+  idle: "The conversation ended because nobody spoke for a while.",
+  ended: "You ended the conversation.",
+  closed: "The conversation ended.",
+};
+
+const element = (id) => document.getElementById(id);
+
+function say(sentence) {
+  element("status").textContent = sentence;
+}
+
+function show(id, visible) {
+  element(id).hidden = !visible;
+}
+
+function line(who, text) {
+  if (text === "") {
+    return;
+  }
+  const item = document.createElement("li");
+  item.textContent = `${who}: ${text}`;
+  element("transcript").append(item);
+}
+
+let device = null;
+let volume = DEFAULT_VOLUME;
+let microphone = null;
+let speaker = null;
+let conversation = null;
+let starting = false;
+
+function setVolume(value) {
+  volume = value;
+  element("volume").textContent = `Volume ${volume}`;
+  if (speaker !== null) {
+    speaker.setVolume(volume);
+  }
+}
+
+// What the device tools reach.
+const tools = {
+  volume: () => volume,
+  setVolume,
+  listening: () => conversation !== null && conversation.listening(),
+};
+
+function idleControls() {
+  show("start", device !== null);
+  show("interrupt", false);
+  show("end", false);
+}
+
+function release() {
+  if (microphone !== null) {
+    microphone.close();
+    microphone = null;
+  }
+  if (speaker !== null) {
+    speaker.close();
+    speaker = null;
+  }
+  conversation = null;
+}
+
+async function start() {
+  if (starting || conversation !== null) {
+    return;
+  }
+  starting = true;
+  show("start", false);
+  show("code", false);
+  try {
+    say("Opening the microphone.");
+    try {
+      microphone = await Microphone.open({
+        onPacket: (packet) => conversation !== null && conversation.send(packet),
+        assumeNoEcho: ASSUME_NO_ECHO,
+      });
+    } catch {
+      say("This page cannot use the microphone. Allow it for this site and press Start again.");
+      return;
+    }
+    const mode = microphone.echoCancelled ? "realtime" : "auto";
+    show("no-interrupt", mode === "auto");
+    say("Checking in with the server.");
+    let reply = await ota.checkIn(device);
+    if (reply.access === "denied") {
+      reply = await ota.waitForClaim(
+        device,
+        reply,
+        (code) => {
+          show("code", code !== null);
+          element("code").textContent = code === null ? "" : code;
+          say(
+            code === null
+              ? "This server has no agent for this browser yet. Waiting."
+              : "Tell the person who runs this server this code, so they can connect this browser.",
+          );
+        },
+        () => microphone === null,
+      );
+      show("code", false);
+      if (reply === null) {
+        return;
+      }
+    }
+    say("Connecting.");
+    conversation = await Conversation.open({
+      identity: device,
+      token: reply.access === "token" ? reply.websocket.token : "",
+      mode,
+      device: tools,
+      openSpeaker: async (sampleRate) => {
+        speaker = await Speaker.open({
+          sampleRate,
+          volume,
+          observe: OBSERVE,
+          onSum: (sum) => {
+            document.documentElement.dataset.vingaPcmSum = String(sum);
+          },
+        });
+        return speaker;
+      },
+      on: {
+        transcript: (text) => line("You", text),
+        sentence: (text) => line("Reply", text),
+        speaking: (speaking) => {
+          show("interrupt", speaking);
+          say(speaking ? "Speaking." : "Listening.");
+        },
+        ended: (why) => {
+          release();
+          say(ENDINGS[why]);
+          element("start").textContent = "Start again";
+          idleControls();
+        },
+      },
+    });
+    show("end", true);
+    say("Listening. Say something.");
+  } catch (failure) {
+    release();
+    say(failure.message || "The conversation could not start.");
+    element("start").textContent = "Start again";
+    idleControls();
+  } finally {
+    starting = false;
+  }
+}
+
+async function join() {
+  try {
+    device = await identity.start(element("onboarding").value);
+  } catch (refusal) {
+    say(refusal.message);
+    return;
+  }
+  show("pair", false);
+  say("This browser is now a device of this server. Press Start to talk.");
+  idleControls();
+}
+
+async function main() {
+  const lacks = await missing();
+  if (lacks.length > 0) {
+    say(`This browser cannot run vinga's client: it lacks ${lacks.join(", ")}.`);
+    return;
+  }
+  element("start").addEventListener("click", start);
+  element("interrupt").addEventListener("click", () => conversation !== null && conversation.interrupt());
+  element("end").addEventListener("click", () => conversation !== null && conversation.end());
+  element("join").addEventListener("click", join);
+  setVolume(DEFAULT_VOLUME);
+  if (token !== "") {
+    try {
+      device = await identity.redeem(token);
+      document.documentElement.dataset.vingaBound = "true";
+      say("This browser is now a device of this server, bound to its default agent. Press Start to talk.");
+    } catch (refusal) {
+      say(refusal.message);
+    }
+  }
+  if (device === null) {
+    device = identity.stored();
+  }
+  if (device === null) {
+    show("pair", true);
+    if (token === "") {
+      say("Paste the onboarding URL this server's operator gave you, or open a try link.");
+    }
+    return;
+  }
+  if (token === "") {
+    say("Press Start to talk.");
+  }
+  idleControls();
+}
+
+main();
