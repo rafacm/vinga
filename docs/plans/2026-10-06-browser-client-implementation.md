@@ -1276,3 +1276,35 @@ MAC. Listings, exports and the API still show `Browser <mac>`; what
 changed is that nothing says it aloud. Every mutation of the rule (the
 browser alternative dropped, the own-name exemption narrowed, the fold
 skipped or reduced, the swap moving only the board word) was killed.
+
+### PR review round
+
+Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.1, read-only sandbox, at the PR's first head ([the round](https://github.com/rafacm/vinga/pull/628#issuecomment-6014978640)). The fixes are by the same implementer.
+
+1. **P2: a folded spelling of a device's own placeholder, written
+   before the reservation, broke export and swap.** The exemption and
+   the swap compared exact spellings. *Resolution:* both ask which of
+   the device's own minted names the name folds onto, and a swap writes
+   the canonical spelling on the new MAC, since the old capitals and
+   spacing spelled the old one. The board shape had the same gap before
+   this PR, measured at 3f293675 (a `DEVICE\tAA:...` row's unchanged
+   export refused whole, a swap leaving the old MAC behind), and the
+   same fix covers it. A device may now also be renamed to a folded
+   variant of its own placeholder, which still reads as unnamed. Tests
+   plant the rows as an older build wrote them; all five failed first,
+   and both exact-comparison mutations are killed (`09b891d7`).
+2. **P3: descriptions that said only an unnamed board yields a null
+   name.** *Resolution:* the event, session schema, view, API and
+   telemetry descriptions name browsers too, their references
+   regenerated. The session column's description is also its Postgres
+   comment, so the change carries a comment-only migration,
+   `1012_device_name_names_browsers`, on the 1004 and 1011 precedent,
+   with its upgrade and downgrade tested and the chain head moved where
+   it is pinned, the workflow's wheel check included (`0c07e197`).
+
+Verification after the round: unit `8364 passed, 19 skipped`;
+integration `357 passed` after `uv cache clean vinga-server` (the first
+run met the stale build cache AGENTS.md describes, confirmed by the
+cached venv carrying no 1012 before cleaning); the eight generated
+documents current; link check `0 failures`.
+- `uv run pytest tests/census -q`, last, after this section: `66 passed in 29.77s`
