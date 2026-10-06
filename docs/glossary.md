@@ -212,9 +212,11 @@ What a device is called, held on the
 speaking through it ("you are on the kitchen speaker"). Free-form,
 because a slug reads badly in speech, and unique across the deployment
 once case and whitespace are folded together. A record created by
-binding a board is called `Device <mac>` until somebody gives it a
-better name, so no onboarding flow asks for one the operator does not
-yet have.
+binding a board is called `Device <mac>`, and one a try link creates
+for a browser `Browser <mac>`, until somebody gives it a better name,
+so no onboarding flow asks for one the operator does not yet have.
+Both spellings are reserved for the device whose MAC they name, and
+an agent never says either out loud.
 
 ### Device record
 
