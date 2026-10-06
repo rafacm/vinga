@@ -209,6 +209,35 @@ def frames_while_speaking(wire: list[tuple[str, ...]]) -> list[int]:
     return counts
 
 
+def rearmed_after_draining(page: Page) -> bool:
+    """Whether every `listen start` after the first followed an `idle`
+    report from the playback processor that came after the `tts stop`
+    before it, on the page's own clock (`instrument.js`)."""
+    trace = page.evaluate("window.__lane")
+    idles = [at for kind, at in trace["playback"] if kind == "idle"]
+    rearms = trace["listens"][1:]
+    if not rearms:
+        return False
+    for listen in rearms:
+        stops = [at for at in trace["stops"] if at < listen]
+        if not stops or not any(max(stops) <= idle <= listen for idle in idles):
+            return False
+    return True
+
+
+def flushed_after_abort(page: Page) -> bool:
+    """Whether the playback processor was told to flush after the last
+    `abort` the page sent and before the socket closed, if it has
+    (`instrument.js`): an ending flushes too, and that one is not the
+    interruption's."""
+    trace = page.evaluate("window.__lane")
+    if not trace["aborts"]:
+        return False
+    aborted = trace["aborts"][-1]
+    closed = min((at for at in trace["closes"] if at >= aborted), default=float("inf"))
+    return any(kind == "flush" and aborted <= at < closed for kind, at in trace["playback"])
+
+
 def assert_no_leak(server: Server, visit: Visit) -> None:
     """D7a: neither the try token nor the device token reaches the
     server's log, the page's console, its document, its storage, its
@@ -297,6 +326,9 @@ def test_a_realtime_conversation_with_barge_in_and_an_ending(
         "the abort reaching the server",
         lambda: server.said("reply_finished", device=mac, outcome="aborted"),
     )
+    # What was still waiting to sound is dropped, not played out: the
+    # speaker is told to flush once the abort has gone.
+    visit.wait_for("the speaker flushed after the abort", lambda: flushed_after_abort(page))
     page.locator("#end").click()
     visit.wait_for("the person's ending", lambda: visit.status() == ENDED_BY_PERSON)
 
@@ -328,6 +360,10 @@ def test_without_echo_cancellation_the_page_listens_in_auto_mode(
     assert all(count <= 1 for count in replies), replies
     starts = [entry for entry in visit.wire if entry[:3] == ("sent", "listen", "start")]
     assert len(starts) >= 2, "the page never asked to listen again after a reply"
+    # And it asked only once the reply had finished sounding: between
+    # the `tts stop` before each later `listen start` and that start,
+    # the playback processor reported itself idle.
+    assert rearmed_after_draining(page)
     assert float(page.evaluate("document.documentElement.dataset.vingaPcmSum || '0'")) > 0
 
     page.locator("#end").click()

@@ -2,14 +2,14 @@
 // opens before any of the page's own scripts run. It watches the
 // client from outside, through the browser APIs the client calls, and
 // changes nothing the client sees: it records the microphone streams
-// the page is handed, when the page sent `listen start` and `abort` and
-// received `tts stop`, and what passed between the page and its
+// the page is handed, when the page sent `listen start` and `abort`,
+// received `tts stop` and saw a socket close, and what passed between the page and its
 // playback processor (the processor's `idle` reports, and every message
 // to it but the audio itself). Every record is a timestamp on the page's
 // own clock, so the lane can order what the client did against what the
 // speaker reported. Nothing here ships: it lives beside the lane.
 (() => {
-  const lane = { streams: [], listens: [], aborts: [], stops: [], playback: [] };
+  const lane = { streams: [], listens: [], aborts: [], stops: [], closes: [], playback: [] };
   window.__lane = lane;
   const now = () => performance.now();
 
@@ -44,6 +44,7 @@
           lane.stops.push(now());
         }
       });
+      this.addEventListener("close", () => lane.closes.push(now()));
     }
 
     send(data) {
