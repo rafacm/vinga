@@ -959,3 +959,71 @@ On agentpi, from the worktree root unless noted:
   here.
 - Not run: the integration lane, since M3b changes no code it
   exercises and adds no migration.
+
+### PR review round
+
+Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.0, read-only sandbox, runtime 2m53s, at commit 34308ea5 ([the round](https://github.com/rafacm/vinga/pull/619#issuecomment-6006702674)).
+
+1. **P1: the ElevenLabs key still reached the shell.** The voice
+   listing in `voices.md` and the `tts-elevenlabs.yaml` comment passed
+   `"$ELEVENLABS_API_KEY"` to the builtin `printf`: out of the process
+   table, but `set -x` prints the expanded argument to stderr, so the
+   guide's claim that tracing could not see it was false.
+   *Resolution:* both now read the header from a curl config file
+   created with mode 0600 (`install -m 600 /dev/null`) and written in
+   an editor, passed as `curl -s -K ~/.elevenlabs-curlrc`, so the key
+   is in no argument and no expansion; the claim about the builtin is
+   gone, and the changelog fragment follows. Run against a local
+   listener with a dummy key, the request carried the header and the
+   file's mode was 600. This supersedes D8a's `printf` form for this
+   command; row 14, paragraph 6 stays a declared edit (`c43b4ba9`).
+2. **P2: memory was said to be read on every reply.** The prompt guide
+   said a fact one conversation stores reaches a concurrent one on its
+   next reply. Since #536 `_system_prompt` keeps the memory read for a
+   conversation's activation under `_SnapshotKey`.
+   *Resolution:* the paragraph states the snapshot's lifetime (read at
+   the first reply of an activation and kept; another conversation's
+   write or an operator's correction seen at the next activation) and
+   the three things that make the next reply read again (a hard
+   deletion by `vinga memory delete`, the API or a permanent `forget`;
+   the memory switch moving; a failed read), and how the
+   conversation's own writes reach it. The error predates the move.
+   Declared edited, row 21 paragraph 9 (`fc2ea838`).
+3. **P2: `prompt_assembled` was said to carry the whole preview's
+   counts.** It reports only the half assembled at activation; memory's
+   sizes ride each reply round.
+   *Resolution:* the paragraph names `prompt_assembled.sources` for the
+   persona, fragments and guidance and `llm_round`'s
+   `system_characters`, `memory_characters`, `memory_sources` and
+   `memory_facts` for the rest, linking both events' reference
+   sections. The error predates the move. Declared edited, row 21
+   paragraph 8 (`d52c0577`).
+4. **P2: an agent told nothing was said to get no memory block.**
+   `with_scopes` sends a framed `memory` block saying nothing is saved
+   yet whenever the agent may remember and every scope is empty.
+   *Resolution:* `memory.md` and the prompt guide's order paragraph say
+   so. The error predates the move. Declared edited, row 18 paragraph
+   29 and row 21 paragraph 4 (`56447e5b`).
+5. **P2: the `vinga memory set` example typed the fact into `echo`'s
+   arguments**, directly under the sentence warning that arguments land
+   in shell history and the process list.
+   *Resolution:* the example writes the fact in an editor and hands the
+   file over on `-f` or on standard input. Typing at the command's own
+   standard input is not offered, because `vinga memory set` refuses a
+   terminal with nothing piped into it (`config/cli/input.py`). The
+   example predates the move too. Declared edited, row 18 paragraph 40
+   (`8cc1d3dd`).
+
+The audit against `git show origin/main:vinga-server/README.md` (byte
+identical to `ac40be9f`'s), exit 0
+(`.logs/m3b-audit-round1.txt`):
+
+```text
+11 units, 150 paragraphs moved, 29 declared edited, 0 declared dropped, 0 kept in the page, 0 findings
+```
+
+The changelog fragment names the three corrected statements and the
+example alongside the seven from the first hand-back. No code or test
+changed in this round, so ruff and the unit lane were not rerun; the
+link check, the Run and Use check, the fragment check and the census
+were.
