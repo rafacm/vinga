@@ -76,11 +76,6 @@ differently. Four things to get right:
   [Setting limits and probes](limits-and-probes.md)); give whatever
   stops it a grace period above `drain_s`.
 
-Separating the two later needs no separate ports and no code change: run the
-same image twice, route `/xiaozhi/ota/` to one group and `/xiaozhi/v1/` to
-the other, and point `server.websocket_url` at the second. Devices follow,
-because they are told where to go.
-
 ## The configuration API in a deployment
 
 Two more things, about the surface that writes the configuration. What
