@@ -1094,11 +1094,29 @@ claimed" sections in the same change.
 
 *Setup.* A laptop with its built-in microphone and speakers, no
 headphones, in an ordinary room. Desktop Chrome, its version from
-`chrome://version`. A server from this branch's head or later, with
-real providers for VAD and ASR at least (the mock ones hear nothing
-real), on the same laptop so the link names `localhost`, or reached
-over `https://` from it. The speakers at the volume someone would talk
-at.
+`chrome://version`. A server from this branch's head or later, on the
+same laptop so the link names `localhost`, or reached over `https://`
+from it. The speakers at the volume someone would talk at.
+
+*Preconditions, each confirmed before step 1 and recorded beside the
+result, since without any one of them a quiet step 3 proves nothing:*
+
+- **Real providers for VAD, ASR and TTS**, and a TTS that speaks: a
+  real voice saying words, whether a local engine or a vendor's. The
+  mock TTS plays a fixed tone, which a real VAD may never classify as
+  speech, so a reply in it cannot leak back as speech however badly
+  the echo canceller does, and "no `barge_in` during playback" would
+  then measure the tone, not the browser. The mock VAD and ASR hear
+  nothing real. Record each stage's provider entry and type
+  (`vinga show`).
+- **Barge-in on**: `server.barge_in` is `true` (the default), with
+  `server.barge_in_min_speech_ms` recorded as it stands, both read
+  from the server section of the configuration the server started
+  with. With it off, steps 3 and 4 cannot tell a working canceller
+  from a broken one.
+- **Realtime listening**: step 2's `listening (realtime mode)`. In auto
+  mode the page sends nothing while a reply plays, so steps 3 and 4
+  test nothing about echo; record the mode and stop there.
 
 *Steps, each with what to observe:*
 
@@ -1128,9 +1146,11 @@ at.
    which mode it picks.
 
 *Record:* the date, the laptop and its operating system, the browser
-and its full version, the server's revision, the providers for each
-stage, the volume, and for each step what was observed, including any
-`barge_in` that nobody's speech caused.
+and its full version, the server's revision, the three preconditions
+as found (each stage's provider, `server.barge_in` and
+`barge_in_min_speech_ms`, the listening mode), the volume, and for
+each step what was observed, including any `barge_in` that nobody's
+speech caused.
 
 ### The #301 comment
 
