@@ -684,7 +684,8 @@ def _stored_anywhere(sentinel: str) -> bool:
     server-side store has. This is weaker in one stated way: it cannot
     see a page the server has not yet reclaimed, which is autovacuum's
     business and not a client's. It is the strongest thing a client can
-    ask, and it is what the reference and the README now promise.
+    ask, and it is what the reference and the conversation store guide
+    now promise.
     """
     for table in ("sessions", "turns", "tool_invocations", "events"):
         for row in read(f"select * from record.{table}"):

@@ -394,7 +394,8 @@ def test_a_snapshot_open_across_a_prune_keeps_seeing_what_the_prune_took() -> No
     seeing the row it deleted, because that is what its snapshot is; a
     transaction opened after the delete commits does not. Promising
     otherwise would be promising something MVCC does not do, and the
-    generated reference and the README say it in these words.
+    generated reference and the conversation store guide
+    (`docs/run/conversation-store.md`) say it in these words.
 
     Held across the pruning store's start, which is when it prunes.
     """
