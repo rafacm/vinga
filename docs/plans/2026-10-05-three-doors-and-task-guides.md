@@ -411,6 +411,13 @@ printf 'user = "%s:%s"\n' "$LANGFUSE_PUBLIC_KEY" "$LANGFUSE_SECRET_KEY" \
   | curl -sS -K - -X POST "$LANGFUSE_HOST/api/public/models" ...
 ```
 
+(Amended after M3b's PR review: the `printf` form above still exposes
+the secret under shell tracing, since `set -x` prints a builtin's
+expanded arguments too. The form used from M3b on is a protected curl
+config file the person writes once in an editor, mode 0600, passed as
+`curl -K <file>`, so the shell never expands the secret at all. See
+M3b's PR review round in the implementation doc.)
+
 A connection URL is a credential too when it can carry a password
 (the README says so of `VINGA_DB_URL`, L3490-3493), so `psql "$ADMIN_URL"`
 is the same defect. Database commands are rewritten to take their
