@@ -707,6 +707,8 @@ Say instead: choose and specify either revisioned or content-hashed asset URLs, 
 Evidence: D3 specifies `capture-worklet.js`, then requires decoded audio to play through "a second worklet node with a jitter buffer." An `AudioWorkletNode` needs a registered processor; WebCodecs encoding also cannot be assumed to run inside that processor.
 Say instead: specify the capture-to-main-thread encoder transfer and either a separate playback worklet or one explicitly dual-purpose worklet module, including its packet/PCM ownership and jitter-buffer message protocol.
 
+   *Resolution:* Accepted. D3b specifies one worklet module with two registered processors: capture posts transferred 60 ms blocks to the main thread, which owns the WebCodecs encoder and decoder; decoded audio is transferred to the playback processor, which owns the jitter buffer (120 ms start, silence on underrun), the tool-set gain and the lane's PCM sum, and takes three messages (append, set gain, flush).
+
 7. **P2: The test plan does not drive the claimed auto fallback.**
 Evidence: Q4 promises `auto`, microphone pausing during reply playback, re-arming after `tts stop`, and a user warning; Q5 names only `listen realtime`. No JS unit harness or browser-lane case covers unavailable echo cancellation.
 Say instead: add a fake-media case whose track reports echo cancellation unavailable and assert `listen auto`, no outbound mic frames during TTS, re-arm after `tts stop`, and the visible no-interrupt warning.
