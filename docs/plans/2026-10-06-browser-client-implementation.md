@@ -1254,3 +1254,25 @@ failures`; Run and Use page check `37 pages, 0 findings`; fragment
 check `0 failures`; no em-dash or issue reference on an added line;
 the unit, integration and browser lanes not run, since no code changed.
 - `uv run pytest tests/census -q`, last, after this section: `66 passed in 42.61s`
+
+## After M2: a browser's name reserved
+
+**Attribution:** anthropic/claude-opus-5-5, thinking high; found by M4's implementer, fixed by a fresh one, on its own branch from `main`.
+
+M4's implementer found by reading that D5b's `Browser <full MAC>` was not
+reserved the way a board's `Device <MAC>` is: `is_default_device_name`
+matched only the board shape, so a redeemed browser read as named and
+the agent's prompt said "a device called Browser 02:66:77:88:99:aa",
+which `concepts.md` says an agent never does. Reproduced through
+`redeem`, the connect's read and `prompt.with_scopes` before the fix.
+
+The minted shapes now have one home in `config/models.py`, which both
+the reservation and the try link's naming read: the browser shape is
+reserved and folded as the board shape is, a device may carry either of
+its own two spellings (an exported browser must apply back, and nothing
+a writer holds says whether a device was minted as a board or a
+browser), and a board swap moves a browser's placeholder to the new
+MAC. Listings, exports and the API still show `Browser <mac>`; what
+changed is that nothing says it aloud. Every mutation of the rule (the
+browser alternative dropped, the own-name exemption narrowed, the fold
+skipped or reduced, the swap moving only the board word) was killed.
