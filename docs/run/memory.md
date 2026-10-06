@@ -47,7 +47,7 @@ turn by default, so the agent answers half a sentence and the rest
 arrives as an interruption. The bound is per VAD entry and an agent
 binds its own, so give that agent a patient entry rather than slowing
 every agent down: see
-[Listening and barge-in](../../vinga-server/README.md#listening-and-barge-in).
+[Listening and barge-in](turn-taking.md#listening-and-barge-in).
 
 **The prompt carries the newest of an agent's facts, not all of them.**
 A scope of a thousand facts does not fit in front of a small local
