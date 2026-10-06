@@ -742,6 +742,8 @@ Say instead: classify the operator's `vinga info` stdout as an explicitly allowe
 Evidence: M3 requires Playwright Python plus a Chromium container, but `pyproject.toml` has no Playwright dependency and the existing workflow has no browser-image setup. "Containerized Chromium" alone does not state where the test runner, browser binary, fake WAV, or server networking are installed.
 Say instead: name the pinned Playwright/container version, dependency and lockfile changes, CI setup, local invocation, and the wheel/image server topology used by the lane.
 
+   *Resolution:* Accepted. Q5b names the runtime: a `browser` dependency group locked in `uv.lock`, the Playwright container image pinned to the locked version, a committed WAV, the built wheel installed in the container (and the CI image in a second run), one local command in `docs/contributing.md`, and a CI job using the image as its job container, its time measured in M3.
+
 10. **P3, settled round-2 finding #5: keyless-page wording still conflicts with D2.**
 Evidence: Q2 and D2 correctly keep the page at keyless `/try/`, but M1 still says page assets are "under the onboarding path," and D5 says the page "moves" to the onboarding path after redemption. That would put the key back into an address/history and proxy request target.
 Say instead: state consistently that the browser remains at `/try/`; redemption returns the alias only in a response body, stores it locally, and uses it only as the target of OTA and activation requests.
