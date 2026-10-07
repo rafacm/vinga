@@ -83,13 +83,17 @@ touched. Every other change (documentation, the skills, this file) runs
 server workflow's paths: it checks internal links and anchors
 (`scripts/check_doc_links.py`) and runs the census lane,
 `vinga-server/tests/census`, which holds two censuses against two
-committed manifests. The command-spellings census sweeps every tracked
-file, so a documentation change can stale it: a spelling a document
-starts or stops quoting, or a move that gives one another class. The
-reach-in census counts where the tests reach past an interface, and
-reads only the tracked Python under `tests/`, so a documentation change
-leaves it alone. On a pull request the workflow also refuses an edit to
-`CHANGELOG.md` and holds every `changelog.d/` fragment to its shape.
+committed manifests and one committed copy against its source. The
+command-spellings census sweeps every tracked file, so a documentation
+change can stale it: a spelling a document starts or stops quoting, or
+a move that gives one another class. The reach-in census counts where
+the tests reach past an interface, and reads only the tracked Python
+under `tests/`, so a documentation change leaves it alone. The copy is
+the built-in agent's packaged Use pages, held byte for byte to
+`docs/concepts.md`, `docs/glossary.md` and `docs/devices/`, so an edit
+to any of those pages stales it. On a pull request the workflow also
+refuses an edit to `CHANGELOG.md` and holds every `changelog.d/`
+fragment to its shape.
 Between the two workflows every change runs the lane somewhere. A
 third workflow, `.github/workflows/changelog-fold.yml`, runs only on a
 push to `main` that touches `changelog.d/`: it folds the fragments into
@@ -209,6 +213,18 @@ the rule for the times they do conflict, and
 enforces it, in both workflows: each manifest is rendered again and
 diffed, so a spliced resolution is a red run rather than a committed
 state no generator produced.
+
+The third committed artifact is not a manifest but a copy: the Use
+pages packaged inside the server at
+`vinga-server/src/vinga_server/knowledge/pages/`, regenerated with
+`uv run python -m tests.census.test_packaged_pages` from
+`vinga-server/` and checked by `test_the_packaged_pages_are_the_tree`
+(the same file set, the same bytes). Two consequences for a rebase. A
+conflict inside the copy is resolved by regenerating from the rebased
+`docs/`, never by merging the copy. And a rebase that brings in a Use
+page edit with no conflict at all still stales the copy, since nothing
+moves it but the regenerate command, so regenerate after any rebase
+that touched `docs/concepts.md`, `docs/glossary.md` or `docs/devices/`.
 
 And the habit both classes taught, which outlives them: after any
 rebase, grep the tree for conflict markers before pushing, and count
