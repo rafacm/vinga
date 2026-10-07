@@ -1,0 +1,609 @@
+# Glossary
+
+**Date:** 2026-08-21
+
+The concepts, techniques, and technologies this project is built on:
+a short definition of each as vinga uses it, with pointers for going
+deeper. The [system overview](system-overview.md) teaches the
+pipeline-shaped subset of these in order, with diagrams; this
+page is for looking one thing up. Entries are alphabetical,
+and each is a heading, so any of them can be linked directly from
+anywhere in the project: `docs/glossary.md#opus`,
+`docs/glossary.md#barge-in`,
+`docs/glossary.md#vad-voice-activity-detection`.
+
+### AEC (acoustic echo cancellation)
+
+Signal processing that removes
+the device's own speaker output from its microphone input, using the
+played signal as the reference. On vinga's primary board it runs in
+firmware on dedicated codec hardware (ES8311 playback, ES7210
+capture), and it is why the field-measured echo leakage is below the
+ambient floor. Whether a device has AEC decides its listening mode
+and how much of the barge-in problem is acoustic.
+More: [Speex/SpeexDSP AEC](https://www.speex.org/docs/manual/speex-manual/node7.html),
+[WebRTC audio processing](https://webrtc.org/).
+
+### Agent
+
+A named configuration of prompt, providers, voice, and MCP tools that
+holds conversations and accrues memory. A device is bound to one or more
+agents; the default answers a fresh wake. Older issues say "persona";
+new writing says agent. Never a [coding agent](#coding-agent), which is
+a different thing that shares the word. The full domain model is on
+[the concepts page](concepts.md).
+
+### ASR (automatic speech recognition)
+
+The stage that turns one
+utterance of audio into text. Pluggable: a local engine
+(faster-whisper) or a cloud endpoint (OpenAI transcription models).
+The transcript is the only thing later stages ever see, so ASR
+failures masquerade as reasoning failures.
+More: [Whisper paper](https://arxiv.org/abs/2212.04356),
+[faster-whisper](https://github.com/SYSTRAN/faster-whisper).
+
+### ASR prompt
+
+Free-text context an ASR accepts to bias
+transcription, used for vocabulary the model would otherwise mangle
+("vinga"). Kept to vocabulary only, never agent names or anything
+imperative, because the model can echo the prompt back as if the user
+had spoken it; see prompt echo.
+
+### Barge-in
+
+Interrupting the assistant by talking over its reply.
+Speech that endpoints mid-reply passes a gate ladder (minimum speech,
+transcript confirmation) before it cancels the reply; suppressed
+attempts are logged with the gate that stopped them. The design
+decision is recorded in
+[the barge-in ADR](adr/2026-08-05-replies-cancel-only-on-evidence-of-speech.md).
+
+### Backend (telemetry backend)
+
+The deployment that RECEIVES vinga's exported traces, never vinga
+itself. Every sentence in this project that says "the backend owns
+retention", "the backend prices it" or "the backend ingests no span
+events" is about that deployment, which is a Langfuse or another
+OpenTelemetry collector's store, run by whoever runs it and reached
+over the standard `OTEL_EXPORTER_OTLP_*` variables.
+
+The distinction is load-bearing rather than pedantic, because the
+whole export design rests on it. vinga computes no cost, stores no
+trace and enforces no retention on what has left: usage leaves as raw
+integers and the receiving deployment multiplies them by a model
+definition it owns, at ingestion, storing the result on the
+observation. So "how long is a trace kept", "who may read it" and
+"what did this conversation cost" are all questions about the backend
+and none of them are answerable here. What vinga owns is what it
+sends and under which switch, which is
+[the export ladder](architecture/observability-surfaces.md#the-export-ladder).
+
+vinga's own server is not a backend in this vocabulary, and neither is
+the Postgres it stores conversations in: that one is the conversation
+store, and it is a different row of
+[the surfaces table](architecture/observability-surfaces.md#the-nine-surfaces).
+
+### Binding
+
+The link between a device and the agents reachable from
+it, one of which is the designated default that answers a fresh
+wake. Many-to-many: one agent can serve several devices, one device
+can reach several agents. Today it is the device's agent list in
+configuration, first entry the default. See
+[the concepts page](concepts.md#binding).
+
+### Board
+
+A model of hardware, not one piece of it: what `board.type` names when
+a device checks in, what one guide under [`devices/`](devices/README.md)
+describes, and what is true of every unit of that model. Which button
+starts a conversation, which wake word is listening, what the display
+shows and whether the captive portal can take a server's address are
+all board facts, read from the firmware a board runs. vinga's primary
+board is the Waveshare ESP32-S3-Touch-LCD-1.54. Contrast a
+[device](#device), which is one of them.
+
+### Capture
+
+Per-session recording for field analysis: a stereo WAV
+(microphone on channel 0, the paced reply on channel 1), an event
+track (JSONL), and a manifest (JSON). The reply channel is
+[wire-true](#wire-true-capture), which is what makes the echo
+measurement trustworthy. Off by default; recording room
+audio is a deliberate, temporary state. See
+[the regression suite page](conversational-quality-regression-suite.md).
+
+### Coding agent
+
+A program a person runs to work on a vinga deployment or on vinga's
+code, such as Claude Code or Codex: it reads the documentation, runs
+commands and edits files on that person's behalf. It is not an
+[agent](#agent) in vinga's sense, which is always the named
+configuration of prompt, providers, voice and tools that answers at a
+device. The two never share the bare word: a program of this kind is
+written **coding agent** wherever "agent" alone could be read as
+vinga's.
+
+### Continuation
+
+The rest of a user's sentence, arriving after the endpointer
+wrongly declared the sentence over at a thinking pause. By the time
+it arrives, a reply to the fragment is already in flight, so the
+pipeline can only see the continuation as a barge-in attempt against
+that reply; whether it survives the gate ladder decides whether the
+user gets to finish their own thought. Example from field round 2:
+"I'm here with my..." endpointed, drew the reply "Take your time!",
+and the continuation "I'm here with my kids." then had to fight
+that reply to be heard.
+
+### Conversation
+
+A dialogue between a user and exactly one agent,
+living on the server independently of any device: a durable thread
+that accrues a transcript and can be resumed later, including from a
+different device, though a fresh wake starts a fresh thread and
+resuming an old one is always asked for. What accumulates and what
+you come back to, where a session is how audio reaches the server.
+One conversation can span many sessions, and a turn names both the
+thread it belongs to and the session it was spoken in, so the two
+are views of the same rows. The entity exists: a thread
+takes its identity at an agent activation, its row with its first
+stored turn, and its title from that turn's utterance, and retention
+measures the window against its last activity. Where the deployment
+has switched resumption on, an agent finds one of its own past threads
+by description and carries on with it, rebuilding the context from the
+stored dialogue under a token budget; off, an agent's working context
+ends when its session closes. See
+[the concepts page](concepts.md#conversation-and-session).
+
+### Conversational filler
+
+A short utterance that buys time in a
+conversation without carrying content ("Hmm, let me see..."). In
+linguistics, a filled pause; in voice interfaces the technique is
+latency masking: playing a filler when the reply is slow so the
+silence reads as thinking rather than deafness. Distinct from a
+backchannel, which is the listener's feedback ("mm-hm") while the
+other party speaks. Implemented in vinga as optional per-agent
+latency masking, configured under an agent's (or `agent_defaults`')
+`filler` section.
+More: [filled pause](https://en.wikipedia.org/wiki/Filler_(linguistics)),
+[backchannel](https://en.wikipedia.org/wiki/Backchannel_(linguistics)).
+
+### Cross-correlation
+
+Sliding one signal against another and
+measuring similarity at each offset. Used on the two capture
+channels to measure echo: the correlation peak's position gives the
+acoustic delay and its gain the leakage. A null result is only
+trusted alongside a positive control (a synthetic echo the method
+must find).
+More: [cross-correlation](https://en.wikipedia.org/wiki/Cross-correlation).
+
+### Device
+
+One unit that talks to the server, addressed by its MAC: what
+`devices.<mac>` names in configuration, what a [binding](#binding)
+binds to an agent, and what accrues [memory](#memory) and
+conversations. Most are physical: three units of one [board](#board)
+are three devices, and everything a board guide says is true of all
+three. A web browser can be one too, running the page the server
+serves at `/try/`: it checks in and converses as a board does, under a
+MAC the server made up for it, and a try link records it as
+`Browser <mac>` ([its guide](devices/browser.md)). A device reports
+which board it is at every check-in (a browser says `vinga-browser`),
+so a board is observed rather than configured.
+
+### Device location
+
+Where a device stands, in a person's own words
+("the kitchen"), held on the [device record](#device-record). Free
+text and deliberately not unique: two devices in one room is normal.
+Context rather than identity, which is why it is the half of the
+record a conversation may change while the
+[device name](#device-name) is the half only an operator writes.
+
+### Device name
+
+What a device is called, held on the
+[device record](#device-record) and said out loud by the agent
+speaking through it ("you are on the kitchen speaker"). Free-form,
+because a slug reads badly in speech, and unique across the deployment
+once case and whitespace are folded together. A record created by
+binding a board is called `Device <mac>`, and one a try link creates
+for a browser `Browser <mac>`, until somebody gives it a better name,
+so no onboarding flow asks for one the operator does not yet have.
+Both spellings are reserved for the device whose MAC they name, and
+an agent never says either out loud.
+
+### Device record
+
+What `devices.<mac>` holds: a server-minted id,
+a [device name](#device-name), a [device location](#device-location)
+and the agents the device may reach. The id is the device's identity
+and the MAC is only its address, which is the distinction the record
+exists for: a board can be replaced, and a record identified by the
+hardware could not outlive it. Replacing one is
+`vinga device replace <mac> <new mac>`, which rewrites the MAC on the
+record and moves that board's per-device [memory](#memory) onto the new
+address in the same transaction, so what the household established
+about the thing in the room outlives the thing. Recorded sessions keep
+the MAC they were written with: a dated row says which board was
+connected at the time.
+
+### Echo leakage
+
+How much of the assistant's own voice survives the
+device's AEC and arrives back at the server as microphone input,
+expressed in dB relative to the played signal. The number barge-in
+thresholds would have to defend against; field measurement found it
+below the ambient floor on the primary board.
+
+### End-of-turn detection
+
+The general problem the endpointer is
+one answer to: deciding whether a pause means "your turn" or "still
+thinking". Human listeners read three signal families at once, and
+the same 700 ms pause reads differently under each: silence duration
+(all vinga's endpointer uses today), prosodic cues, and semantic
+completeness. After "...y toca el piano muy bien." the pause yields
+the turn; after "guarda en la memòria que..." the same pause holds
+it, and only the last two signal families can tell those apart.
+Pretrained models exist for exactly this judgment; smart-turn is the
+openly licensed one (BSD-2-Clause, audio-native, CPU inference).
+More: [smart-turn](https://github.com/pipecat-ai/smart-turn).
+
+### Endpointer
+
+The logic that decides where an utterance ends:
+accumulates VAD evidence per frame and declares the turn over after
+enough trailing silence. Its trailing-silence bound is a
+conversation-design tradeoff: too short chops sentences at thinking
+pauses, too long makes every reply feel late. Silence duration is
+the only signal it reads; end-of-turn detection is the general
+problem, with the other two signal families.
+
+### First token
+
+The first piece of an LLM's streamed answer; the
+time to it (TTFT) is the latency a user actually feels, as opposed
+to the full generation time. A round that streams nothing at all is
+a stall; the first-token watchdog bounds that wait, retries once,
+and gives the round up as a silent turn rather than a wedged
+session.
+
+### Gate ladder
+
+The ordered checks an endpointed utterance passes before it may
+cancel a reply in flight: minimum classified speech (a noise blip
+cancels nothing), a merge when the reply is still inside ASR (that
+reply was transcribing the head of the user's own sentence), and
+transcript confirmation (pause the outgoing frames, run ASR, cancel
+only on a non-empty transcript). Each suppressed attempt logs which
+gate stopped it (`barge_in_suppressed` with a reason). In practice: a
+32 ms noise blip dies at the speech floor and costs nothing, while a
+real continuation reaches the confirmation and cancels the reply it
+was competing with. A refractory period used to sit between the merge
+and the confirmation and dropped those continuations; it was removed
+in 2026-09 once the field showed it caught nothing else. The ladder
+enforces
+[the barge-in ADR](adr/2026-08-05-replies-cancel-only-on-evidence-of-speech.md):
+acoustics alone can at most pause a reply; only evidence of user
+speech cancels it.
+
+### Handover
+
+Switching the active agent mid-session, requested by
+name in conversation and executed by the LLM's `switch_agent` tool.
+The tool's enum of bound agents is what maps a near-miss transcript
+("Mark") onto the right agent (`marc`). Each agent of a session has
+its own conversation, and the switch is a per-conversation context
+switch: the incoming agent reads its own thread and nothing of the
+outgoing agent's, and switching back returns an agent to the thread
+it was on with what it said there. The turn the handover happens in
+belongs to the thread it started on, and the greeting the incoming
+agent answers with is the first turn of its own. See
+[the concepts page](concepts.md#conversation-and-session).
+
+### Idle timeout
+
+A realtime session with no conversation for the
+configured time is closed by the server; the device reconnects on
+the next button press. Exists because a realtime device streams its
+microphone continuously and would otherwise hold it open forever.
+
+### Listening modes
+
+How the device decides when the microphone is
+live. Realtime: streams continuously, AEC removes playback, barge-in
+is possible. Auto: microphone stops during playback, re-arms each
+turn. Manual: push to talk. The firmware picks realtime whenever AEC
+is on, so realtime is the normal mode for vinga's target hardware.
+
+### LLM round
+
+One generation call within a reply. Tool use makes a
+reply multi-round: a round that calls tools speaks nothing, the next
+round reads the results. Each round logs duration, time to first
+token, and token counts (`llm_round`).
+
+### Manifest
+
+The JSON sidecar of a capture: the device identity (MAC
+and client ID), the board model and firmware version cached from the
+device's last OTA check-in when they are available, the session's
+protocol version, resolved provider entries verbatim, completeness
+flag. What makes a recording attributable to an exact stack long
+after the fact.
+
+### Marker phrase
+
+A fixed, otherwise-improbable phrase ("banana,
+banana, banana") said aloud the moment a field test misbehaves. It
+timestamps the problem in the audio and the transcript, surviving
+even a wrongly pinned ASR because three repeated bursts are visible
+in the waveform.
+
+### Memory
+
+What an assistant keeps between replies, in three scopes named by
+whose the remembered thing is: the **agent** scope, what this agent
+knows about the user, keyed by the agent and not by the board it was
+said to; the **device** scope, what is known about the place and its
+household, shared by every agent bound to that device that may
+remember; and **conversation state**, a keyed ledger of what is
+currently true in the thread happening now, which dies with it. All
+three are injected into the system prompt of an agent whose `memory`
+section leaves memory on, which is every agent that says nothing, in
+the order they take precedence in, which is the
+conversation first, then the agent's facts, then the device's notes,
+each under a heading stating its rank: what is most current wins. An
+agent switched off is offered no memory tool and injected no scope. A
+removed fact is held rather than erased until the conversation that
+removed it ends, which is what makes "no, put that back" answerable. The
+agent scope is larger than a prompt, so it splits in two: a small
+injected core of the newest facts, and the rest reached by looking it
+up. Distinct from what an assistant
+appears to know inside one conversation, which is the dialogue it is
+reading. See
+[the concepts page](concepts.md#memory).
+
+### MCP (Model Context Protocol)
+
+The protocol vinga uses for tools
+on both sides: the device publishes its own controls (volume,
+screen) to the server over it, and the server connects outward to
+configured MCP servers whose tools agents may call.
+More: [modelcontextprotocol.io](https://modelcontextprotocol.io/).
+
+### Meta capability
+
+A vinga-owned tool in every agent's tool set, so a meta request is
+answerable in any conversation, whoever is answering. There are
+three: the handover tool, offered wherever the device reaches more
+than one agent, and the two conversation tools, which start a new
+thread and find and resume an old one. Conversation search is
+deliberately agent-scoped: an agent finds its own past threads and no
+other agent's. See
+[the concepts page](concepts.md#meta-capabilities).
+
+### Opus
+
+The audio codec on the device link, carrying 60 ms frames
+in both directions. Chosen (by the upstream ecosystem) for quality
+at low bitrate and graceful behaviour on lossy links.
+More: [RFC 6716](https://www.rfc-editor.org/rfc/rfc6716),
+[opus-codec.org](https://opus-codec.org/).
+
+### OTA endpoint
+
+The HTTP endpoint a device calls at boot with its
+identity; the reply carries the WebSocket URL and the device's auth
+token. The URL a board calls lives in its NVS flash, which is why a
+board follows a deployment until that entry is rewritten.
+
+### Output pacing
+
+Sending reply audio at playback speed, one
+60 ms Opus frame per 60 ms, instead of as fast as the network
+accepts. The pacing clock is owned by the device edge and reset per
+reply. Pacing keeps the device's small playback buffer from
+overflowing, keeps a barge-in cut close to immediate (little audio
+is in flight beyond what has played), and gives the capture its
+timeline: each frame is recorded at the moment the clock sends it
+(see [wire-true capture](#wire-true-capture)).
+
+### PCM
+
+Raw uncompressed audio samples, the working format between
+pipeline stages once Opus is decoded: 16-bit mono, 16 kHz on the
+input side.
+
+### Premature endpoint
+
+The endpointer declaring an utterance over at a pause that was
+thinking rather than turn-yielding. Visible in the conversation
+store as turns whose transcript trails off ("I'm here with my..."),
+which the ASR itself marks with an ellipsis; on the events it shows
+as a short `heard` whose continuation arrives as a barge-in. Each one starts a reply to a
+fragment and turns the user's continuation into a barge-in attempt
+against it. Dictation-style speech (telling an agent things to
+remember) pauses longer between clauses than question-answer
+exchanges do, which is what makes the trailing-silence bound a
+per-conversation tradeoff rather than a constant, and why it is
+configured per agent rather than per server (see trailing silence).
+
+### Pre-roll
+
+A short stretch of audio kept from before the VAD's
+speech onset when trimming an utterance, so a soft first syllable is
+not clipped by the trim.
+
+### Prompt echo
+
+An ASR failure mode where the model returns the
+transcription prompt itself as the transcript, most likely on very
+short clips. The guard discards an exact echo rather than acting on
+it, and a retry without the prompt recovers the cases where a real
+short utterance was behind it.
+
+### Prosodic cues
+
+How speech sounds as it approaches a pause,
+independent of the words: the melody and rhythm that tell a listener
+whether the speaker is done. A finished turn typically ends with
+falling pitch (or a rise for a yes/no question) and a stretched
+final syllable; a thinking pause cuts off with the pitch left
+suspended, which any listener hears as "more coming". Filled pauses
+are prosody too, and explicitly turn-keeping: "um..." means the
+speaker is holding the floor, yet a silence-only endpointer
+transcribes it as a complete utterance and the assistant answers it
+("Take your time!"), which field round 2 recorded verbatim.
+More: [prosody](https://en.wikipedia.org/wiki/Prosody_(linguistics)).
+
+### Refractory period
+
+The window right after the assistant starts
+speaking during which barge-in attempts are suppressed, absorbing
+the acoustic aftermath of the user's own previous utterance. A
+standard rung of a barge-in gate ladder, and vinga no longer has
+one: measured on the primary board, playback trails the server by
+roughly 760 ms, so a window counted from the server's first
+delivered frame closes while the room has heard a fraction of the
+reply, and nothing reaches that rung without half a second of
+classified speech already behind it. Every suppression it made in
+the field was a user finishing their own sentence, so the rung was
+removed in 2026-09 and an interruption arriving that early takes the
+transcript confirmation like any other.
+
+### Semantic completeness
+
+Whether the words heard so far form a
+finished thought. "I'm here with my kids." stands alone; "I'm here
+with my" ends on a possessive with no noun and no fluent listener
+would treat it as finished, yet a silence-only endpointer cannot
+tell the two apart. The pipeline already gets one semantic signal
+for free: Whisper-family ASR marks a trail-off with a trailing
+ellipsis in the transcript, which is how field round 2 counted 18
+premature endpoints without listening to a single recording.
+Transcript-based turn models make the same judgment with a
+classifier instead of a heuristic.
+
+### Sentence lookahead
+
+Synthesizing the next sentence while the
+current one plays, removing the dead air that otherwise appears at
+every sentence boundary of a multi-sentence reply. The
+subtlety is ownership: a synthesized-ahead sentence belongs to the
+agent leg that started it, which matters across a handover.
+
+### Session
+
+One connection episode from one device: wake (button
+press or wake word) to close. A session attaches to conversations;
+it is not a conversation. "Sophia... let me talk to Nadia... back to
+Sophia" is one session touching two conversations. Its own
+transcript (everything said and done from wake to close, across
+every conversation touched) is a view over the
+turns that name it, the same rows a conversation reads by thread, so
+no dialogue is stored twice. Belongs to the device side of the model
+the way a conversation belongs to an agent. Written **device session**
+wherever the bare word could be read as a user's or a login's: vinga
+has no user session. See
+[the concepts page](concepts.md#conversation-and-session).
+
+### Structured event
+
+A named JSONL record the server emits at each conversational
+decision point (`heard`, `barge_in`, `barge_in_suppressed`,
+`filler_played`, `llm_round`, ...), carrying the numbers behind the
+decision (`speech_ms`, `delay_ms`, a suppression's reason). The
+event stream is what field analysis reconstructs timelines from; a
+capture's event track is the same stream scoped to one session. The
+few named here are examples: every event, every field one may carry
+and every token a reason admits are in
+[the event schema reference](reference/events.md), generated from
+the declarations.
+
+### Trailing silence
+
+The stretch of non-speech the endpointer
+requires before declaring an utterance over. The single most
+consequential conversational constant: it sets where the system
+believes a sentence ends. At the 700 ms default, question-answer
+turns end cleanly but dictation ("remember that...") pauses longer
+than that between clauses, so the same bound that feels responsive
+in one conversation manufactures premature endpoints in the other.
+Which is why it is not one number per server: `trailing_silence_ms`
+is an option on a VAD provider entry, an agent binds the entry it
+wants, and a handover builds the incoming agent's endpointer, so a
+dictation agent can be patient while its siblings stay quick
+([Tuning when a turn ends](run/turn-taking.md#listening-and-barge-in)).
+
+### TTS (text-to-speech)
+
+The stage that turns reply text into
+audio, streamed sentence by sentence. Pluggable: local (Piper, a GPL
+extra, never a core dependency) or cloud (ElevenLabs, OpenAI). Voice
+choice is per agent, which is what makes a handover audible.
+More: [Piper](https://github.com/OHF-Voice/piper1-gpl).
+
+### Utterance
+
+One stretch of user speech as delimited by the
+endpointer: the unit ASR transcribes and the unit the conversation
+advances by.
+
+### VAD (voice activity detection)
+
+Frame-by-frame classification of
+audio as speech or not, the pipeline's first judgment. vinga uses
+Silero VAD. Everything downstream sees only what the VAD passes, so
+"the assistant never heard me" begins here.
+More: [Silero VAD](https://github.com/snakers4/silero-vad).
+
+### Wake word
+
+An always-on, on-device trigger phrase that opens a
+session hands-free. Supported by the firmware's ESP-SR models; the
+primary test setup uses the conversation button instead. The wake
+word wakes the device, never a particular agent: ESP-SR spots it
+on-chip, the server takes no part in the decision and is at most told
+which word fired, after the fact, and the device's default agent
+answers. Builds with the firmware's send-wake-word-data option
+enabled, the default in current upstream sources, also send the
+buffered trigger audio as the conversation's first audio; whether our
+prebuilt images do is unchecked on the wire.
+More: [ESP-SR](https://github.com/espressif/esp-sr).
+
+### Wire-true capture
+
+The property that makes a capture's reply
+channel trustworthy as a measurement reference: channel 1 is decoded
+from the very Opus packets paced out to the device, each placed at
+the moment it was sent, contiguously, on one clock. A reference with
+this property stands in for what the device actually played, which
+is what the echo-leakage analysis cross-correlates against; a
+recording made upstream of pacing, on its own timeline, can carry a
+constant offset or a drift the analysis would misread as acoustics.
+The property is proven, not assumed: the synthetic-echo control is
+its acceptance test, and the pipecat alignment spike showed a
+foreign pipeline reproduces it only with deliberate wiring
+([the spike record](plans/2026-08-11-pipecat-alignment-spike-implementation.md)).
+
+### World
+
+One complete configuration state a running server
+serves: a validated configuration snapshot, the stored credentials
+opened behind it, and everything built from the pair (provider
+engines, MCP installs, filler clips), frozen together. In code, a
+`Generation`. The server boots into its first world, and applying
+stored changes without a restart composes and builds the whole next
+world before anything swaps, so a refused apply has changed nothing.
+Live work then converges at its own boundary: tools per reply,
+prompt text per activation, filler clips and provider engines when a
+conversation opens. A world nothing serves and nothing holds retires
+and releases what it built. See
+[how a change reaches a conversation](concepts.md#configuration-changes-arrive-as-whole-worlds).
