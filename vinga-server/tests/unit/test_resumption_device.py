@@ -90,3 +90,16 @@ async def test_a_session_with_no_board_offers_nothing_held_to_one() -> None:
 
     assert answer == builtin.NOTHING_TO_RESUME
     assert store.asked == []
+
+
+async def test_a_pick_is_held_to_the_device_by_who_is_picking_not_by_who_searched() -> None:
+    """Review round 1, finding 1: an unscoped search's offer, picked by
+    an agent that is the built-in one now, is checked against this board
+    as a held search's would be. The restriction belongs to the agent
+    selecting, whatever the search was."""
+    flow = Resumption(store_offering(KITCHEN), 4096, 5.0, HALL)
+    await flow.described("vinga", "the galaxy")
+
+    assert await flow.resumed("vinga", THREAD, on_device=True) == builtin.NO_SUCH_CANDIDATE
+    assert await flow.recap("vinga", THREAD, on_device=True) == builtin.NO_SUCH_CANDIDATE
+    assert isinstance(await flow.resumed("vinga", THREAD), Resumed)

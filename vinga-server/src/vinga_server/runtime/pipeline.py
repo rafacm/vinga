@@ -1871,7 +1871,16 @@ class PipelineRuntime:
         providers = self._providers
         self._remembering = self._resolved_memory()
         assert self._agent is not None
-        self._builtin = self._world_of(self._agent).is_builtin(self._agent)
+        builtin = self._world_of(self._agent).is_builtin(self._agent)
+        if self._builtin is not None and builtin != self._builtin and self._resumption:
+            # The agent speaking became, or stopped being, the built-in
+            # one across an install (an operator's legacy `vinga` deleted
+            # and the built-in installed, say), so what it was offered
+            # was searched under the other rule: its threads were either
+            # the deployment's or this device's. Dropped, so nothing
+            # searched under one rule is picked under the other (#612).
+            self._resumption.forget()
+        self._builtin = builtin
         # The tools, their declared shapes and where each came from, as
         # one value taken once: the shapes are what the coercion reads
         # and the origins are what a withheld sentence is named from, so
@@ -2289,7 +2298,7 @@ class PipelineRuntime:
         says it is a tail.
         """
         await self.conversations.settled(conversation)
-        found = await flow.resumed(agent, conversation)
+        found = await flow.resumed(agent, conversation, on_device=self._builtin_now())
         if isinstance(found, str):
             return found
         if offering and found.over_budget:
@@ -2325,12 +2334,12 @@ class PipelineRuntime:
         the next resume offers the choice again.
         """
         await self.conversations.settled(conversation)
-        made = await flow.recap(agent, conversation)
+        made = await flow.recap(agent, conversation, on_device=self._builtin_now())
         if isinstance(made, str):
             return made
         text = await self._summarized(made)
         if text is None:
-            fallback = await flow.resumed(agent, conversation)
+            fallback = await flow.resumed(agent, conversation, on_device=self._builtin_now())
             if isinstance(fallback, str):
                 return fallback
             return _Transition(
