@@ -550,3 +550,31 @@ Not verified: the smoke lane (the seeds were run only through
 `test_smoke_seeds.py`, not in the image), the wheel-level drift checks
 CI runs against an installed wheel, and any board: no device was
 onboarded against this build.
+
+### PR review round
+
+Reviewed 2026-10-07 by openai/gpt-6-sol, thinking high via codex CLI 0.160.1, read-only sandbox, at commit fc94316c ([the round](https://github.com/rafacm/vinga/pull/632#issuecomment-6033152918)). The fixes are by anthropic/claude-opus-5-5, thinking high, M1's own implementer.
+
+1. **P2: a rename that moved only the default agent promised a device
+   check-in.** *Resolution:* `_rename_notice` gives that case
+   `DEFAULT_AGENT_UNSERVED_NOTICE` (the install alone), whose sentence
+   already describes it, and keeps `RENAME_UNSERVED_NOTICE` for a rename
+   that moved a binding; API and CLI tests split the two cases, and the
+   default-only test failed on the old code first (`24b5a697`).
+2. **P2: device deletion's help and API description promised the
+   removed fallback.** *Resolution:* both say a deleted device is
+   unbound whatever the default agent; the CLI and OpenAPI references
+   regenerated; an untruncated grep found no other statement of the old
+   rule beyond the `sessions.device_name` column comment already
+   recorded as a follow-up (`cff79346`).
+3. **P2: the browser guide said both ways of joining work on every
+   server.** *Resolution:* it states that both need onboarding on, that
+   a try link also needs a default agent, and that pairing needs none
+   when the claim names the agent; the packaged copy regenerated in the
+   same commit. M1b rewrites the section for invite links (`7773c570`).
+
+Verification after the round: `uv run ruff check .` clean; the unit lane
+(`-n auto --dist loadfile`) `8423 passed, 19 skipped in 1006.25s`; the
+generated documents current; link check and Run and Use page check
+clean. The integration and browser lanes were not rerun for a notice
+choice, two descriptions and a guide paragraph.
