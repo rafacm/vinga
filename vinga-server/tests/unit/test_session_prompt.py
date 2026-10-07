@@ -819,3 +819,52 @@ def test_the_fact_list_s_bound_is_stated_as_the_store_sets_it() -> None:
     assert f"at most {CORE_LINES + DEVICE_LINES}" in MEMORY_FACTS_NOTE
     assert f"newest {CORE_LINES}" in MEMORY_FACTS_NOTE
     assert f"cap of {DEVICE_LINES}" in MEMORY_FACTS_NOTE
+
+
+# The operator agent's prompt, pinned across the built-in agent
+
+
+# What an operator agent was sent before the built-in agent existed
+# (#612), byte for byte, with every block an operator agent's prompt can
+# carry filled in: its persona, an included fragment, a granted entry's
+# guidance, a fact of its own, a note about its board, and its board's
+# record. Captured at the commit before M3 touched the device block, and
+# held here because M3 and M4 add text to that block for the built-in
+# alone: an operator agent's prompt must not move by a byte.
+OPERATOR_PROMPT = (
+    "POET\n\nThe bins go out on Tuesday.\n\nGuidance for using the tools whose "
+    "names begin with home__:\nAsk before unlocking the door.\n\nWhat follows is "
+    "memory as it was read when this conversation started, so a memory tool result "
+    "later in the conversation is newer and takes precedence over it.\n\nYou "
+    "remember these facts about past conversations:\n- the user is vegetarian\n\n"
+    "You are speaking through a device called Kitchen, which is in the kitchen.\n\n"
+    "Notes about this device and its household. The conversation and the "
+    "remembered facts above take precedence:\n- the radiator rattles"
+)
+
+
+async def test_an_operator_agent_s_prompt_is_what_it_was_before_the_built_in() -> None:
+    store = lane_memory()
+    await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
+    await store.add(
+        MemoryScope.DEVICE, POET_MAC.lower(), "the radiator rattles", agent="poet"
+    )
+    llm = RecordingLlm()
+    config = base_config(
+        prompt_fragments={"household": {"text": FRAGMENT}},
+        devices={
+            POET_MAC: {"agents": ["poet"], "name": "Kitchen", "location": "the kitchen"},
+            BOTH_MAC: ["poet", "tutor"],
+        },
+        agents={
+            "poet": {"prompt": "POET", "tts": "tenor", "prompt_includes": ["household"]},
+            "tutor": {"prompt": "TUTOR", "tts": "alto"},
+        },
+    )
+    session = session_with(
+        CountingServers((Guidance("home", GUIDANCE),)), {"poet": llm}, store, config=config
+    )
+
+    await run_reply(session, "hello")
+
+    assert llm.systems == [OPERATOR_PROMPT]
