@@ -171,24 +171,21 @@ def test_a_rename_that_moved_the_row_alone_advises_the_install(
     assert err.splitlines() == [output.SPOKEN[frozenset({Applies.RELOAD})]]
 
 
-@pytest.mark.parametrize("live", ["binding", "default"])
-def test_a_rename_that_moved_a_live_reference_advises_both_boundaries(
-    run, capsys: pytest.CaptureFixture[str], live: str
+def test_a_rename_that_moved_a_binding_advises_both_boundaries(
+    run, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A row a running server re-reads as a device asks moved with the
-    agent, so the rename is waiting at two boundaries at once, and this
-    client has a line for that pair: the agent is not serving yet, the
-    install is what ends that, and the device follows at its check-in.
+    """A binding a running server re-reads as a device asks moved with
+    the agent, so the rename is waiting at two boundaries at once, and
+    this client has a line for that pair: the agent is not serving yet,
+    the install is what ends that, and the device follows at its
+    check-in.
 
     The sentence the server composed for a rename is the one an old
     client would have printed here, and `boundaries` reads the pair off
     either voice.
     """
     pipeline(run)
-    if live == "binding":
-        assert run("device", "bind", BOARD, "sam") == 0
-    else:
-        assert run("default-agent", "set", "sam") == 0
+    assert run("device", "bind", BOARD, "sam") == 0
 
     code, printed, err = out(run, capsys, "agent", "rename", "sam", "poet")
 
@@ -198,6 +195,22 @@ def test_a_rename_that_moved_a_live_reference_advises_both_boundaries(
         output.SPOKEN[frozenset({Applies.RELOAD, Applies.CHECK_IN})]
     ]
     assert entities.RENAME_UNSERVED_NOTICE.sentence not in err
+
+
+def test_a_rename_that_moved_only_the_default_agent_advises_the_install(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The default agent reaches no device's check-in since #612, so a
+    rename that moved it and nothing bound waits at the install alone,
+    and this client's line for that one boundary is what it prints."""
+    pipeline(run)
+    assert run("default-agent", "set", "sam") == 0
+
+    code, printed, err = out(run, capsys, "agent", "rename", "sam", "poet")
+
+    assert (code, printed) == (0, "wrote agent sam renamed to poet\n")
+    assert boundaries(err) == {RELOAD}
+    assert err.splitlines() == [output.SPOKEN[frozenset({Applies.RELOAD})]]
 
 
 def test_a_rename_against_a_handed_configuration_prints_the_sentence_alone(

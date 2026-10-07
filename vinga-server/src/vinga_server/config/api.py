@@ -3213,17 +3213,19 @@ def _binding_notice(
 def _rename_notice(renamed: Renamed, snapshot_only: bool) -> entities.Notice:
     """When a rename takes effect, which depends on what it rewrote.
 
-    Three arms, chosen from the transaction's own result. A rename that
+    Four arms, chosen from the transaction's own result. A rename that
     moved the agents row alone is waiting where every other write of
     that kind waits, so it answers with the kind's own notice rather
     than with a second copy of it: the install that puts the stored
     configuration on the running server. One that moved a device binding
-    or the default agent
-    with it is waiting at two boundaries at once, because those rows are
+    with it is waiting at two boundaries at once, because that row is
     live: the sentence for that is `RENAME_UNSERVED_NOTICE`, which says
-    what a rename is rather than what one binding is. And a server that
-    reads no store answers before either of them, exactly as a device
-    write does.
+    what a rename is rather than what one binding is. One that moved the
+    default agent and no binding reaches no device's check-in (#612): the
+    next claim binds to the new name and the agent under it arrives at
+    the install, which is `DEFAULT_AGENT_UNSERVED_NOTICE` word for word.
+    And a server that reads no store answers before any of them, exactly
+    as a device write does.
 
     Deliberately not asked of the loaded agents, which is the one place
     this differs from `_binding_notice` above and the reason it is a
@@ -3237,8 +3239,10 @@ def _rename_notice(renamed: Renamed, snapshot_only: bool) -> entities.Notice:
     """
     if snapshot_only:
         return SNAPSHOT_NOTICE
-    if renamed.devices or renamed.default_agent:
+    if renamed.devices:
         return RENAME_UNSERVED_NOTICE
+    if renamed.default_agent:
+        return DEFAULT_AGENT_UNSERVED_NOTICE
     return _AGENT.notice
 
 

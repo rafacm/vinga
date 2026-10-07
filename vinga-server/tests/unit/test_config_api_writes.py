@@ -1339,18 +1339,18 @@ def test_a_rename_that_moved_the_row_alone_waits_at_the_install(
     assert boundaries(answer.json()) == {RELOAD}
 
 
-@pytest.mark.parametrize("live", ["binding", "default"])
-def test_a_rename_that_moved_a_live_reference_names_both_boundaries(
-    client: TestClient, live: str
+@pytest.mark.parametrize("with_default", [False, True])
+def test_a_rename_that_moved_a_binding_names_both_boundaries(
+    client: TestClient, with_default: bool
 ) -> None:
-    """The rows a running server re-reads as a device asks for them
-    moved with the agent, so both halves are true at once: the device
-    meets the moved reference at its next check-in, and the agent under
-    its new name arrives at the install."""
+    """A binding a running server re-reads as a device asks for it moved
+    with the agent, so both halves are true at once: the device meets
+    the moved reference at its next check-in, and the agent under its
+    new name arrives at the install. A default agent moving beside it
+    adds nothing a device meets."""
     _pipeline(client)
-    if live == "binding":
-        client.put("/devices/aa:bb:cc:dd:ee:ff", json={"agents": ["sam"]})
-    else:
+    client.put("/devices/aa:bb:cc:dd:ee:ff", json={"agents": ["sam"]})
+    if with_default:
         client.put("/default-agent", json={"name": "sam"})
 
     answer = _renamed_agent(client)
@@ -1358,6 +1358,24 @@ def test_a_rename_that_moved_a_live_reference_names_both_boundaries(
     assert answer.status_code == 200, answer.text
     assert boundaries(answer.json()) == {RELOAD, CHECK_IN}
     assert answer.json()["notice"] == entities.RENAME_UNSERVED_NOTICE.sentence
+
+
+def test_a_rename_that_moved_only_the_default_agent_waits_at_the_install(
+    client: TestClient,
+) -> None:
+    """The default agent reaches no device's check-in since #612, so a
+    rename that moved it and no binding promises no device anything: the
+    next claim binds to the new name, and the agent under it arrives at
+    the install. The default agent's own unserved sentence says exactly
+    that, on the one boundary."""
+    _pipeline(client)
+    client.put("/default-agent", json={"name": "sam"})
+
+    answer = _renamed_agent(client)
+
+    assert answer.status_code == 200, answer.text
+    assert boundaries(answer.json()) == {RELOAD}
+    assert answer.json()["notice"] == entities.DEFAULT_AGENT_UNSERVED_NOTICE.sentence
 
 
 def test_the_arm_is_chosen_by_what_moved_and_not_by_what_is_served(
