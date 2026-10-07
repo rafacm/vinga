@@ -558,6 +558,8 @@ def test_the_deployment_reads_back_through_every_read(run) -> None:
         ("agent", "export", "sam"),
         ("agent-defaults", "show"),
         ("agent-defaults", "export"),
+        ("builtin-agent", "show"),
+        ("builtin-agent", "export"),
     ):
         assert answered(run(*argv), *argv).strip(), argv
 
@@ -601,6 +603,8 @@ def test_the_settings_are_written_and_read_back(run) -> None:
 
     defaults = ("agent-defaults", "set", "llm=brain", "asr=ears", "tts=voice", "vad=gate")
     assert answered(run(*defaults), *defaults).startswith("wrote ")
+    builtin = ("builtin-agent", "set", "tts=voice")
+    assert answered(run(*builtin), *builtin).startswith("wrote ")
 
 
 def test_an_agent_is_renamed_from_the_installed_wheel(run) -> None:
