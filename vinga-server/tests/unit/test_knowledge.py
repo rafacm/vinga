@@ -184,10 +184,32 @@ def test_the_summary_s_heading_is_in_the_packaged_concepts_page() -> None:
     assert "The model in one paragraph" in headings
 
 
-def test_the_persona_is_the_concept_summary_verbatim() -> None:
+def test_the_persona_ends_with_the_concept_summary_verbatim() -> None:
     """The page's own section, so there is no second copy of it to
-    drift. The persona file joins it in M3."""
+    drift, after the hand-written persona (D1, D2)."""
     summary = knowledge.section("concepts.md", "The model in one paragraph").text
 
-    assert knowledge.persona() == summary.rstrip()
+    assert knowledge.persona().endswith("\n\n" + summary.rstrip())
     assert "A **device** is a physical endpoint" in knowledge.persona()
+
+
+def test_the_persona_opens_with_who_vinga_is_and_how_it_speaks() -> None:
+    """D1: the hand-written text comes first, says it is vinga, names
+    commands rather than running them, speaks briefly and without
+    markdown, says when it does not know, and does not configure by
+    voice. M3's persona says nothing about a lookup tool, which M5
+    adds."""
+    opening = " ".join(knowledge.persona().split("## The model in one paragraph")[0].split())
+
+    assert opening.startswith("You are vinga")
+    for promise in (
+        "you never run one yourself",
+        "one or two short sentences",
+        "no markdown",
+        "the language the person spoke",
+        "say so plainly rather than guessing",
+        "by voice",
+        "switching agents",
+    ):
+        assert promise in opening
+    assert "look" not in opening.casefold()

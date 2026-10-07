@@ -16,8 +16,9 @@ maps to a guide.
 - `library` reads the copy once per process and cuts it into sections.
 - `boards` names the board guides and answers a board type with its
   guide's facts, or with fixed text when no guide is named for it.
-- `persona` is the text the built-in agent's prompt opens with, which
-  for now is the concept summary, cut from the packaged concepts page.
+- `persona` is the text the built-in agent's prompt opens with: the
+  hand-written `persona.md`, then the concept summary cut from the
+  packaged concepts page.
 
 This `__init__` is the interface. Submodules import their siblings
 directly and take nothing from here, so only this file aggregates.
