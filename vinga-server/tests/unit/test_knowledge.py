@@ -135,9 +135,42 @@ def test_a_page_with_no_title_is_titled_by_its_path() -> None:
     assert cut.title == "devices/untitled.md: Only"
 
 
-def test_a_missing_section_is_refused_by_name_rather_than_read_as_empty() -> None:
-    with pytest.raises(LookupError, match="no section headed 'Not a heading'"):
+def test_a_missing_section_is_refused_rather_than_read_as_empty() -> None:
+    with pytest.raises(LookupError):
         knowledge.section("concepts.md", "Not a heading")
+
+
+SENTINEL = "sk-section-4b9e2a71-never-a-real-credential"
+
+
+def chain(raised: BaseException) -> list[BaseException]:
+    """An exception and everything it was raised from or during."""
+    found: list[BaseException] = []
+    current: BaseException | None = raised
+    while current is not None and current not in found:
+        found.append(current)
+        current = current.__cause__ or current.__context__
+    return found
+
+
+@pytest.mark.parametrize(
+    ("page", "heading"),
+    [(SENTINEL, None), ("concepts.md", SENTINEL), (SENTINEL, SENTINEL)],
+    ids=["page", "heading", "both"],
+)
+def test_the_refusal_quotes_neither_the_page_nor_the_heading(
+    page: str, heading: str | None
+) -> None:
+    """The caller passed both values, so it already knows which section
+    it asked for; the refusal is a fixed sentence, so a value that
+    should never have been passed cannot reach a message, a traceback
+    or a log line through it."""
+    with pytest.raises(LookupError) as refused:
+        knowledge.section(page, heading)
+
+    for raised in chain(refused.value):
+        assert SENTINEL not in str(raised)
+        assert all(SENTINEL not in repr(arg) for arg in raised.args)
 
 
 # The concept summary
