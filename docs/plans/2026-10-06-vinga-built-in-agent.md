@@ -1098,7 +1098,7 @@ through their generators.
   behavior change alone in review. Design footprint: deepens
   `device/bindings.py`, `config/store.py`, `config/models.py`; shallows
   `browser/router.py`; no new module.
-- [ ] **M1b: browsers join by invite** (PR TBD). Q11: `vinga device
+- [x] **[M1b: browsers join by invite](2026-10-06-vinga-built-in-agent-implementation.md#m1b-browsers-join-by-invite)** (PR TBD). Q11: `vinga device
   invite [--agent NAME]`, `vinga info` reporting only, the API route
   and body, the agents carried with the token and bound at redemption,
   `try_links` renamed `invites` throughout, the page at `/talk/`; the
