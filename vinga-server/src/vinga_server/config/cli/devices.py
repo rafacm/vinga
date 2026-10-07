@@ -10,11 +10,18 @@ which one a verb takes. `device bind` addresses the MAC an operator
 already has and `device pending claim` addresses the six digits on a
 screen, and both send the same binding to the same store; everything
 else about a device is the record, which is read through the entity
-renderer the commanded kinds use.
+renderer the commanded kinds use. A browser is the third way a device
+arrives, by `device invite`, which addresses nothing: it asks the
+running server for a link that binds whichever browser opens it, and
+which origin that link names is half this client's to decide.
 """
 
+import sys
 from collections.abc import Mapping
+from urllib.parse import urlsplit
 
+from vinga_server.config.loader import ConfigError
+from vinga_server.config.printing import printable
 from vinga_server.config.responses import (
     Acknowledgement,
     DeviceBinding,
@@ -22,6 +29,8 @@ from vinga_server.config.responses import (
     DeviceRename,
     DeviceReplacement,
     Envelope,
+    Invite,
+    InviteRequest,
     PendingClaim,
     PendingDevice,
 )
@@ -29,7 +38,8 @@ from vinga_server.config.responses import (
 from .acts import UNREADABLE_WRITE, Act, _path, _printed
 from .entities import _print_entity
 from .invocation import Invocation
-from .output import _acknowledged, _columns, _short
+from .output import UNBOUNDED, _acknowledged, _columns, _short
+from .reach import Address, _loopback
 
 # The pending listing's columns. Headings a person reads rather than
 # field names: what the body has to carry to be read as a listing at all
@@ -60,6 +70,72 @@ def _pending_listing(entries: Mapping[str, Mapping[str, str]]) -> str:
             for code, entry in entries.items()
         ]
     )
+
+
+# What `device invite` says on stderr once the link is on stdout (#612,
+# Q11): that it worked, and what the link does. Fixed, so it repeats no
+# agent name the command was given, and it carries no token: the token
+# is a credential, and stdout is the one place it is printed.
+INVITED = (
+    "invite issued: the link above opens this deployment in a browser once, within ten "
+    "minutes, and binds that browser before its first word"
+)
+
+# And what the command fails with when neither end can name an origin a
+# browser can open the page on: the server has no `https://` public URL
+# configured, and this CLI reached the API somewhere other than this
+# machine's loopback, so `localhost` would name the wrong machine. A
+# link with a guessed origin would open nothing, or a page with no
+# microphone, so there is none, and stdout stays empty: a caller holding
+# `$(vinga device invite)` holds nothing rather than a sentence.
+NO_LINK_ORIGIN = (
+    "no link is printed, because this server names no origin a browser can open it on "
+    "and this CLI did not reach it on this machine. Set server.public_url to the "
+    "deployment's https:// origin, or run this command on the server's own machine."
+)
+
+
+def _situated_link(link: Mapping[str, object], address: Address) -> Mapping[str, object]:
+    """An invite link with its origin named, where this client can name it.
+
+    The server names its configured public origin when it has one a
+    browser can use, and nothing otherwise; what it cannot know is the
+    address this client reached it on. When that is this machine's
+    loopback, the page is at `localhost` on the same port, which is a
+    secure context for the browser on this machine. Anything else is
+    left unnamed, and the renderer refuses (#613, D5c).
+
+    The scheme and port are the API target's own, so a loopback TLS
+    terminator stays `https`. `localhost` rather than the literal the
+    target was typed with, because that is the name every browser
+    treats as a secure context.
+    """
+    if link["origin"] is not None:
+        return link
+    parts = urlsplit(address.base)
+    if parts.hostname is None or not _loopback(parts.hostname):
+        return link
+    port = parts.port
+    authority = "localhost" if port is None else f"localhost:{port}"
+    return {**link, "origin": f"{parts.scheme}://{authority}"}
+
+
+def _invite_link(link: Mapping[str, object]) -> None:
+    """The link alone on stdout, and that it worked on stderr; or, with
+    no origin to name, the refusal and nothing on stdout.
+
+    Made printable like every other value an answer carries; not
+    bounded, because a truncated link is a wrong one. The token in it
+    is a credential, and the operator's own stdout is the one place it
+    is printed (#613, D7a). Flushed between the two halves, for the
+    reason every two-stream renderer here flushes: stderr is unbuffered
+    and stdout is not.
+    """
+    if link["origin"] is None:
+        raise ConfigError(NO_LINK_ORIGIN)
+    print(printable(f"{link['origin']}{link['page']}", UNBOUNDED))
+    sys.stdout.flush()
+    print(INVITED, file=sys.stderr)
 
 
 def _device_summary(body: Mapping[str, object]) -> str:
@@ -101,6 +177,10 @@ def _device_summary(body: Mapping[str, object]) -> str:
 
 def _device_path(args: Invocation) -> str:
     return _path("devices", args.mac)
+
+
+def _invites_path(args: Invocation) -> str:
+    return _path("runtime", "invites")
 
 
 def _binding(args: Invocation) -> object:
@@ -225,6 +305,26 @@ CLEAR_DEVICE_LOCATION = Act(
     answers=Acknowledgement,
     refusal=UNREADABLE_WRITE,
     render=_acknowledged,
+)
+
+# An invite link, issued for whoever runs `device invite` (#612, Q11).
+# An action of the running server rather than a write to the store:
+# each run is a new single-use link, held in that server's memory, and
+# the device it binds is written only when a browser opens it. The one
+# act whose answer leaves part of itself to the client, which names a
+# loopback origin when the server names none (#613, D5c).
+INVITE = Act(
+    method="POST",
+    path=_invites_path,
+    # The binding's own body, `{"agents": [...]}`: what the API reads as
+    # the agents the browser is bound to, and with none named an empty
+    # list, which it reads as the default agent. Always sent, since the
+    # API requires a body.
+    body=_binding,
+    sends=InviteRequest,
+    answers=Invite,
+    render=_invite_link,
+    completes=_situated_link,
 )
 
 PENDING = Act(

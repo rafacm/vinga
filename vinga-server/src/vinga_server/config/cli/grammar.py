@@ -42,7 +42,6 @@ from .deployment import (
     EXPORT_ALL,
     IDENTITY,
     IMPORT,
-    INVITE,
     LIST,
     SHOW_ALL,
     _contacted,
@@ -52,6 +51,7 @@ from .devices import (
     BIND_DEVICE,
     CLEAR_DEVICE_LOCATION,
     DELETE_DEVICE,
+    INVITE,
     PENDING,
     RELOCATE_DEVICE,
     RENAME_DEVICE,
@@ -434,6 +434,11 @@ DEVICE_NAME_HELP = (
 )
 
 DEVICE_LOCATION_HELP = "where the board stands, free-form, as a person would say it"
+
+INVITE_AGENT_HELP = (
+    "an agent the browser that opens the link is bound to, repeated for several "
+    "(default: the default agent)"
+)
 
 DEVICE_SWAP_HELP = (
     "the MAC of the board this device is to answer at from now on, which no other "
@@ -1681,6 +1686,36 @@ def _bound_by_code(row: Command) -> Callable[..., None]:
     return run
 
 
+def _invited_by(row: Command) -> Callable[..., None]:
+    """Asking the running server for an invite link, which addresses
+    nothing (#612, Q11).
+
+    No positional, because there is no address for one to lead: the
+    agents the browser is bound to are a flag, repeatable the way `device
+    bind`'s agents are a group, so a stray word on the line is refused as
+    an argument nothing takes rather than read as an agent."""
+
+    def run(
+        context: typer.Context,
+        agents: Annotated[
+            list[str] | None,
+            typer.Option("--agent", metavar="NAME", help=INVITE_AGENT_HELP),
+        ] = None,
+        config: ConfigOption = None,
+        api_url: ApiUrlOption = None,
+        force: ForceOption = None,
+        no_input: NoInputOption = None,
+    ) -> None:
+        row.perform(
+            _invocation(
+                row, context, config, api_url, force, no_input,
+                agents=tuple(agents or ()),
+            )
+        )
+
+    return run
+
+
 def _device_renamed_to(row: Command) -> Callable[..., None]:
     """One device addressed by its MAC, with the name it is to be given
     behind it.
@@ -2280,6 +2315,22 @@ COMMANDS: tuple[Command, ...] = (
             "bind when you know the MAC instead"
         ),
     ),
+    # The third way a device arrives, beside a MAC and a code: a browser
+    # opening a link (#612, Q11). A verb of the device noun rather than a
+    # noun of its own, because what it brings about is a device record;
+    # and the only command that issues a link, so `info` reports and
+    # never issues. What it prints on stdout is the link and nothing
+    # else, which is what lets `$(vinga device invite)` hold one.
+    Command(
+        words=("device", "invite"),
+        kind="device",
+        does=INVITE,
+        declare=_invited_by,
+        help=(
+            "print a single-use link that joins the browser opening it as a device, "
+            "bound to the agents named or else to the default agent"
+        ),
+    ),
     # The setting that is a noun with two verbs. `<name>` is payload
     # rather than address: `/default-agent` has no path parameter.
     Command(
@@ -2306,21 +2357,18 @@ COMMANDS: tuple[Command, ...] = (
     # resources because identity is the running server's and the counts
     # are the store's.
     #
-    # And an invite link between the two, since #613: a new one each run,
-    # which a browser opens to join as a device bound to the default
-    # agent. Its own act because the API answers it as an action of the
-    # running server, and where it cannot be issued the reason stands in
-    # its place rather than ending the command.
+    # It issued a link between the two from #613 until #612, which gave
+    # that to `device invite`: a command that reports should not hand out
+    # credentials, and a link that binds a browser is one.
     Command(
         words=("info",),
-        does=(IDENTITY, INVITE, COUNTS),
+        does=(IDENTITY, COUNTS),
         opens=_contacted,
         declare=_plain,
         help=(
             "what deployment this is: the API this CLI reached, the running server's "
-            "version and revision, the URL to type into a device's captive portal, a "
-            "new invite link a browser opens to join as a device, and how much of each "
-            "kind is configured"
+            "version and revision, the URL to type into a device's captive portal, and "
+            "how much of each kind is configured"
         ),
     ),
     # The one write that carries the whole configuration. Its own row

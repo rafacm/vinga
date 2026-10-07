@@ -1,18 +1,23 @@
-"""`vinga info`'s invite link line (#613, D5, D5a, D5c, D6b, D7a).
+"""`vinga device invite`, the one command that issues an invite link
+(#612, Q11; #613, D5, D5a, D5c, D6b, D7a).
 
-`info` issues an invite link and prints it, `<origin>/talk/#<token>`, on a
-line of its own under a label saying what it does. Which origin is
-split between the two ends: the server names its configured public
-origin when that opens a secure context in a browser, and otherwise
-names none; this client then names its own API target's host as
-`localhost` when it reached the API on a loopback address, and
-otherwise prints no link and a sentence asking for an `https://`
-`server.public_url`. Never the listen address and never a guess.
+It prints one link, `<origin>/talk/#<token>`, on stdout and nothing else
+there, so `$(vinga device invite)` is the one way a script holds a link
+without printing it. `--agent`, repeatable, names the agents the browser
+that opens it is bound to; with none, the default agent. That it worked
+is one fixed line on stderr, which names no agent it was given.
 
-When the server will not issue one, its sentence stands where the link
-would be, with this client's own remedy where the state has one, and
-`info` goes on to say the rest of what it says: a deployment with no
-default agent yet is the deployment a person meets first.
+Which origin is split between the two ends: the server names its
+configured public origin when that opens a secure context in a browser,
+and otherwise names none; this client then names its own API target's
+host as `localhost` when it reached the API on a loopback address, and
+otherwise prints no link, exits non-zero, and says on stderr to set an
+`https://` `server.public_url`. Never the listen address and never a
+guess.
+
+When the server will not issue one, the command fails with the server's
+sentence and this client's own remedy where the state has one, and
+stdout stays empty: nothing on it may be mistaken for a link.
 
 The token is a credential, so it is printed on stdout alone, which is
 the one place the plan allows it.
@@ -26,11 +31,12 @@ import pytest
 
 from tests.support.config_cli import logged, runner
 from tests.support.leaks import renderings
-from vinga_server.config.cli import acts, deployment
+from vinga_server.config.cli import acts, devices
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.models import ServerConfig
-from vinga_server.config.responses import RuntimeInfo
 from vinga_server.onboarding.invites import (
+    AGENT_NOT_SERVED,
+    AGENTS_UNKNOWN,
     NO_DEFAULT_AGENT,
     ONBOARDING_OFF,
     Invites,
@@ -47,23 +53,21 @@ def run(monkeypatch: pytest.MonkeyPatch):
     return runner(monkeypatch)
 
 
-def identity() -> RuntimeInfo:
-    return RuntimeInfo(
-        version="0.1.0",
-        revision="v0.1.0-3-gdeadbee",
-        onboarding_enabled=True,
-        onboarding_url="https://vinga.test.invalid/x/aaaaaaaa/",
-        onboarding_provenance="from server.public_url",
-    )
-
-
-def deploy(run, server: ServerConfig | None = None, *, default_agent: bool = True) -> Invites:
-    """A deployment around the API: its identity, a store with an agent
-    in it, and the issuer the composition root would build."""
+def deploy(
+    run,
+    server: ServerConfig | None = None,
+    *,
+    default_agent: bool = True,
+    served: frozenset[str] = frozenset({"sam", "kids"}),
+) -> Invites:
+    """A deployment around the API: a store with two agents in it, the
+    agents the running server serves, and the issuer the composition
+    root would build."""
     links = Invites()
-    run.runtime["identity"] = identity()
     run.runtime["invites"] = Issuer(links, server or ServerConfig(), False)
+    run.runtime["loaded_agents"] = lambda: served
     assert run("agent", "set", "sam", "prompt=You are Sam.") == 0
+    assert run("agent", "set", "kids", "prompt=You are kind.") == 0
     if default_agent:
         assert run("default-agent", "set", "sam") == 0
     return links
@@ -73,52 +77,98 @@ def port() -> str:
     return os.environ.get("VINGA_SERVER__PORT", "8003")
 
 
-def link_lines(out: str) -> list[str]:
-    return [line for line in out.splitlines() if LINK.match(line)]
+def token_of(out: str) -> str:
+    match = LINK.match(out.rstrip("\n"))
+    assert match is not None, out
+    return match.group("token")
 
 
-def test_a_loopback_target_prints_a_localhost_link(
+# --- the link, and nothing else on stdout ---------------------------------
+
+
+def test_a_loopback_target_prints_one_localhost_link_and_nothing_else(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
     links = deploy(run)
     capsys.readouterr()
 
-    assert run("info") == 0
+    assert run("device", "invite") == 0
 
     printed = capsys.readouterr()
-    lines = printed.out.splitlines()
-    (link,) = link_lines(printed.out)
-    assert LINK.match(link).group("origin") == f"http://localhost:{port()}"
-    # The label is the line above, saying what the link does; the link
-    # stands alone so it can be selected whole.
-    assert lines[lines.index(link) - 1] == f"{deployment.INVITE_LABEL}:"
+    # Exactly one line, the link: what `$(vinga device invite)` holds.
+    assert printed.out.count("\n") == 1
+    assert LINK.match(printed.out.rstrip("\n")).group("origin") == f"http://localhost:{port()}"
+    assert printed.err == f"{devices.INVITED}\n"
     assert links.held == 1
-    assert printed.err == ""
+
+
+def test_naming_no_agent_binds_the_default_agent(run, capsys: pytest.CaptureFixture[str]) -> None:
+    links = deploy(run)
+    capsys.readouterr()
+
+    assert run("device", "invite") == 0
+
+    invitation = links.claim(token_of(capsys.readouterr().out))
+    assert invitation is not None and invitation.agents == ()
+
+
+def test_each_agent_flag_names_an_agent_the_browser_is_bound_to(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    links = deploy(run)
+    capsys.readouterr()
+
+    assert run("device", "invite", "--agent", "kids", "--agent", "sam") == 0
+
+    printed = capsys.readouterr()
+    invitation = links.claim(token_of(printed.out))
+    assert invitation is not None and invitation.agents == ("kids", "sam")
+    # The line that says it worked names no agent: it is a fixed
+    # sentence, and what was typed is not repeated back.
+    assert printed.err == f"{devices.INVITED}\n"
+    assert "kids" not in printed.err
+
+
+def test_naming_agents_needs_no_default_agent(run, capsys: pytest.CaptureFixture[str]) -> None:
+    links = deploy(run, default_agent=False)
+    capsys.readouterr()
+
+    assert run("device", "invite", "--agent", "kids") == 0
+
+    assert links.claim(token_of(capsys.readouterr().out)).agents == ("kids",)  # type: ignore[union-attr]
 
 
 def test_the_configured_origin_wins(run, capsys: pytest.CaptureFixture[str]) -> None:
     deploy(run, ServerConfig(public_url=PUBLIC))
     capsys.readouterr()
 
-    assert run("info") == 0
+    assert run("device", "invite") == 0
 
-    (link,) = link_lines(capsys.readouterr().out)
-    assert LINK.match(link).group("origin") == PUBLIC
+    assert LINK.match(capsys.readouterr().out.rstrip("\n")).group("origin") == PUBLIC
 
 
-def test_a_link_follows_the_onboarding_url_and_precedes_the_counts(
+def test_a_configured_origin_is_used_whatever_the_target(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    deploy(run)
+    deploy(run, ServerConfig(public_url=PUBLIC))
     capsys.readouterr()
 
-    assert run("info") == 0
+    assert run("--api-url", "https://vinga.test.invalid/api", "device", "invite") == 0
 
-    lines = capsys.readouterr().out.splitlines()
-    (link,) = link_lines("\n".join(lines))
-    assert lines.index(identity().onboarding_url) < lines.index(link)
-    configured = next(index for index, line in enumerate(lines) if line.startswith("configured:"))
-    assert lines.index(link) < configured
+    assert LINK.match(capsys.readouterr().out.rstrip("\n")).group("origin") == PUBLIC
+
+
+def test_a_configured_origin_with_a_path_prefix_keeps_it(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A deployment a proxy serves under a prefix names it in
+    `server.public_url`, and the link is the page under that prefix."""
+    deploy(run, ServerConfig(public_url=f"{PUBLIC}/vinga"))
+    capsys.readouterr()
+
+    assert run("device", "invite") == 0
+
+    assert capsys.readouterr().out.startswith(f"{PUBLIC}/vinga/talk/#")
 
 
 @pytest.mark.parametrize(
@@ -132,125 +182,94 @@ def test_a_target_that_is_not_loopback_with_no_configured_origin_prints_no_link(
     names no origin; this client reached it somewhere that is not this
     machine, so there is no origin either end can vouch for. A link
     with a guessed origin would open nothing, or open a page with no
-    microphone, so there is none."""
+    microphone, so there is none, and the command fails rather than
+    leaving a caller holding an empty link."""
     deploy(run, ServerConfig(host="0.0.0.0"))
     capsys.readouterr()
 
-    assert run("--api-url", api_url, "info") == 0
+    assert run("--api-url", api_url, "device", "invite") == 1
 
     printed = capsys.readouterr()
-    assert link_lines(printed.out) == []
-    assert "/talk/#" not in printed.out + printed.err
-    assert f"{deployment.INVITE_LABEL}: {deployment.NO_LINK_ORIGIN}" in printed.out.splitlines()
+    assert printed.out == ""
+    assert "/talk/#" not in printed.err
+    assert devices.NO_LINK_ORIGIN in printed.err
 
 
-def test_a_configured_origin_is_used_whatever_the_target(
-    run, capsys: pytest.CaptureFixture[str]
-) -> None:
-    deploy(run, ServerConfig(public_url=PUBLIC))
-    capsys.readouterr()
-
-    assert run("--api-url", "https://vinga.test.invalid/api", "info") == 0
-
-    (link,) = link_lines(capsys.readouterr().out)
-    assert LINK.match(link).group("origin") == PUBLIC
+# --- refusals: the command fails, and stdout stays empty ------------------
 
 
-def test_with_no_default_agent_the_refusal_and_its_remedy_stand_in_its_place(
+def test_with_no_default_agent_and_none_named_the_refusal_and_its_remedy_are_said(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
     links = deploy(run, default_agent=False)
     capsys.readouterr()
 
-    assert run("info") == 0
+    assert run("device", "invite") == 1
 
     printed = capsys.readouterr()
-    assert link_lines(printed.out) == []
-    line = next(
-        line for line in printed.out.splitlines() if line.startswith(deployment.INVITE_LABEL)
-    )
-    assert line == (
-        f"{deployment.INVITE_LABEL}: {NO_DEFAULT_AGENT} Set one with "
-        f"`vinga default-agent set <name>`, and a browser opening a link is bound to that "
-        f"agent."
-    )
-    # And the rest of what `info` says is still said.
-    assert any(line.startswith("configured:") for line in printed.out.splitlines())
-    assert printed.err == ""
+    assert printed.out == ""
+    assert NO_DEFAULT_AGENT in printed.err
+    assert "`vinga default-agent set <name>`" in printed.err
     assert links.held == 0
 
 
-def test_with_onboarding_off_the_refusal_stands_in_its_place(
+def test_an_agent_this_deployment_does_not_have_is_refused_without_its_name(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    server = ServerConfig(onboarding={"enabled": False})
-    deploy(run, server)
-    capsys.readouterr()
-
-    assert run("info") == 0
-
-    out = capsys.readouterr().out
-    assert f"{deployment.INVITE_LABEL}: {ONBOARDING_OFF}" in out.splitlines()
-    assert link_lines(out) == []
-
-
-def test_a_server_that_issues_no_links_does_not_fail_info(
-    run, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """An application with no server around it, or a server from before
-    invite links existed: a refusal this API wrote, of the one act whose
-    refusal is a line of the answer rather than the end of it."""
-    run.runtime["identity"] = identity()
-    capsys.readouterr()
-
-    assert run("info") == 0
-
-    out = capsys.readouterr().out
-    line = next(line for line in out.splitlines() if line.startswith(deployment.INVITE_LABEL))
-    assert "no running server around it" in line
-
-
-def test_the_token_reaches_stdout_and_nothing_else(
-    run,
-    capsys: pytest.CaptureFixture[str],
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """The one owner-facing disclosure the plan allows (D7a): the
-    operator's own terminal. Not stderr, not a log record of the whole
-    invocation in either format."""
-    deploy(run)
-    capsys.readouterr()
-
-    with caplog.at_level(logging.DEBUG):
-        assert run("info") == 0
-
-    printed = capsys.readouterr()
-    (link,) = link_lines(printed.out)
-    token = LINK.match(link).group("token")
-    assert token not in printed.err
-    assert token not in logged(caplog)
-    assert token not in "\n".join(renderings(caplog))
-
-
-def test_each_run_is_a_new_link(run, capsys: pytest.CaptureFixture[str]) -> None:
     links = deploy(run)
     capsys.readouterr()
 
-    assert run("info") == 0
-    first = link_lines(capsys.readouterr().out)
-    assert run("info") == 0
-    second = link_lines(capsys.readouterr().out)
+    assert run("device", "invite", "--agent", "sk-live-AGENT-NAME-SENTINEL-0000") == 1
 
-    assert first != second
-    assert links.held == 2
+    printed = capsys.readouterr()
+    assert printed.out == ""
+    assert AGENTS_UNKNOWN in printed.err
+    assert "`vinga list`" in printed.err
+    assert "SENTINEL" not in printed.err
+    assert links.held == 0
 
 
-def test_an_invite_request_that_never_got_an_answer_still_ends_info(
+def test_an_agent_this_server_is_not_serving_is_refused_with_the_apply_named(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    links = deploy(run, served=frozenset({"sam"}))
+    capsys.readouterr()
+
+    assert run("device", "invite", "--agent", "kids") == 1
+
+    printed = capsys.readouterr()
+    assert printed.out == ""
+    assert AGENT_NOT_SERVED in printed.err
+    assert "`vinga apply`" in printed.err
+    assert links.held == 0
+
+
+def test_with_onboarding_off_the_refusal_is_said(run, capsys: pytest.CaptureFixture[str]) -> None:
+    deploy(run, ServerConfig(onboarding={"enabled": False}))
+    capsys.readouterr()
+
+    assert run("device", "invite") == 1
+
+    printed = capsys.readouterr()
+    assert printed.out == ""
+    assert ONBOARDING_OFF in printed.err
+
+
+def test_an_application_with_no_server_around_it_issues_nothing(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    capsys.readouterr()
+
+    assert run("device", "invite") == 1
+
+    printed = capsys.readouterr()
+    assert printed.out == ""
+    assert "no running server around it" in printed.err
+
+
+def test_a_request_that_never_got_an_answer_fails_the_command(
     run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Only a refusal the API wrote is a line of the answer. A request
-    that did not complete is not a state of the deployment, and `info`
-    ends with it as it ends with any other act's."""
     deploy(run)
     real = acts._call
 
@@ -262,23 +281,57 @@ def test_an_invite_request_that_never_got_an_answer_still_ends_info(
     monkeypatch.setattr(acts, "_call", call)
     capsys.readouterr()
 
-    assert run("info") == 1
+    assert run("device", "invite") == 1
 
     printed = capsys.readouterr()
+    assert printed.out == ""
     assert "could not be reached" in printed.err
-    assert deployment.INVITE_LABEL not in printed.out
-    assert "configured:" not in printed.out
 
 
-def test_a_configured_origin_with_a_path_prefix_keeps_it(
-    run, capsys: pytest.CaptureFixture[str]
+# --- the token, and the grammar -------------------------------------------
+
+
+def test_the_token_reaches_stdout_and_nothing_else(
+    run,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """A deployment a proxy serves under a prefix names it in
-    `server.public_url`, and the link is the page under that prefix."""
-    deploy(run, ServerConfig(public_url=f"{PUBLIC}/vinga"))
+    """The one owner-facing disclosure the plan allows (#613, D7a): the
+    operator's own terminal. Not stderr, not a log record of the whole
+    invocation in either format."""
+    deploy(run)
     capsys.readouterr()
 
-    assert run("info") == 0
+    with caplog.at_level(logging.DEBUG):
+        assert run("device", "invite", "--agent", "kids") == 0
 
-    (link,) = link_lines(capsys.readouterr().out)
-    assert link.startswith(f"{PUBLIC}/vinga/talk/#")
+    printed = capsys.readouterr()
+    token = token_of(printed.out)
+    assert token not in printed.err
+    assert token not in logged(caplog)
+    assert token not in "\n".join(renderings(caplog))
+
+
+def test_each_run_is_a_new_link(run, capsys: pytest.CaptureFixture[str]) -> None:
+    links = deploy(run)
+    capsys.readouterr()
+
+    assert run("device", "invite") == 0
+    first = capsys.readouterr().out
+    assert run("device", "invite") == 0
+    second = capsys.readouterr().out
+
+    assert first != second
+    assert links.held == 2
+
+
+def test_it_takes_no_positional(run, capsys: pytest.CaptureFixture[str]) -> None:
+    """Nothing is addressed, so nothing is positional: an agent is a
+    flag, which keeps a stray word from becoming one."""
+    links = deploy(run)
+    capsys.readouterr()
+
+    assert run("device", "invite", "kids") != 0
+
+    assert capsys.readouterr().out == ""
+    assert links.held == 0
