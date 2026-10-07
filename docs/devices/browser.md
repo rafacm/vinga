@@ -27,9 +27,10 @@ says so.
 
 A browser becomes a device in one of two ways. Both need the server's
 onboarding switched on, which is the default, since the page is not
-served without it; a try link also needs the server to have a default
-agent, which the link binds the browser to. Pairing needs no default
-agent when the person claiming the code names the agent. The browser
+served without it. An invite link that names no agent also needs the
+server to have a default agent, which the link binds the browser to;
+one that names its agents needs none. Pairing needs no default agent
+either, when the person claiming the code names the agent. The browser
 lane joins both ways.
 
 **With an invite link.** Whoever runs the server runs
