@@ -34,10 +34,12 @@ packaged as a committed, drift-checked copy inside the package rather
 than a build step, an extra build context or a force-include across the
 build root.
 
-**Operator surface:** no new configuration key. A new command, `vinga device invite [--agent NAME]`, prints a single-use invite link and is the only thing that issues one; `vinga info` stops issuing links; the browser page moves from `/try/` to `/talk/`; `POST /api/runtime/try-links` becomes `POST /api/runtime/invites` (M1b, with an `Upgrade:` line). `agents.vinga` becomes
-the built-in agent's override entry (providers, voice, filler,
-fallback, memory, and `prompt_includes`, which is how its language is
-set; a non-empty `prompt` or `mcp` refused there), and the `agents` and
+**Operator surface:** one new configuration key, `builtin_agent` (amended after plan review findings 3 and 4). A new command, `vinga device invite [--agent NAME]`, prints a single-use invite link and is the only thing that issues one; `vinga info` stops issuing links; the browser page moves from `/try/` to `/talk/`; `POST /api/runtime/try-links` becomes `POST /api/runtime/invites` (M1b, with an `Upgrade:` line). `builtin_agent` holds the
+built-in agent's overrides (providers, voice, filler, fallback, memory,
+and `prompt_includes`, which is how its language is set; it has no
+`prompt` and no `mcp` field), read and written like `agent_defaults`,
+with a `vinga builtin-agent` noun beside `vinga agent-defaults`; any
+stored `agents.vinga` is an operator's agent; and the `agents` and
 `default_agent` descriptions change, with `config.example.yaml`
 following and the generated `docs/reference/domain-config.md` with
 them. `default_agent` changes meaning: the agent a newly bound device
@@ -205,11 +207,12 @@ half, `DomainConfig`.
   `config/models.py`.
 - An after-validator on `Config`, ordered before `_check_domain`, puts
   an `AgentConfig` under `agents["vinga"]` built from the stored
-  override entry when there is one (else an empty layer), with
+  `builtin_agent` entry when there is one (else an empty layer), with
   `prompt=""` and `mcp=[]` pinned. It does so exactly when one pure
   function over a `DomainSnapshot`, `builtin_status(snapshot)`, answers
   `served`. Its closed set has two other answers, each with one
-  decision site in that function: `displaced` (Q2) and `unprovided`
+  decision site in that function: `displaced` (Q2: a stored
+  `agents.vinga` exists) and `unprovided`
   (some provider stage resolves through neither the override nor
   `agent_defaults`). A private attribute set by the validator backs
   `Config.is_builtin(agent)`, true only for the synthesized entry.
@@ -221,8 +224,8 @@ half, `DomainConfig`.
   meaning the stored rows; an export must never carry the built-in.
 - `check_references` resolves names against
   `set(snapshot.agents) | {BUILTIN_AGENT}`, so `default_agent: vinga` and
-  a binding to vinga are valid writes whether or not an override row
-  exists or vinga is served, and `defined("agents", ...)` lists vinga.
+  a binding to vinga are valid writes whether or not `builtin_agent`
+  is stored or vinga is served, and `defined("agents", ...)` lists vinga.
   A binding to an agent not yet served is a state the store already
   allows between a write and an apply.
 - `unprovided` does not refuse the boot. A fresh deployment boots empty
@@ -231,28 +234,45 @@ half, `DomainConfig`.
   stop booting on upgrade. vinga is then simply not served, which the
   event and `vinga info` say (D6), and a device bound to it waits as a
   device bound to any unserved agent waits (`unloaded`).
+- **Where the overrides live: `builtin_agent`, a key of its own.** It
+  mirrors `agent_defaults` end to end: a one-row table created by one
+  domain migration (`3005`), `store.read_builtin_agent` and
+  `set_builtin_agent`, the key in the configuration document so export,
+  import, apply and diff carry it, and a `vinga builtin-agent` noun
+  with `agent-defaults`' verbs. Its model, `BuiltinAgentConfig`, is
+  `AgentConfig` without `prompt` and `mcp`, so the persona and the
+  grants are not refused on it: they cannot be written at all.
+  Overloading `agents.vinga` as both an operator's agent and the
+  built-in's overrides was the first draft; it needed a field heuristic
+  to tell a legacy row from an override, and a blank legacy row would
+  have silently become the built-in (plan review finding 3).
 - **Providers, voice, language.** vinga inherits `agent_defaults` like
-  any agent. The override entry overrides `llm`, `asr`, `tts` (the
+  any agent. `builtin_agent` overrides `llm`, `asr`, `tts` (the
   voice), `vad`, `filler`, `fallback`, `memory` and `prompt_includes`;
   the language is a shared fragment ("Always reply in Swedish.")
   included there, the mechanism `AgentConfig.prompt`'s description
   already points an operator at, and `prompt_includes: []` opts vinga
   out of fragments its siblings share.
-- **Refused on that entry**: a non-empty `prompt` (the persona is the
-  build's, Q10) and a non-empty `mcp`. vinga is appended to every bound
-  device (Q3), so a grant on it would be a grant to every device; and
+- **No persona and no grants for the built-in.** The persona is the
+  build's (Q10), and `BuiltinAgentConfig` has no `prompt` to carry
+  another. vinga is appended to every bound device (Q3), so a grant on
+  it would be a grant to every device; it has no `mcp` field, and
   `agent_defaults.mcp` is not inherited either (the pin), because an
   upgrade would otherwise hand the default grants to devices bound only
-  to an agent that opted out with `mcp: []`. The refusal is per entry
-  written, in the store's agent staging beside `DEVICE_NAME_RESERVED`,
-  never in the whole-state reference pass, so a legacy row already
-  stored (Q2) does not wedge every unrelated write. Renaming an agent
-  *to* `vinga` is refused under the same rule when it carries a prompt
-  or a grant.
+  to an agent that opted out with `mcp: []`.
+- **A new `agents.vinga` is refused; an existing one is not.** Creating
+  an agent named `vinga`, or renaming one to it, would displace the
+  built-in by a write, so the store refuses it with a reason of its own,
+  decided against the stored state before the write: a write that
+  leaves an already stored `agents.vinga` as it was, or edits it, is
+  the operator's agent being kept, and passes. That is what keeps an
+  unchanged export of a displaced deployment applying back (plan review
+  finding 4): apply's per-entry preparation sees an existing row, never
+  a creation.
 
-**Q2. The name collision.** A stored `agents.vinga` with a non-empty
-`prompt` or a non-empty `mcp` is an operator's agent from before this
-change, and it **displaces** the built-in: it is served exactly as
+**Q2. The name collision.** A stored `agents.vinga`, whatever it holds,
+a blank one included, is an operator's agent from before this change
+(Q1 refuses creating one after it), and it **displaces** the built-in: it is served exactly as
 before, under its name, with its memory and threads; the built-in is
 not served (`displaced`) and is not appended to any device (Q3).
 `builtin_agent_not_served` fires at boot and at every apply and
@@ -269,6 +289,11 @@ Rejected, with reasons:
 - **Treat the stored entry as the override**: the operator's persona
   would vanish without a word, and its MCP grants would ride the
   built-in onto every device.
+- **Tell a legacy row from an override by its fields** (a non-empty
+  `prompt` or `mcp` meaning legacy): a blank legacy row, which
+  `AgentConfig` allows, would silently take the built-in's persona and
+  lose its inherited grants (plan review finding 3). The overrides
+  have their own key instead (Q1).
 - **Rename by migration**: a data migration across the domain,
   conversations and memory chains, three Alembic chains with three
   advisory keys, to do what one existing verb does on request.
@@ -521,8 +546,8 @@ prompt:
   cache can hold. `with_scopes` gains an optional `board` text, empty
   for every agent but the built-in, so an operator agent's prompt is
   byte-identical to today's.
-- The operator's providers, voice and language apply through the
-  override entry (Q1): providers by stage, voice by `tts`, language by
+- The operator's providers, voice and language apply through
+  `builtin_agent` (Q1): providers by stage, voice by `tts`, language by
   an included fragment, injected after the persona as every fragment
   is.
 
@@ -706,8 +731,8 @@ manifest does not move.
 - `device/bindings.py` (deepened): names only, and `against(config)`
   classifying against one world, append included.
 - `config/store.py` (deepened): the claim without `ALREADY_COVERED` and
-  with an optional agent; the override entry's per-entry refusal; the
-  rename-to refusal; the effective default in claim and enrolment.
+  with an optional agent; `builtin_agent` mirroring `agent_defaults`;
+  the refusal to create or rename to `agents.vinga`; the effective default in claim and enrolment.
 - `tools/builtin.py`, `tools/source.py` (deepened): the device-only
   memory family and the lookup tool, offered by one predicate.
 - `memory/store.py`, `conversations/threads.py`,
@@ -960,7 +985,9 @@ through their generators.
   where the pages are and how they are cut.
 - [ ] **M3: vinga, the built-in default agent** (PR TBD). The name, the
   synthesis and `builtin_status`, `is_builtin`, the reference rule, the
-  override entry and its per-entry refusals, displacement, the
+  `builtin_agent` key (table, migration `3005`, store, document key,
+  `vinga builtin-agent` noun), the refusal to create `agents.vinga`,
+  displacement, the
   effective default in claim and enrolment, D5's refusal, the persona
   through `prompt_for_agent`, device-scoped memory and threads (Q5),
   D6's event and `vinga info` line, the browser lane's vinga case, the
@@ -1013,7 +1040,26 @@ Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.1, re
 
 3. **P2: An existing blank `vinga` agent silently changes identity on upgrade.** Evidence: Q2 (`docs/plans/2026-10-06-vinga-built-in-agent.md:250`) treats a stored `agents.vinga` row as legacy only when `prompt` or `mcp` is non-empty. AgentConfig (`vinga-server/src/vinga_server/config/models.py:3530`) permits both to be empty; such a row can still have provider settings or prompt fragments. The plan would replace that agent’s blank persona with the built-in persona and could remove inherited MCP grants without warning. It should specify how a pre-upgrade row is distinguished from a new override, and test the blank-row upgrade.
 
+   *Resolution:* accepted, by removing the heuristic rather than
+   refining it. The built-in's overrides move to a key of their own,
+   `builtin_agent`, mirroring `agent_defaults` (table, migration
+   `3005`, store, document key, `vinga builtin-agent` noun), whose model
+   has no `prompt` and no `mcp` (Q1). Any stored `agents.vinga`, blank
+   or not, is then an operator's agent and displaces the built-in (Q2).
+   M3 adds the test the finding asks for: a blank `agents.vinga` stored
+   before the upgrade stays served under its own empty persona with its
+   inherited grants, and vinga is `displaced`.
+
 4. **P2: The collision remedy breaks export-and-apply round trips.** Evidence: Q1 (`docs/plans/2026-10-06-vinga-built-in-agent.md:233`) places the `agents.vinga` refusal in per-entry write staging. apply (`vinga-server/src/vinga_server/config/store.py:901`) prepares every document entry, and _parsed (`vinga-server/src/vinga_server/config/store.py:1954`) runs that write check before deciding an entry is unchanged. An export containing a displaced legacy `vinga` row would therefore fail when applied back unchanged. The plan should preserve that round trip for legacy rows, with a test, while refusing new incompatible writes.
+
+   *Resolution:* accepted. With the overrides in `builtin_agent`, the
+   refusal on `agents.vinga` is no longer about its fields: only a write
+   that would *create* that agent (or rename one to it) is refused,
+   decided against the stored state before the write, so an existing row
+   kept or edited passes (Q1). M3 tests the round trip: a displaced
+   deployment's export applies back unchanged with nothing written, and
+   a document adding a new `agents.vinga` to a deployment without one is
+   refused whole.
 
 5. **P2: `vinga info` needs a live status source that the plan does not name.** Evidence: D6 (`docs/plans/2026-10-06-vinga-built-in-agent.md:655`) promises status after every apply. The existing runtime info response (`vinga-server/src/vinga_server/config/api.py:1721`) is composed once at startup from process and file settings. The plan should specify a read against the installed generation for built-in status and test that `vinga info` changes after an apply makes vinga served, displaced or unprovided.
 
