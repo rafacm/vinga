@@ -251,6 +251,8 @@ historical  vinga metric list
 historical  vinga metric show
 historical  vinga metric show tokens
 historical  vinga ota-url
+historical  vinga prompt
+historical  vinga prompt on that board
 historical  vinga provider
 historical  vinga provider delete
 historical  vinga provider frobnicate
