@@ -163,7 +163,9 @@ is written by PUTting `{"secret": "..."}` to its slot, which is the only
 plaintext this API accepts and the reason the whole of it belongs on a
 loopback connection or behind TLS. The writes that are not an entity
 fragment take a small argument body instead: that one, a device
-binding or a claim (`{"agents": [...]}`), the default agent
+binding (`{"agents": [...]}`), a claim (the same body, whose `agents`
+may be left out or empty to bind the board to the default agent), the
+default agent
 (`{"name": "..."}`, whose DELETE clears it), a rename or a device's
 replacement (`{"to": "..."}`), a device's location
 (`{"location": "..."}`), and a corrected memory (`{"fact": "..."}`).
@@ -174,10 +176,12 @@ sentence for a reader, `notice`, and the boundaries it is waiting at as
 the half a program branches on; the whole answer is the
 `Acknowledgement` schema in the OpenAPI document, and `POST /api/apply`
 answers the same two for each entry it wrote. A
-device binding and the default agent carry the one about a device
-asking, because a running server reads them as it asks: they apply at
-that device's next OTA check or connection, and so do a claim, a
-device's rename, its replacement and its location. Every other kind this API
+device binding carries the one about a device asking, because a
+running server reads it as the device asks: it applies at that device's
+next OTA check or connection, and so do a claim, a device's rename, its
+replacement and its location. The default agent carries a sentence of
+its own on the same token: the next claim that names no agent reads it,
+and no device already bound changes. Every other kind this API
 writes, which is the whole of the rest of the domain half, carries the
 one that says the write is stored and not yet serving, and leaves the
 three moments a conversation meets an installed change at to the
@@ -185,9 +189,9 @@ installing command's own help. A binding naming an agent this server is
 not serving yet carries a sentence of its own, and it is the one an
 operator is most likely to need, because both halves of it are true at
 once: the row is live, and the agent arrives at the apply that installs
-it. A default agent naming an unserved agent carries its own for the
-same pair of reasons and about the row it really wrote, which covers
-every device that has no binding of its own. No sentence names a
+it. A default agent naming an unserved agent carries its own, waiting at
+the install alone: a default agent reaches no device's check-in, only
+the devices claimed onto it afterwards. No sentence names a
 command: which command crosses a boundary is a fact of the client's
 grammar, and a client is a program this server neither ships nor
 versions, so the CLI reads the tokens and says the whole of it in its

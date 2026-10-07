@@ -108,5 +108,8 @@ the reference it displaces.
 
 Devices and the default agent have no fragments: they are written with
 `config device bind` and `config default-agent set`, which take
-arguments rather than a document. A preset carries neither, because
-which board reaches which agent is the one thing a preset cannot know.
+arguments rather than a document, and a board in front of you is bound
+by the code it shows with `config device pending claim`. A preset
+carries neither, because which board reaches which agent is the one
+thing a preset cannot know; a default agent names only the agent a
+claim that names none binds a board to.

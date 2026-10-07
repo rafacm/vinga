@@ -181,10 +181,7 @@ on purpose:
   Anyone talking to a device may move it, which is deliberately the
   same trust boundary as talking to it at all, and the tool writes
   through the same repository an operator's command writes through, so
-  a place a room offers meets the rules a typed one meets. A device a
-  default agent merely covers, with no record of its own, is refused in
-  a sentence the agent reads out, because creating a device record is
-  an operator's act.
+  a place a room offers meets the rules a typed one meets.
   The
   [configuration reference](reference/domain-config.md) documents the
   fields.
@@ -242,9 +239,12 @@ designated default. Bindings are many-to-many: one agent can serve
 several devices (the same home agent in every room), and one device can
 reach several agents. Today the binding is the `agents` list on the
 device's own record, and the first entry is the default. A device
-with no binding reaches the deployment's `default_agent` when one is
-set, and is turned away otherwise, so the devices map doubles as an
-allowlist.
+with no binding reaches no agent at all: it is offered an activation
+code to be claimed by, and nothing else, so the devices map is always
+the allowlist. The deployment's `default_agent` is the agent a newly
+bound device starts with: a claim that names no agent binds the board
+to it, and it admits nothing by itself
+([the decision record](adr/2026-10-07-an-unbound-device-only-pairs.md)).
 
 A fresh wake always gets the default agent: the binding is resolved
 when the device connects, so whatever happened in the last session, the

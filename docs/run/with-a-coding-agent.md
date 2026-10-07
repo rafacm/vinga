@@ -333,8 +333,10 @@ Then ask, one question at a time and in this order:
    [Choosing how an agent hears](speech-recognition.md).
 3. **Keep the agents that are stored, or add their own.** Getting
    Started creates one called `assistant`. Their own needs a name and a
-   prompt, and either a binding to their board or becoming the
-   `default_agent`; which of the two is their choice, not yours.
+   prompt, and a board reaches it only by a binding: claimed by its code
+   naming the agent, or claimed naming none once it is the
+   `default_agent`, the agent a newly claimed board starts with. Which
+   of the two is their choice, not yours.
 
 Four conventions hold for every answer:
 
@@ -378,9 +380,7 @@ refusals name the entry and the rule. One that does not, from
 same way, is answered by `vinga check`, which reads the store as a boot
 would and names both. It needs the server's half of the package, so run
 it in the container (`docker compose exec -T vinga vinga check`) or from
-a checkout. A fresh store with agents and no device bound needs a
-`default_agent`, and that is the refusal you are most likely to meet
-first.
+a checkout.
 
 ## 7. Closing the loop
 

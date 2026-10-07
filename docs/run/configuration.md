@@ -43,7 +43,7 @@ text agents share, `agent_defaults` holding what every agent uses
 unless it says otherwise, `agents` combining a prompt with provider,
 fragment and MCP references, `devices` holding a record per board by
 its MAC address (its name, where it stands, and the agents it is bound
-to), and `default_agent` for unknown devices.
+to), and `default_agent`, the agent a newly claimed board starts with.
 
 The CLI writes it through the configuration API on the running server,
 so these commands need one to be up, and an empty database is a valid
@@ -98,11 +98,12 @@ line: `config device pending list` lists what is waiting and `config device pend
 binds one by the code on its screen. That is
 [Onboarding a device](onboarding-a-device.md).
 
-The rules about a runnable server (every stage of every agent
-resolving, a default agent when agents exist and no device is bound)
-are checked at boot
+The rule about a runnable server, every stage of every agent
+resolving, is checked at boot
 rather than at write time, so a half-built database is a legitimate
-state to be in and an illegitimate one to serve from.
+state to be in and an illegitimate one to serve from. Agents with no
+device bound to any of them is not half-built: it is a deployment
+awaiting its first claim, and it boots.
 
 **When the server will not start**, there is nothing to write through,
 and the way back is to rebuild the store rather than to operate on it:
@@ -163,11 +164,11 @@ name leaves the rows under the old name, and moving them is
 agent, its memory and its conversation threads in one transaction.
 
 **Device bindings are the other way, applied by being noticed.** A
-running server reads the devices table and the default agent as a device
-asks for them, so
-binding a board, unbinding it, or changing the default agent applies
+running server reads the devices table as a device asks for it, so
+binding a board or unbinding it applies
 at that device's next OTA check or connection, with nothing asked of
-the server at all. Those
+the server at all. The default agent is read by the next claim that
+names no agent, and reaches no device's check-in by itself. Those
 writes say so instead. That ends where the agent does: a
 binding naming an agent this server is not serving resolves to
 nothing until the apply that installs it, and the
@@ -206,8 +207,8 @@ answer say every time they write. There are two ways it becomes
 effective, and each write says which case it is in: everything in the
 domain half, from a provider entry to an agent to the defaults under
 them, reaches a running server when it is asked to apply; a device
-binding and the default agent reach it at that device's next check-in,
-with nothing asked of the server. Renaming an agent is the one write here
+binding reaches it at that device's next check-in, and the default agent
+at the next claim, with nothing asked of the server. Renaming an agent is the one write here
 that is not an edit of the document: it moves the stored references in
 one transaction, its memory and its conversation threads with them, so
 nothing is left behind under the old name. What it shares with every

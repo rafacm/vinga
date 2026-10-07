@@ -183,14 +183,18 @@ server:
 or `VINGA_SERVER__AUTH__ENABLED=false` in the environment.
 
 **Who gets a token is the allowlist.** A token is only issued to a device
-the configuration resolves to at least one agent. Omit `default_agent`
-and the `devices` map becomes an allowlist: an unknown MAC is issued no
-token. With onboarding on, which is the default, it is shown an
+whose own record binds it to at least one agent, so the `devices` map is
+the allowlist on every deployment: an unknown MAC is issued no token,
+whatever `default_agent` says, which names only the agent a newly
+claimed board starts with
+([the decision record](../adr/2026-10-07-an-unbound-device-only-pairs.md)).
+With onboarding on, which is the default, an unknown MAC is shown an
 activation code instead, and gets a token only once someone with the
 API's token claims it by that code
 ([Onboarding a device](onboarding-a-device.md)); with
 `server.onboarding.enabled: false` it is answered with nothing and
-refused at the handshake. There is no second list to keep in sync.
+refused at the handshake. There is no second list to keep in sync, and
+no exception for a server on localhost.
 
 ## The OTA endpoint
 

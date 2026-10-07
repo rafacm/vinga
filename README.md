@@ -240,8 +240,8 @@ agents:
       speakable: one or two sentences, no lists, no markdown. Always
       reply in the language the user spoke.
 
-# Which agent a board reaches when nothing has bound it. Bind one
-# board instead, by the MAC on its sticker:
+# Which agent a board starts with once you claim it by the code it
+# shows. Or bind it by the MAC on its sticker instead:
 #   vinga device bind aa:bb:cc:dd:ee:ff assistant
 default_agent: assistant
 EOF
@@ -311,12 +311,14 @@ The board reboots into your network and checks in by itself. When it does not tu
 
 **Step 5. Talk**
 
-Step 3 set a `default_agent`, so any board that reaches the server is covered: short-press PWR, the button on its own edge, and speak. Your board's guide in [`docs/devices/`](docs/devices/README.md) says which wake word it ships with, if any, and saying that opens a session with no button at all. Leave the default agent unset instead and an unbound board shows and speaks a six-digit code, and one command binds it; the device polls while it waits, so it connects seconds later.
+A board nobody has bound shows and speaks a six-digit code, and one command binds it. Step 3 set a `default_agent`, so the claim needs no agent: it binds the board to `assistant`, and says so. The device polls while it waits, so it connects seconds later.
 
 ```bash
-vinga device pending list                     # which board is showing what
-vinga device pending claim 418293 assistant   # bind the one showing 418293
+vinga device pending list            # which board is showing what
+vinga device pending claim 418293    # bind the one showing 418293
 ```
+
+Then short-press PWR, the button on its own edge, and speak. Your board's guide in [`docs/devices/`](docs/devices/README.md) says which wake word it ships with, if any, and saying that opens a session with no button at all.
 
 When a turn does not go the way you expected, `vinga events` is the first place to look: it is the server's own account of what it decided, turn by turn, and it names the stage that failed rather than leaving you to read a container log. A turn that worked reads `heard`, then the model's rounds, then `speaking_started` and `replied`; `speaking_started` is the one worth finding, because it says audio frames went out rather than that the server decided to speak.
 

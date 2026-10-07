@@ -96,12 +96,11 @@ every device-facing route answers both spellings itself, and none of
 them redirects, because the firmware does not follow a redirect on
 these requests.
 
-**4. Read the six digits off the board, if it shows any.** A device the
-configuration resolves to no agent is answered with an activation code
-instead of a token: the firmware shows it and speaks it, and re-checks
-every half minute to two minutes, so the number on the screen is always
-the current one. A board a `default_agent` already covers shows no code
-and connects straight away, which is the case just below.
+**4. Read the six digits off the board, if it shows any.** A device
+with no binding of its own is answered with an activation code instead
+of a token: the firmware shows it and speaks it, and re-checks every
+half minute to two minutes, so the number on the screen is always the
+current one. A board already bound by its MAC shows none.
 `vinga-server config device pending list` lists every board waiting, with the board
 type and firmware version each one reported, which is how two boards on
 one desk are told apart.
@@ -113,18 +112,23 @@ vinga-server config device pending claim 418293 assistant
 # wrote device aa:bb:cc:dd:ee:ff bound to assistant
 ```
 
-The device polls every three seconds while it waits, so it connects
-seconds later with no restart and no power cycle. `device bind` is the
-same write for a MAC you already know; `device pending claim` is for the
-board in front of you.
+Name no agent and the board is bound to the deployment's default agent
+(`default_agent`), the agent a newly bound device starts with; the line
+says which agent that was. With no default agent set, a claim naming no agent is refused
+and the code still works. The device polls every three seconds while it
+waits, so it connects seconds later with no restart and no power cycle.
+`device bind` is the same write for a MAC you already know, and it
+always names its agents; `device pending claim` is for the board in
+front of you.
 
-**Which devices are offered a code.** Exactly those the database
-resolves to nothing: no binding row of their own, and no
-`default_agent` set. A deployment with a default agent covers every
-unknown board by design, so its devices are handed a token straight
-away and never see a code, which is also why nothing changes for a
-deployment that upgraded into this. Turning `server.onboarding.enabled`
-off removes both the short URL and the code ceremony.
+**Which devices are offered a code.** Exactly those with no binding row
+of their own, on every deployment: an unbound device gets pairing and
+nothing else, whatever `default_agent` says, and there is no exception
+for a server on localhost
+([the decision record](../adr/2026-10-07-an-unbound-device-only-pairs.md)).
+Turning `server.onboarding.enabled` off removes both the short URL and
+the code ceremony, and an unbound device then gets neither a code nor a
+token: it is bound by its MAC.
 
 **On a fresh deployment, write the agent and apply it.** A server
 serves the world it last installed, so an agent written into an empty
