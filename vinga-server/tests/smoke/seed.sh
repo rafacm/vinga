@@ -12,8 +12,8 @@
 # VINGA_API_SECRET for the API the CLI writes to.
 #
 # The order is the one the write-time reference checks require:
-# providers, then the agent defaults, then the agent, then the default
-# agent that names it.
+# providers, then the agent defaults, then the agent, then the binding
+# that names it.
 set -eu
 
 # The server this writes through, started here and stopped on the way
@@ -55,6 +55,9 @@ vinga-server config agent set assistant -f - <<'YAML'
 prompt: A smoke test assistant.
 YAML
 
-vinga-server config default-agent set assistant
+# The smoke lane's board, bound by its MAC (tests/smoke/conftest.py's
+# DEVICE_MAC): an unbound device only pairs, so a default agent would
+# leave it showing a code instead of talking.
+vinga-server config device bind aa:bb:cc:dd:ee:ff assistant
 
 stop_server

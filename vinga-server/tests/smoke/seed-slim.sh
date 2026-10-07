@@ -60,6 +60,9 @@ vinga-server config agent set assistant -f - <<'YAML'
 prompt: A slim-image boot check.
 YAML
 
-vinga-server config default-agent set assistant
+# The smoke lane's board, bound by its MAC (tests/smoke/conftest.py's
+# DEVICE_MAC): an unbound device only pairs, so a default agent would
+# leave it showing a code instead of talking.
+vinga-server config device bind aa:bb:cc:dd:ee:ff assistant
 
 stop_server

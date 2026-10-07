@@ -40,6 +40,7 @@ import pytest
 
 from tests.conftest import throwaway_database
 from tests.integration.conftest import BYTECODE_OFF, script_environment
+from tests.smoke.conftest import DEVICE_MAC as SMOKE_MAC
 from vinga_server.config.models import DatabaseConfig
 from vinga_server.config.store import ConfigStore, DomainConfig
 from vinga_server.db import open_database
@@ -130,7 +131,10 @@ def test_the_smoke_conversation_runs_on_mock_providers(
     for stage in ("llm", "asr", "tts", "vad"):
         for name, entry in getattr(domain.providers, stage).items():
             assert entry.type == "mock", f"{stage}.{name} is not a mock provider"
-    assert domain.default_agent == "assistant"
+    # The smoke board bound by its MAC rather than reached through a
+    # default agent, which admits no unbound device since #612.
+    assert domain.devices[SMOKE_MAC].agents == ["assistant"]
+    assert domain.default_agent is None
 
 
 def test_the_slim_boot_config_names_no_local_engine(tmp_path: Path) -> None:
@@ -169,9 +173,9 @@ def test_a_seed_ignores_an_ambient_api_url(
         with served_api(DatabaseConfig(name=decoy)) as decoy_url:
             domain = seeded(script, tmp_path, {"VINGA_API_URL": decoy_url})
 
-        assert domain.default_agent == "assistant"
+        assert domain.devices[SMOKE_MAC].agents == ["assistant"]
         assert _domain(decoy).agents == {}
-        assert _domain(decoy).default_agent is None
+        assert _domain(decoy).devices == {}
 
 
 # What stands in for `vinga-server` on the interrupted seeding's PATH:
