@@ -1,6 +1,6 @@
 """The invite link: a short-lived, single-use token that binds a browser.
 
-`vinga info` prints `<origin>/talk/#<token>`. The token travels in the
+`vinga device invite` prints `<origin>/talk/#<token>`. The token travels in the
 URL's fragment, which a browser sends to no server and puts in no
 `Referer`, so no proxy or access log in front of this server can record
 it; the page at `/talk/` reads it, clears it from the address bar and
