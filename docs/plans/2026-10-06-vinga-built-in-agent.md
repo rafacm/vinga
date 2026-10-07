@@ -691,11 +691,20 @@ which M3 verifies.
 `displaced | unprovided` and, for `unprovided`, `stages` from the
 closed set of provider stages; it quotes no operator text. It fires
 once per installed world where `Generations` takes its first
-generation and where `_install` installs a later one. The API read that
-`vinga info` tallies carries the built-in's status, computed
-server-side by `builtin_status`, so the client restates no rule; `info`
-prints the default as `vinga (built in)` when unset, and the status
-when it is not `served`.
+generation and where `_install` installs a later one. `vinga info`
+reads the status live: `GET /api/runtime/info` composes everything
+else once at startup, as a fact of the process (`config/api.py`,
+`read_runtime_info`), so the built-in's status is the one field that
+route computes per request, from the installed generation
+(`comp.generations.current().config`, through `builtin_status`), and
+the response model says which of its fields are live. That keeps one
+route for `info` rather than a second read the client must combine, and
+the client restates no rule; `info` prints the default as
+`vinga (built in)` when unset, and the status when it is not `served`.
+M3 tests it across applies on one running server: `served`, then a
+stored `agents.vinga` and an apply make `info` answer `displaced`,
+then a rename and an apply `served` again, and clearing the providers
+`unprovided`.
 
 **D7. `default-agent clear` means vinga.** The row is deleted as today;
 an unset default and `default-agent set vinga` mean the same thing, and
@@ -1062,6 +1071,13 @@ Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.1, re
    refused whole.
 
 5. **P2: `vinga info` needs a live status source that the plan does not name.** Evidence: D6 (`docs/plans/2026-10-06-vinga-built-in-agent.md:655`) promises status after every apply. The existing runtime info response (`vinga-server/src/vinga_server/config/api.py:1721`) is composed once at startup from process and file settings. The plan should specify a read against the installed generation for built-in status and test that `vinga info` changes after an apply makes vinga served, displaced or unprovided.
+
+   *Resolution:* accepted. D6 names the source: the built-in's status
+   is the one field of `GET /api/runtime/info` computed per request,
+   from the installed generation through `builtin_status`, with the
+   rest of the response still composed at startup; M3 tests `info`
+   across applies through `served`, `displaced`, `served` and
+   `unprovided`.
 
 6. **P2: The lookup-query no-leak assertion omits an authorized content channel.** Evidence: the test plan (`docs/plans/2026-10-06-vinga-built-in-agent.md:737`) says a query may appear only in the conversation record. The pipeline (`vinga-server/src/vinga_server/runtime/pipeline.py:793`) also stages tool arguments for a telemetry span when LLM input export is enabled; the event catalog (`vinga-server/src/vinga_server/events/catalog.py:4178`) documents that content field. The plan should classify that opt-in span as an authorized content surface and test both export-off and export-on behavior, while keeping the query out of ordinary logs and event fields.
 
