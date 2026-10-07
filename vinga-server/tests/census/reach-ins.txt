@@ -86,6 +86,7 @@ tests/unit/test_config_cli_grammar.py  _click  2
 tests/unit/test_config_cli_grammar.py  _parsed  2
 tests/unit/test_config_cli_grammar.py  _usage_problem  1
 tests/unit/test_config_cli_info.py  _call  1
+tests/unit/test_config_cli_invite.py  _call  1
 tests/unit/test_config_cli_rendering.py  _acknowledged  5
 tests/unit/test_config_cli_rendering.py  _act  7
 tests/unit/test_config_cli_rendering.py  _apply_listing  3
@@ -98,7 +99,6 @@ tests/unit/test_config_cli_transport.py  _NOTHING  2
 tests/unit/test_config_cli_transport.py  _answer  1
 tests/unit/test_config_cli_transport.py  _permitted  5
 tests/unit/test_config_cli_transport.py  _sent  2
-tests/unit/test_config_cli_try_link.py  _call  1
 tests/unit/test_config_cli_untransportable.py  _act  1
 tests/unit/test_config_reload.py  _apply_listing  2
 tests/unit/test_config_reload.py  _filler  3
