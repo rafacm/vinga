@@ -93,9 +93,11 @@ def browsers() -> dict[str, list[str]]:
 
 @contextmanager
 def deployment(
-    default_agent: str | None = "assistant", agents: tuple[str, ...] = ("assistant",)
+    default_agent: str | None = "assistant",
+    agents: tuple[str, ...] = ("assistant",),
+    agent_defaults: dict[str, str] | None = None,
 ) -> Iterator[tuple[object, TestClient]]:
-    config = booted(agents=agents, default_agent=default_agent)
+    config = booted(agents=agents, default_agent=default_agent, agent_defaults=agent_defaults)
     with entered_app(config, from_store=True) as entered:
         yield entered
 
@@ -714,3 +716,16 @@ def test_a_link_that_was_never_live_logs_nothing(caplog: pytest.LogCaptureFixtur
         assert asyncio.run(redeem(Invites(), "A" * 43, store)) is None
 
     assert warnings_of(caplog) == []
+
+
+def test_an_invite_naming_vinga_binds_the_browser_to_the_built_in_agent() -> None:
+    """Review round 1, finding 2: the built-in agent has no stored row,
+    and an invite naming it is still an invite naming an agent this
+    deployment has, so it is issued while vinga is served and redeemed
+    onto it."""
+    served = dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
+    with deployment(agent_defaults=served) as (_, client):
+        answer = redeemed(client, token_of(client, [BUILTIN_AGENT]))
+
+        assert answer.status_code == 200, answer.text
+        assert list(browsers().values()) == [[BUILTIN_AGENT]]
