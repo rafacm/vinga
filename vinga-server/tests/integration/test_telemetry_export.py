@@ -179,6 +179,8 @@ async def _exporting_server(endpoint: str, monkeypatch: pytest.MonkeyPatch):
     config = Config(
         providers=MOCK_PROVIDERS,
         agents={"assistant": MOCK_AGENT},
+        # Bound by name: an unbound device only pairs (#612).
+        devices={DEVICE_MAC: ["assistant"]},
         default_agent="assistant",
         server={"telemetry": {"enabled": True}},
     )

@@ -35,15 +35,18 @@ MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", 
 }
 MOCK_AGENT = dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
 
-CONFIG = Config(
-    providers=MOCK_PROVIDERS,
-    agents={"assistant": MOCK_AGENT},
-    default_agent="assistant",
-)
-
 BROWSER_MAC = "02:41:9c:7d:3e:58"
 BROWSER_CLIENT = "3d9e1f5a-6b2c-5d8e-9f1a-0c4b6d8e2f7a"
 BOARD_MAC = "aa:bb:cc:dd:ee:02"
+
+# Both devices bound by name, the browser as a redeemed try link binds
+# it: an unbound device only pairs (#612).
+CONFIG = Config(
+    providers=MOCK_PROVIDERS,
+    agents={"assistant": MOCK_AGENT},
+    devices={BROWSER_MAC: ["assistant"], BOARD_MAC: ["assistant"]},
+    default_agent="assistant",
+)
 BOARD_CLIENT = "8c4e2a6f-1d3b-4f5a-9e7c-0b2d4f6a8c1e"
 
 HELLO = {

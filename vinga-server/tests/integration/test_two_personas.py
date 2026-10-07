@@ -8,8 +8,9 @@ for both halves of its persona: the reply text quotes that agent's own
 prompt (the mock LLM speaks back the system prompt it was handed), and
 the received audio's dominant frequency is that agent's own mock voice.
 
-A third device, bound to nothing, gets `default_agent`; against a
-config with no agents at all, a device is turned away with 1008.
+A third device, bound to nothing, is turned away with 1008, whether
+the config has no agents at all or has a `default_agent` set, which
+admits no unbound device since #612.
 """
 
 import asyncio
@@ -78,18 +79,21 @@ async def test_two_devices_get_two_personas_from_one_server(server_port: int) ->
     assert abs(dominant_hz(tutor_audio) - TUTOR_TONE) < 20
 
 
-async def test_an_unbound_device_gets_the_default_agent(server_port: int) -> None:
-    events, audio = await converse(server_port, UNBOUND_MAC)
-    assert spoken(events) == "TUTOR explains rain."
-    assert abs(dominant_hz(audio) - TUTOR_TONE) < 20
-
-
-async def test_a_device_with_no_agent_at_all_is_turned_away() -> None:
-    # No agents and no default_agent: the device proves who it is at the
-    # handshake, so the upgrade is accepted (it gets a reason rather than
-    # a bare handshake failure) and then closed with the policy code.
+@pytest.mark.parametrize(
+    "config",
+    [
+        pytest.param(Config(), id="no agents at all"),
+        # The case that used to get the default agent, the tutor here: an
+        # unbound device only pairs since #612, so a default agent set on
+        # the two-persona server turns it away like any device with none.
+        pytest.param(two_persona_config(), id="a default agent set"),
+    ],
+)
+async def test_a_device_with_no_agent_is_turned_away(config: Config) -> None:
+    # The device proves who it is at the handshake, so the upgrade is
+    # accepted (it gets a reason rather than a bare handshake failure)
+    # and then closed with the policy code.
     client_id = "6f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"
-    config = Config()
     auth = build_device_auth(config)
     assert auth is not None
     async with running(config) as port:

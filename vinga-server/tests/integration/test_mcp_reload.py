@@ -24,10 +24,13 @@ from xiaozhi_sdk import XiaoZhiWebsocket
 from tests.integration.conftest import FRAME_BYTES, SAMPLE_RATE, mock_voice, spoken
 from tests.support.notices import RELOAD, boundaries
 from tests.support.problems import refused as refusal_body
+from tests.support.stores import dangling_default_agent
 from tests.support.tools_mcp import entry_data
 from tests.support.wire import speech_pcm
 from vinga_server.config import Config
-from vinga_server.config.models import API_MOUNT_PATH
+from vinga_server.config.models import API_MOUNT_PATH, DatabaseConfig
+from vinga_server.config.store import ConfigStore
+from vinga_server.db import open_database
 
 DEVICE_MAC = "aa:bb:cc:dd:ee:31"
 
@@ -189,14 +192,15 @@ async def test_a_refused_reload_leaves_the_running_servers_alone(
     lose: a reload the stored configuration refuses changes nothing, and
     the conversation that was using an MCP server goes on using it.
 
-    Provoked the way an operator would provoke it by accident, and by
-    the one way this API leaves open. Every write route refuses a
-    fragment that would leave a reference dangling, and every delete
-    refuses while something still names its subject, so what is left is
-    the rule that is checked when a configuration is composed and by no
-    write: a deployment with agents has to be reachable. Unbinding the
-    board and then clearing the default agent is two live, legal writes
-    that between them leave a snapshot no boot would accept.
+    Provoked underneath the API, because no route leaves such a state
+    any more. Every write route refuses a fragment that would leave a
+    reference dangling, and every delete refuses while something still
+    names its subject; the one rule a composition checked and no write
+    did, that a deployment with agents had to be reachable, went at #612
+    (unbinding the board and clearing the default agent was the two-write
+    route to it here). So the default agent is written straight into the
+    database naming no agent, which is what another build or a hand edit
+    leaves, and the reload meets it.
     """
     granted = one_agent(
         mcp_servers={ENTRY: entry_data()},
@@ -213,8 +217,11 @@ async def test_a_refused_reload_leaves_the_running_servers_alone(
             assert before[ENTRY]["state"] == "connected"
             assert TOOL in before[ENTRY]["tools"]
 
-            assert (await control.delete(f"/devices/{DEVICE_MAC}")).status_code == 200
-            assert (await control.delete("/default-agent")).status_code == 200
+            engine = open_database(DatabaseConfig())
+            try:
+                dangling_default_agent(ConfigStore(engine))
+            finally:
+                engine.dispose()
 
             refused = await control.post("/runtime/config/reload")
 

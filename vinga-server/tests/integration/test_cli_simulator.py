@@ -47,10 +47,9 @@ from vinga_server.simulator import board, conversation, utterance
 # match by accident.
 SECRET = "sk-simlane-8d2c47-never-a-real-credential"
 
-# The agent the claim binds this board to. Named rather than default:
-# `default_agent` is deliberately unset, because a board covered by one
-# is answered as a configured device and mints no code at all, and a code
-# is what the whole ceremony hangs off.
+# The agent the claim binds this board to, named rather than left to a
+# default agent, which this deployment does not set: the claim is what
+# this lane is about, and naming the agent is its plain form.
 AGENT = "assistant"
 
 # What the mock providers answer, so the assertions are about words this
@@ -59,14 +58,10 @@ HEARD = "hello from a simulated board"
 
 REPLY = f"You said {HEARD}."
 
-# Some other board, bound to the agent so the configuration is valid
-# without a default agent.
-#
-# `default_agent` is what a validator would otherwise ask for here, and
-# setting it would answer the simulated board as a configured device and
-# mint no code at all, which would take the ceremony's first step away.
-# A binding to a MAC nothing in this file uses satisfies the rule and
-# leaves the board this lane is about unclaimed.
+# Some other board, bound to the agent, which leaves the board this lane
+# is about unclaimed. It satisfied the boot's completeness rule until
+# #612 removed that rule; it stays as the ordinary shape of a deployment
+# that already has one board.
 SOMEBODY_ELSE = "aa:bb:cc:dd:ee:99"
 
 
@@ -92,16 +87,20 @@ def deployment(**overrides: object) -> Config:
 
 def open_deployment() -> Config:
     """The deployment #369 was reported from: device authentication off
-    for a trial on a trusted network, and a default agent covering every
-    board that arrives.
+    for a trial on a trusted network, and the board already bound.
 
     The two together are what makes the reply ambiguous on the wire. The
-    default agent means this board resolves to something to talk to, so
-    it is admitted and is offered no code; the auth setting means there
-    is no credential to hand it, so the token beside that admission is
-    the same empty string a board nothing resolves is turned away with.
+    binding means this board resolves to something to talk to, so it is
+    admitted and is offered no code; the auth setting means there is no
+    credential to hand it, so the token beside that admission is the
+    same empty string a board nothing resolves is turned away with. (The
+    report's deployment admitted the board through a default agent,
+    which admits nothing since #612; a binding is the same admission.)
     """
-    return deployment(default_agent=AGENT, server={"auth": {"enabled": False}})
+    return deployment(
+        devices={SOMEBODY_ELSE: [AGENT], board.DEFAULT_MAC: [AGENT]},
+        server={"auth": {"enabled": False}},
+    )
 
 
 @pytest.fixture
@@ -179,7 +178,7 @@ def test_a_deployment_that_issues_no_tokens_holds_the_whole_conversation(
 ) -> None:
     """The issue's own reproduction, as a test.
 
-    Device authentication off, a default agent set, and `simulator run`
+    Device authentication off, the board bound, and `simulator run`
     with no `--claim` at all: one check-in, admitted with an empty token
     because there is no credential to be had, and a whole conversation
     on it. Before #369 this deployment answered a reply byte for byte
