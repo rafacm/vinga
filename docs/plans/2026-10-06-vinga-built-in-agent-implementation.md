@@ -760,3 +760,39 @@ image build changed, and neither was run), the wheel-level drift checks
 CI runs against an installed wheel beyond the wheel lane's own case,
 and any real browser outside the lane: no person opened an invite link
 against this build.
+
+### PR review round
+
+Reviewed 2026-10-07 by openai/gpt-6-sol, thinking high via codex CLI 0.160.1, read-only sandbox, at commit 5fa7d8d6 ([the round](https://github.com/rafacm/vinga/pull/633#issuecomment-6035335387)). The fixes are by anthropic/claude-opus-5-5, thinking high, M1b's own implementer.
+
+1. **P1: a failed browser identity mint could escape as a traceback.**
+   `mint()` ran outside `redeem`'s containment, and the
+   `browser-identity` route called it bare, with no sanitized boundary
+   in the parent app. *Resolution:* `redeem` mints inside the arm that
+   already contained store failures (the link is spent, nothing bound,
+   one `SPENT_UNENROLLED` warning naming only the class), and the route
+   catches the same way, logs a `MINT_FAILED` warning after the handler
+   and answers 503 with the fixed `IDENTITY_UNAVAILABLE`.
+   `tests/unit/test_mint_failure.py` injects a failing generator whose
+   message carries a sentinel, on `redeem` and both routes; all three
+   failed first with the sentinel in the escaping chain (`5ebf9b27`).
+2. **P2: the browser lane kept an invite token in an exception chain.**
+   *Resolution:* `lane.opened` makes the navigation, leaves the handler,
+   then raises its fixed error with nothing chained; a plain test proves
+   the chain carries no token and failed against the old in-handler
+   raise (`e9d980b5`).
+3. **P2: three texts still described the old issuer.** *Resolution:*
+   the onboarding-off refusal says invite link, the invites route
+   description names `vinga device invite` as the client supplying the
+   origin, and the coding-agent guide says `info` has one credential to
+   filter; the OpenAPI reference regenerated and an untruncated grep
+   found only intended matches (`6569ed0b`).
+
+Verification after the round: the unit lane (`-n auto --dist loadfile`)
+`8476 passed, 19 skipped in 1089.53s`; the browser lane `10 passed` on
+its second run. Its first run errored at setup on every case with a 401
+on the lane's own event-stream request, unchanged code passing on the
+rerun; another server on the host network answering the lane's port is
+the likely cause (two implementers were running lanes at once), not
+confirmed. Generators without diff, ruff, link, Run and Use page and
+fragment checks clean.
