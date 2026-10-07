@@ -124,12 +124,18 @@ def config_with_agent(
             "assistant": dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
             | (agent or {})
         },
+        # The device under test bound by name, beside the default agent
+        # rather than through it: a default agent admits no device by
+        # itself (#612), so a suite that talks through `DEVICE_MAC` has
+        # to have bound it, the way an operator's claim would.
+        devices={DEVICE_MAC: ["assistant"]},
         default_agent="assistant",
     )
 
 
 def base_config(**overrides: object) -> Config:
-    """Two agents that differ in prompt and voice, on mock providers."""
+    """Two agents that differ in prompt and voice, on mock providers,
+    with the device under test bound to the first of them."""
     return Config(
         **(
             {
@@ -147,7 +153,13 @@ def base_config(**overrides: object) -> Config:
                     "poet": {"prompt": "POET", "tts": "tenor"},
                     "tutor": {"prompt": "TUTOR", "tts": "alto"},
                 },
-                "devices": {POET_MAC: ["poet"], BOTH_MAC: ["poet", "tutor"]},
+                # `DEVICE_MAC` bound to the default agent by name, for the
+                # reason `config_with_agent` gives.
+                "devices": {
+                    DEVICE_MAC: ["poet"],
+                    POET_MAC: ["poet"],
+                    BOTH_MAC: ["poet", "tutor"],
+                },
                 "default_agent": "poet",
             }
             | overrides
