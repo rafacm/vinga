@@ -16,6 +16,8 @@ maps to a guide.
 - `library` reads the copy once per process and cuts it into sections.
 - `boards` names the board guides and answers a board type with its
   guide's facts, or with fixed text when no guide is named for it.
+- `persona` is the text the built-in agent's prompt opens with, which
+  for now is the concept summary, cut from the packaged concepts page.
 
 This `__init__` is the interface. Submodules import their siblings
 directly and take nothing from here, so only this file aggregates.
@@ -28,6 +30,7 @@ from vinga_server.knowledge.boards import (
     board_guides,
 )
 from vinga_server.knowledge.library import Section, pages, section, sections
+from vinga_server.knowledge.persona import persona
 
 __all__ = [
     "NOT_BOARD_GUIDES",
@@ -36,6 +39,7 @@ __all__ = [
     "board_facts",
     "board_guides",
     "pages",
+    "persona",
     "section",
     "sections",
 ]
