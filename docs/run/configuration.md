@@ -40,7 +40,8 @@ Postgres database `server.database` names, written with the `vinga`
 CLI: named `providers` per stage (`llm`, `asr`, `tts`, `vad`), named
 `mcp_servers`, named `prompt_fragments` holding the blocks of prompt
 text agents share, `agent_defaults` holding what every agent uses
-unless it says otherwise, `agents` combining a prompt with provider,
+unless it says otherwise, `builtin_agent` holding what vinga, the
+built-in agent, uses instead, `agents` combining a prompt with provider,
 fragment and MCP references, `devices` holding a record per board by
 its MAC address (its name, where it stands, and the agents it is bound
 to), and `default_agent`, the agent a newly claimed board starts with.
@@ -195,6 +196,79 @@ as environment variables. The domain half has no environment layer: a
 the file, refuses the boot and names the command that writes it now,
 because a configuration that quietly stopped applying is worse than one
 that will not start.
+
+## Overriding vinga, the built-in agent
+
+Every deployment has an agent named vinga that nobody stored: the
+server composes it from the build it ships in, a persona of its own
+followed by the summary at the top of
+[the concepts page](../concepts.md#the-model-in-one-paragraph). It
+answers about the device it is speaking through and about vinga
+itself, naming the command that does something rather than running
+it, and hands over to the other agents a device reaches. A device
+bound to vinga reaches it like any other agent.
+
+It inherits `agent_defaults` like any agent, and it is served whenever
+every provider stage (`llm`, `asr`, `tts`, `vad`) resolves through its
+own entry or through `agent_defaults`. A stage that resolves nowhere
+leaves it unserved rather than refusing the boot, since a deployment
+boots empty and is configured afterwards; `vinga info` then says which
+stages are missing, and so does the `builtin_agent_not_served` event
+at the boot and at every apply.
+
+What an operator chooses for it is its `builtin_agent` entry, written
+like `agent_defaults`, one entry for the deployment and replaced whole:
+
+```bash
+vinga builtin-agent show
+vinga builtin-agent set -f examples/builtin-agent.yaml
+vinga apply
+```
+
+The entry overrides the stages (`llm`, `asr`, `tts`, `vad`), so a
+different voice is a `tts` naming another provider entry; the
+`filler`, `fallback` and `memory` sections; and `prompt_includes`, the
+shared fragments its prompt carries after its persona, which is how
+its reply language is set: a fragment reading "Always reply in
+Swedish." listed there. An empty list opts vinga out of the fragments
+`agent_defaults` gives every agent. The example fragment is
+[`examples/builtin-agent.yaml`](../../vinga-server/examples/builtin-agent.yaml).
+
+What the entry refuses:
+
+- **A prompt or MCP grants.** Neither is a field of it. The persona is
+  the build's, and vinga carries no MCP tools at all, not even the
+  ones `agent_defaults.mcp` grants every other agent.
+- **A reference that does not resolve**, under `builtin_agent.<field>`,
+  whether or not vinga is served at the time, exactly as an agent's
+  own references are refused.
+- **An agent named vinga.** Creating one, in a write, in an applied
+  document or by renaming another agent to the name, is refused.
+
+**An agent stored under the name vinga before the built-in agent
+existed displaces it.** That agent is the operator's: it goes on being
+served exactly as before, its memory and its threads with it, and the
+built-in agent is not served. `vinga info` says so, and so does the
+event. The remedy keeps everything that agent had:
+
+```bash
+vinga agent rename vinga old-vinga
+vinga apply
+```
+
+The rename moves its device bindings, the default agent if it was one,
+its remembered facts and its conversation threads in one transaction,
+and the built-in agent appears at the apply. Deleting that agent
+instead leaves its remembered facts unread, since vinga keeps no
+memory of its own, and its threads findable by vinga only on the
+device each was held on.
+
+**What vinga remembers, and the threads it can resume, are its
+device's.** It writes and reads the memory every agent bound to that
+device shares, never an agent memory of its own, and its search for a
+conversation to pick up again finds only the threads held on the
+device it is talking through. What it is told on one device is not
+recalled on another.
 
 ## An edit changes nothing until it is applied
 

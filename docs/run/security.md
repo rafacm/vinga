@@ -300,6 +300,12 @@ any declared boundary every MCP server an agent references must carry
 its own `reach`, most often `reach: network`, asserting that whatever
 its command or URL reaches stays on your own network.
 
+vinga, the built-in agent, references no MCP server at all, by
+construction: its `builtin_agent` entry has no `mcp` field to write a
+grant into, and it does not inherit `agent_defaults.mcp` either. So a
+device that reaches vinga reaches no MCP tool through it, whatever the
+defaults grant every other agent.
+
 The telemetry section carries one of its own, and it is your assertion
 rather than anything this server checks. `server.telemetry.reach` says
 how far this section's destinations lie, and there are three of them:

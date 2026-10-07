@@ -584,6 +584,17 @@ Silero VAD. Everything downstream sees only what the VAD passes, so
 "the assistant never heard me" begins here.
 More: [Silero VAD](https://github.com/snakers4/silero-vad).
 
+### vinga (the built-in agent)
+
+The agent every deployment has without anyone storing it: composed by
+the server from the build it ships in, with a persona of its own, it
+answers about the device it speaks through and about vinga, names the
+commands that do things rather than running them, and hands over to
+the device's other agents. Its `builtin_agent` entry chooses its
+providers, voice and shared fragments; it has no prompt and no MCP
+tools to configure. Its memory and the threads it can resume are its
+device's. See [the concepts page](concepts.md#agent).
+
 ### Wake word
 
 An always-on, on-device trigger phrase that opens a
