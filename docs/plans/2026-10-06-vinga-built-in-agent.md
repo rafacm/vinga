@@ -1158,3 +1158,51 @@ Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.1, re
    Standing lenses).
 
 **Verdict: not ready.** The lookup decision is unmeasured, and the stated board-guide test cannot pass as written.
+
+## Plan review round 2
+
+Reviewed 2026-10-07 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.1, read-only sandbox, runtime 7m18s, at commit 7e7caa5d, plan blob edb9f179.
+
+1. **P1: The plan overrides the issue’s build-time packaging decision.**
+
+   Evidence: plan, Decisions 5 (`docs/plans/2026-10-06-vinga-built-in-agent.md:153`) explicitly replaces copying pages into the image at build time with a committed in-package copy. The issue settles build-time copying, and the review brief says its numbered decisions are not open for revision.
+
+   Plan should say: retain build-time derivation from the authoritative docs, including a wheel and image build path that carries the pages, or first obtain an issue-level decision changing this requirement.
+
+2. **P1: M1 temporarily creates an enrollment path that violates invite-only browsers.**
+
+   Evidence: Q4 (`docs/plans/2026-10-06-vinga-built-in-agent.md:373`) removes both `try_identity` refusals and makes it always mint, while decision 13 (`docs/plans/2026-10-06-vinga-built-in-agent.md:190`) says only `vinga device invite` may issue browser admission. M1b, which replaces try links with invites, comes later. Today those refusals are the branches in browser/router.py (`vinga-server/src/vinga_server/browser/router.py:201`).
+
+   Plan should say: land the invite-only issuance and redemption path atomically with the pairing-rule change, or preserve a refusal until M1b is installed. A deployable M1 must not let a page mint a browser identity that can pair outside the invite command.
+
+3. **P1: The local-stack fallback contradicts the settled local-agent decision.**
+
+   Evidence: the issue requires the local preset’s 8B model and a lookup tool for knowledge beyond the prompt. The plan instead selects `gemma4:e4b` and says that, if its new gate fails, local vinga ships without lookup (Gate (`docs/plans/2026-10-06-vinga-built-in-agent.md:667`), fallback (`docs/plans/2026-10-06-vinga-built-in-agent.md:680`)). Its own restatement still says “the rest is a lookup tool” (decision 7 (`docs/plans/2026-10-06-vinga-built-in-agent.md:174`)).
+
+   Plan should say: keep the local preset on an 8B model and make M5 a ship gate for lookup reliability, or return to the issue for a decision changing the model-size and lookup requirements. It must not redefine the local baseline after the fact.
+
+4. **P2: The board-type sentinel test cannot pass against the existing event contract.**
+
+   Evidence: the test plan requires a credential-shaped board type to be absent from every event (Tests (`docs/plans/2026-10-06-vinga-built-in-agent.md:836`)). Existing OTA handling deliberately emits the bounded reported board in every `ota_check` event (ota/reply.py (`vinga-server/src/vinga_server/ota/reply.py:417`), ota/reply.py (`vinga-server/src/vinga_server/ota/reply.py:442`)), and also retains the submitted body in the DEBUG event (ota/reply.py (`vinga-server/src/vinga_server/ota/reply.py:517`)). The plan itself acknowledges `ota_check.board` as the source for a real-board measurement.
+
+   Plan should say: either change the existing OTA event policy to redact credential-shaped untrusted descriptors, with its own compatibility and documentation review, or narrow the M4 test to new prompt, session, log, and event surfaces while explicitly listing the pre-existing OTA content surfaces as authorized exceptions. The current wording makes the no-leak test false.
+
+5. **P2: `builtin_agent` is not fully specified as a domain section, so invalid overrides can evade write-time validation and pending-state reporting.**
+
+   Evidence: the plan adds a stored singleton but only names `models.py` and `store.py` in its M3 footprint (M3 (`docs/plans/2026-10-06-vinga-built-in-agent.md:1060`)). A domain section is coupled through `DOMAIN_KEYS` and `DomainSnapshot` (models.py (`vinga-server/src/vinga_server/config/models.py:4234`), models.py (`vinga-server/src/vinga_server/config/models.py:4338`)); `check_references` currently validates only defaults and stored agents (models.py (`vinga-server/src/vinga_server/config/models.py:4424`)); and `config/diff.py` requires every domain key in `APPLIES` (diff.py (`vinga-server/src/vinga_server/config/diff.py:77`)) but has no response field for this singleton.
+
+   Plan should say: enumerate registration in models, store loading, entity descriptors, views, document import/apply, API and CLI routes, diff response/OpenAPI, and reload status. It must also state that `builtin_agent`’s provider and fragment references are validated at write time under `builtin_agent.*`, even while the synthesized entry is absent because its stages are unprovided. Add tests for invalid references, export/import round trips, and a visible pending then applied override change.
+
+6. **P2: The M5 gate is not reproducible from the repository and its local-lane test does not enforce the claimed threshold.**
+
+   Evidence: the question set, harness, annotations, and raw runs are kept outside the repository (Gate (`docs/plans/2026-10-06-vinga-built-in-agent.md:597`)), yet M5 claims repeatability only through a local-lane replay (Tests (`docs/plans/2026-10-06-vinga-built-in-agent.md:882`)). The stated 70% correctness, 10% hallucination, retrieval, rephrasing, and watchdog criteria have no committed fixture or executable scorer.
+
+   Plan should say: commit the frozen prompts, expected facts, rephrased set, scoring rules, and threshold assertions as local-lane fixtures. Raw model output can remain uncommitted, but a future maintainer must be able to rerun and evaluate the gate without recovering session files.
+
+7. **P3: The “no index” rationale becomes false once vinga is shared by all devices.**
+
+   Evidence: the plan says filtering `conversations.device` needs no index because the scan already narrows by agent (Q5 (`docs/plans/2026-10-06-vinga-built-in-agent.md:400`)). The current search intentionally scans all threads for an agent (threads.py (`vinga-server/src/vinga_server/conversations/threads.py:712`)). For built-in `vinga`, that agent is precisely the deployment-wide population, so every device-scoped resume search can scan every device’s vinga thread.
+
+   Plan should say: measure the filtered query at a stated deployment size and either add a composite `(agent, device, last_active_at)` index migration or document a justified bound and regression benchmark. The present argument relies on the old agent-per-device cardinality.
+
+Verdict: **not ready.**
