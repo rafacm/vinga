@@ -8,11 +8,51 @@ as given and checks what is built on it.
 
 from __future__ import annotations
 
+import subprocess
+import sys
+import textwrap
+
 import pytest
 
 from tests.census.test_packaged_pages import sources
 from vinga_server import knowledge
 from vinga_server.knowledge.library import sections_of
+
+# What importing it costs
+
+
+def test_importing_the_package_loads_only_the_standard_library() -> None:
+    """The property that lets `config/models.py` reach this package
+    without breaking the configuration client's import-weight pin.
+
+    In a fresh interpreter, because this suite's own `sys.modules`
+    holds the whole server already; and with `-B`, for the reason
+    `tests/unit/test_onboarding_import_weight.py` gives.
+    """
+    source = textwrap.dedent(
+        """
+        import sys
+
+        before = set(sys.modules)
+        import vinga_server.knowledge
+
+        print("\\n".join(sorted(set(sys.modules) - before)))
+        """
+    )
+    finished = subprocess.run(
+        [sys.executable, "-B", "-c", source], capture_output=True, text=True, check=True
+    )
+
+    loaded = finished.stdout.split()
+    assert "vinga_server.knowledge" in loaded
+    assert [
+        name
+        for name in loaded
+        if name.split(".")[0] not in sys.stdlib_module_names
+        and name != "vinga_server"
+        and not name.startswith("vinga_server.knowledge")
+    ] == []
+
 
 # The reader
 
