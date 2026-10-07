@@ -1124,15 +1124,18 @@ def test_default_agent_must_be_defined() -> None:
         load_config_from_data({"default_agent": "ghost"})
 
 
-def test_agents_no_device_can_reach_are_rejected() -> None:
-    with pytest.raises(ConfigError, match="default_agent is required"):
-        load_config_from_data({"agents": {"assistant": {}}})
+def test_agents_no_device_can_reach_still_boot() -> None:
+    """A deployment awaiting its first claim, which the boot used to
+    refuse until #612: a default agent reaches no device, so requiring
+    one when nothing is bound bought nothing."""
+    config = load_config_from_data({"agents": {"assistant": {}}})
+
+    assert config.agents_for_device("aa:bb:cc:dd:ee:ff") == []
 
 
 def test_bound_devices_make_default_agent_optional() -> None:
-    """Omitting default_agent is how a deployment says "only these
-    devices": the devices map becomes the allowlist, and every unknown
-    MAC resolves to nothing."""
+    """The devices map is the allowlist, and every unknown MAC resolves
+    to nothing."""
     config = load_config_from_data(
         {
             "agents": {"assistant": {}},

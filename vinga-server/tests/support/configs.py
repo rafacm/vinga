@@ -37,11 +37,11 @@ DEVICE_MAC = "AA:BB:CC:DD:EE:FF"
 DEVICE_UUID = "6f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"
 
 
-# A board this deployment already onboarded, which is what makes a
-# configuration bootable while the device under test is unbound: the
-# completeness rule refuses a configuration with an agent that no device
-# and no default agent reaches. Onboarding a second board is therefore
-# the ordinary shape of an onboarding or binding test, not a contrivance.
+# A board this deployment already onboarded, beside the device under
+# test while that one is unbound, which is the ordinary shape of an
+# onboarding or binding test: a deployment with agents usually has a
+# board bound to one of them. Nothing requires it since #612 removed the
+# boot rule it used to satisfy.
 BOUND_MAC = "11:22:33:44:55:01"
 
 

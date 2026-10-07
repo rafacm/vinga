@@ -4238,9 +4238,11 @@ DOMAIN_KEYS: tuple[str, ...] = tuple(DOMAIN_DESCRIPTIONS)
 # which adds the file half and the boot-time whole-snapshot validator.
 # The repository validates a write against this class and never against
 # that one, which is why the two are related by inheritance rather than
-# by a second copy of these seven fields: `check_completeness` is a rule
-# about a runnable server, and running it at write time would refuse the
-# first `set agent` into an empty database.
+# by a second copy of these seven fields. There used to be a rule about a
+# runnable server here too, a default agent required when agents existed
+# and no device was bound; it went at #612, since a default agent reaches
+# no device and a deployment with agents and no devices is one awaiting
+# its first claim.
 #
 # The docstring below is output, and nothing checks it. `config schema`
 # prints this model's JSON Schema, where a pydantic model's docstring
@@ -4259,9 +4261,8 @@ DOMAIN_KEYS: tuple[str, ...] = tuple(DOMAIN_DESCRIPTIONS)
 # and then assigns `agent_defaults` and `default_agent` onto the
 # instance it got back, so a model validator would run before those two
 # rows are in place and judge a half-read snapshot that never existed.
-# The rules about a whole domain half are `check_references` and
-# `check_completeness` below, run by the store at write time and by
-# `Config` at boot.
+# The rule about a whole domain half is `check_references` below, run by
+# the store at write time and by `Config` at boot.
 class DomainConfig(BaseModel):
     """The domain half of a configuration, as the database holds it.
 
@@ -4462,36 +4463,6 @@ def check_references(snapshot: DomainSnapshot) -> list[str]:
     return problems
 
 
-def check_completeness(snapshot: DomainSnapshot) -> list[str]:
-    """The rules about a runnable server rather than about a valid
-    entity.
-
-    Boot only. Enforcing this at write time would deadlock the natural
-    creation order: the first agent cannot exist before default_agent
-    names it, and default_agent cannot name it before it exists. A
-    half-built configuration is a legitimate state of the database and
-    an illegitimate state to serve from.
-    """
-    problems: list[str] = []
-
-    # Omitting default_agent is how a deployment says "only these
-    # devices": every unknown MAC then resolves to no agent, is issued
-    # no token, and is turned away, so the devices map is the allowlist.
-    # Omitting it with nothing bound either is the case that cannot be
-    # meant, since no device could reach any agent.
-    if snapshot.agents and snapshot.default_agent is None and not snapshot.devices:
-        problems.append(
-            "default_agent is required when agents are defined and no device is "
-            "bound to one; set it to one of: "
-            # The names this deployment stored, through the door
-            # `defined` above sends the same list through and for the
-            # same reason.
-            + ", ".join(spoken_identity(name) for name in sorted(snapshot.agents))
-        )
-
-    return problems
-
-
 def domain_fields(snapshot: DomainSnapshot) -> dict[str, object]:
     """The six domain sections of a snapshot, by name.
 
@@ -4590,11 +4561,12 @@ class Config(DomainConfig):
 
     @model_validator(mode="after")
     def _check_domain(self) -> "Config":
-        """Boot validates the whole domain snapshot: the completeness
-        rules a runnable server needs and the references every write
-        already had to satisfy. Both halves in one message, in the order
-        they have always been reported."""
-        problems = check_completeness(self) + check_references(self)
+        """Boot validates the whole domain snapshot against the
+        references every write already had to satisfy, all of them in
+        one message, because a snapshot arriving from a store another
+        build wrote, or from rows written underneath the repository, is
+        not one this build's writes vouch for."""
+        problems = check_references(self)
         if problems:
             raise ValueError("\n".join(problems))
         return self

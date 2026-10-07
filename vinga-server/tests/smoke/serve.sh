@@ -8,10 +8,9 @@
 # seeded database, and the seeding has exercised the shipped artifact
 # including its API rather than a fixture.
 #
-# Starting on an empty domain half is a valid boot: the completeness
-# rules (every stage of every agent resolving, a default agent when
-# nothing is bound) are checked only when agents exist, so a fresh
-# database serves no agents and is otherwise a running server.
+# Starting on an empty domain half is a valid boot: the rule that every
+# stage of every agent resolves is checked only when agents exist, so a
+# fresh database serves no agents and is otherwise a running server.
 #
 # Sourced rather than copied into each script, because process lifecycle
 # is exactly where three near-identical copies drift apart.

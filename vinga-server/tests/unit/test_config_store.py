@@ -480,13 +480,12 @@ def test_a_grant_on_an_unknown_server_is_refused_at_the_write(store: ConfigStore
 
 
 def test_a_loaded_snapshot_has_no_unresolved_references(store: ConfigStore) -> None:
-    from vinga_server.config.models import check_completeness, check_references
+    from vinga_server.config.models import check_references
 
     _populate(store)
     domain = store.load().domain
 
     assert check_references(domain) == []
-    assert check_completeness(domain) == []
 
 
 def test_the_credential_reference_survives_beside_the_options(store: ConfigStore) -> None:

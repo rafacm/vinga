@@ -582,12 +582,14 @@ allowlist: a device with no binding is then turned away.
 vinga default-agent set <name>
 ```
 
-`vinga default-agent clear` unsets it, which is a configuration rather than a
-mistake: the devices map is then the allowlist.
+It names the agent a newly bound device starts with: a claim by activation
+code that names no agent (`vinga device pending claim <code>`) binds the board
+to it. It admits no device by itself: a device with no binding of its own
+reaches no agent and is offered a code, whether or not this is set, so the
+devices map is always the allowlist.
 
-It is required only when agents are defined and no device is bound to one, and
-that rule is checked at boot rather than at write time, so a deployment can be
-built up in the natural order without wedging.
+`vinga default-agent clear` unsets it, after which a claim has to name its
+agents. Nothing requires it to be set.
 
 ## The whole domain configuration
 
