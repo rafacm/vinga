@@ -37,8 +37,8 @@ curl -s http://192.168.1.10:8003/healthz
 ```
 
 `vinga info` prints the same revision in brackets on its `server:`
-line; run it with its two credentials filtered out, as the end of
-this section shows. Then decide where to read by what the revision looks like
+line; run it with its one credential, the onboarding URL, filtered
+out, as the end of this section shows. Then decide where to read by what the revision looks like
 ([Which build is running](upgrading.md#which-build-is-running) says
 where each form comes from):
 

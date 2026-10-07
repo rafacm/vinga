@@ -96,8 +96,8 @@ TOKEN_BYTES = 32
 # from the token the second one carries (`RefusalReason`).
 ONBOARDING_OFF = (
     "device onboarding is off (server.onboarding.enabled is false), so this server "
-    "serves no browser page and no short path for a browser to check in at, and a try "
-    "link would open nothing. Nothing was issued."
+    "serves no browser page and no short path for a browser to check in at, and an "
+    "invite link would open nothing. Nothing was issued."
 )
 
 NO_DEFAULT_AGENT = (

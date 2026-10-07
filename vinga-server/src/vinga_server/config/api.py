@@ -1818,8 +1818,8 @@ def _runtime(api: FastAPI) -> None:
         in a browser, which is what a microphone needs, and null
         otherwise: this server never names its listen address or a
         guess. A client that reached this API on a loopback address can
-        name that host's own origin instead, which is what `vinga info`
-        does.
+        name that host's own origin instead, which is what
+        `vinga device invite` does.
 
         The body is required, and `{}` is how to name no agent: a
         request that lost its body on the way would otherwise bind the
