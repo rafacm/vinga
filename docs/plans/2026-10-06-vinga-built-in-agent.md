@@ -248,6 +248,33 @@ half, `DomainConfig`.
   with `agent-defaults`' verbs. Its model, `BuiltinAgentConfig`, is
   `AgentConfig` without `prompt` and `mcp`, so the persona and the
   grants are not refused on it: they cannot be written at all.
+  "Mirrors `agent_defaults`" is an inventory, taken by
+  `git grep -c "agent_defaults\|agent-defaults\|AgentDefaults" -- '*.py'`
+  under `vinga-server/src` (15 files at `7e7caa5d`), and the new key is
+  registered at each of those homes, which M3's implementation doc lists
+  site by site:
+  - `db/schema.py` and domain migration `3005` (the one-row table);
+  - `config/models.py`: `DOMAIN_KEYS`, `DomainConfig`, `DomainSnapshot`,
+    and `check_references`, which validates `builtin_agent`'s provider
+    and fragment references at write time under `builtin_agent.*`
+    whether or not vinga is currently synthesized (an `unprovided` vinga
+    still refuses a misspelled provider in its override);
+  - `config/store.py` (read, set, staged in import and apply);
+  - `config/entities.py` and `config/cli/entities.py` (the descriptor and
+    the `vinga builtin-agent` noun);
+  - `config/views.py`, `config/responses.py` and `config/api.py` (the
+    read, the write route and their OpenAPI shapes);
+  - `config/diff.py` (`APPLIES`, and a response field of its own, so a
+    pending override is visible in `vinga diff` before `vinga apply`)
+    and `config/reload.py` (its status after an apply);
+  - `config/cli/deployment.py` (`list`, `show` and `export`) and
+    `config/docgen.py` (the generated reference).
+
+  `providers/world.py` needs nothing: it reads the synthesized
+  `config.agents`. M3 tests an invalid reference refused under
+  `builtin_agent.*`, an export and import round trip carrying the key,
+  and an override change visible as pending in `vinga diff` and then
+  applied.
   Overloading `agents.vinga` as both an operator's agent and the
   built-in's overrides was the first draft; it needed a field heuristic
   to tell a legacy row from an override, and a blank legacy row would
@@ -1247,6 +1274,13 @@ Reviewed 2026-10-07 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.1
    Evidence: the plan adds a stored singleton but only names `models.py` and `store.py` in its M3 footprint (M3 (`docs/plans/2026-10-06-vinga-built-in-agent.md:1060`)). A domain section is coupled through `DOMAIN_KEYS` and `DomainSnapshot` (models.py (`vinga-server/src/vinga_server/config/models.py:4234`), models.py (`vinga-server/src/vinga_server/config/models.py:4338`)); `check_references` currently validates only defaults and stored agents (models.py (`vinga-server/src/vinga_server/config/models.py:4424`)); and `config/diff.py` requires every domain key in `APPLIES` (diff.py (`vinga-server/src/vinga_server/config/diff.py:77`)) but has no response field for this singleton.
 
    Plan should say: enumerate registration in models, store loading, entity descriptors, views, document import/apply, API and CLI routes, diff response/OpenAPI, and reload status. It must also state that `builtin_agent`’s provider and fragment references are validated at write time under `builtin_agent.*`, even while the synthesized entry is absent because its stages are unprovided. Add tests for invalid references, export/import round trips, and a visible pending then applied override change.
+
+   *Resolution:* accepted. Q1 now carries the registration inventory, taken
+   by tooling (the 15 files that register `agent_defaults` at
+   `7e7caa5d`), with each home named, write-time validation of
+   `builtin_agent.*` references whether or not vinga is synthesized,
+   a `vinga diff` field so a pending override is visible, and the three
+   tests the finding asks for.
 
 6. **P2: The M5 gate is not reproducible from the repository and its local-lane test does not enforce the claimed threshold.**
 
