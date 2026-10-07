@@ -493,9 +493,9 @@ standard library (so `config/models.py` may reach it without breaking
   (D2).
 - `board_facts(board: str | None) -> str`: a guide's facts or the
   vague text (Q6, D3).
-- The lookup itself, per the gate: **<the winning shape, named by the
-  gate: either `search(query) -> Answer`, the top three sections, or
-  `topics() -> tuple[str, ...]` and `read(topic) -> Answer`>**. An
+- The lookup itself, per the gate: **`search(query) -> Answer`**, the top
+  three sections (shape A); the `topics()` and `read(topic)` shape
+  measured worse on every model and is dropped. An
   `Answer` is text bounded to a fixed character budget (D4).
 
 What its callers stop knowing: where the pages live and that they are
@@ -594,45 +594,99 @@ redemption M3 then extends.
 
 ## Gate: the lookup tool's shape
 
-**Status at commit:** running. The plan is committed and reviewed while
-it runs because only M5 (the tool's shape) and M7 (the presets' model)
-depend on it; the table, the winner and Q8's interface line are filled
-in an amendment commit before M5's implementer starts, and that
-amendment is reviewed with M5's PR. Rafael asked on 2026-10-06 for a
-more modern candidate than the two 8B models, so the gate also measures
-Google's Gemma 4 (released April 2026, native tool calling, Ollama's
-tool-call parsing fixed in 0.32.1; this runner is 0.35.1) at its edge 2B
-and 4B sizes, 12B where it fits, and `qwen3:4b` as a same-family
-smaller baseline.
+Measured on 2026-10-06 and 2026-10-07 on this machine (a Raspberry Pi 5,
+16 GB, CPU only, Ollama 0.35.1), before M5 is designed. The harness, the
+frozen question set, every raw run, the hand-check and the full write-up
+are kept outside the repository with the session's working files
+(`epic-615.local/612-gate/`, `RESULTS.md`); what the plan needs from
+them is here.
 
-Measured before the design was committed, on this machine (a Raspberry
-Pi 5, 16 GB, CPU only), against a fixed question set, with vinga's real
-prompt and real tool list (the device-only memory family, the
-conversation tools, `set_device_location`, `switch_agent`, and the
-lookup tool or tools). <Orchestrator: harness path, question set
-location, date, runner version.>
+- **Question set:** 32 questions, frozen before any model call
+  (sha256 `1442b569af5c90810eec945ab3d459a3337ec811030422fd110011d9d415e181`).
+  16 about the device (9 for the LCD-1.54 board, 4 for the browser, a
+  three-turn follow-up), 11 about the system, 2 device commands, 3 the
+  pages cannot answer. 15 need a lookup, 12 are answerable from the
+  prompt, 2 are device-tool calls, 3 should be declined. Each carries
+  the key facts a correct answer must contain, quoted from the pages
+  with their line.
+- **Prompt:** the design's: who vinga is, the LCD-1.54 board's facts
+  (D3), the concept summary (D2), the rule to look up rather than
+  guess, and one device tool (`self_audio_speaker_set_volume`).
+- **Scoring:** automatic, then every one of the 419 answers read in full
+  (177 automatic verdicts overridden, each with a note). Hallucination
+  is a per-answer flag: a confident claim the pages do not support.
+- **Stability:** `llama3.1:8b`, shape A, run twice: 0 of 32 answers
+  changed category (byte-identical at temperature 0 and a fixed seed;
+  determinism, not robustness to rephrasing).
 
-The question set covers each kind of answer: this device (asked on a
-known board and on an unknown one, where the right answer is the vague
-one), this system (what vinga is, what a binding is, which command
-binds a board), a device command (raise the volume), a handover ("let
-me talk to <agent>"), and two the pages cannot answer (where the right
-answer says so).
-
-| Model | Shape | Correct answers / N | Lookup called when needed / N | Confidently wrong / N | Median tool rounds | Median time to first spoken word | Prompt characters |
+| Model, shape | Correct | Hallucinated | Declined (of 3) | Looked up when needed (of 15) | Device command (of 2) | Median s per question | p90 s |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `qwen3:8b` (no thinking) | `search(query)`, top 3 | <fill> | <fill> | <fill> | <fill> | <fill> | <fill> |
-| `qwen3:8b` (no thinking) | `topics()` + `read(topic)` | <fill> | <fill> | <fill> | <fill> | <fill> | <fill> |
-| `llama3.1:8b` | `search(query)`, top 3 | <fill> | <fill> | <fill> | <fill> | <fill> | <fill> |
-| `llama3.1:8b` | `topics()` + `read(topic)` | <fill> | <fill> | <fill> | <fill> | <fill> | <fill> |
-| Gemma 4, edge 2B | both shapes | <fill> | <fill> | <fill> | <fill> | <fill> | <fill> |
-| Gemma 4, 4B | both shapes | <fill> | <fill> | <fill> | <fill> | <fill> | <fill> |
-| Gemma 4, 12B (if it fits) | both shapes | <fill> | <fill> | <fill> | <fill> | <fill> | <fill> |
-| `qwen3:4b` | both shapes | <fill> | <fill> | <fill> | <fill> | <fill> | <fill> |
+| Gemma 4 e4b, A `search` | 53% | 9% | 3 | 11 | 1 | 9 | 69 |
+| Gemma 4 e4b, B `topics`+`read` | 44% | 12% | 3 | 1 | 2 | 7 | 23 |
+| Gemma 4 e2b, A | 50% | 19% | 3 | 10 | 2 | 6 | 36 |
+| Gemma 4 e2b, B | 41% | 12% | 3 | 1 | 2 | 4 | 7 |
+| `llama3.1:8b`, A | 47% | 16% | 3 | 14 | 1 | 117 | 185 |
+| `llama3.1:8b`, B | 38% | 31% | 2 | 15 (11 guessed topics that do not exist) | 1 | 75 | 99 |
+| `qwen3:8b`, thinking off, A | 34% | 34% | 2 | 0 | 1 | 27 | 38 |
+| `qwen3:8b`, thinking off, B | 34% | 28% | 3 | 0 | 1 | 26 | 39 |
+| `qwen3:4b-instruct`, A | 41% | 31% | 3 | 0 | 2 | 15 | 23 |
+| `qwen3:4b-instruct`, B | 41% | 34% | 3 | 0 | 1 | 14 | 20 |
 
-**Winner:** <fill: shape and model, with the reason in one sentence>.
-**What it decides:** Q8's interface, M5's tool definition, Q9's preset
-model.
+Not complete, reported and left out of the comparison: Gemma 4 12B
+(6 of 32, about 100 s per answer without a lookup); `qwen3:4b` (7 of
+32, its thinking cannot be turned off and streams into the reply);
+`qwen3:8b` with thinking on, as the preset runs it (a six-question
+subset: three passed the 360 s cap, the first round alone 94 to 238 s).
+
+**What it shows.**
+
+- **Shape A beats B on every model.** In 192 shape-B runs no model
+  called `topics()` once: they guessed a title, met "no such topic",
+  and answered anyway.
+- **The prompt-carried board facts work.** On the 12 questions the
+  prompt answers, the small models got 11 or 12 right, in 2 to 15 s.
+  Device questions need no lookup.
+- **The preset's model fails the design.** `qwen3:8b` never looks up
+  with thinking off, and a lookup turn passes six minutes with it on.
+  `llama3.1:8b` looks up but takes a median 117 s per question. What
+  separates the models is tool behavior, not size.
+- **Retrieval is the next limit.** Measured with no model, term-overlap
+  search put the right section in its top three for 22 of the 39
+  queries the models actually sent (23 of 39 scoped to the current
+  board's pages).
+- **Latency after a lookup exceeds the watchdog on this hardware.** The
+  reply's first token after a lookup came at a median 23 s (e2b) or
+  44 s (e4b), against the 10 s first-token watchdog and the 30 s read
+  timeout.
+
+**Verdict: fails as written; passes only with the mitigations below,
+which M5 must demonstrate before it ships.**
+
+- **Shape: A**, `search(query)` returning the top three sections. B is
+  dropped. This fills Q8's interface line.
+- **Default local model: Gemma 4 e4b** (`gemma4:e4b`), replacing
+  `qwen3:8b` in the local preset and `llama3.1:8b` in Getting Started
+  (Q9, M7). It is the most accurate configuration measured and ten times
+  faster than either 8B model on this Pi. That is worth having whatever
+  M5 concludes, since the same preset runs every local agent.
+- **M5's own gate:** before the lookup tool ships, retrieval is improved
+  and measured with no model (target: the right section in the top three
+  for at least 32 of the 39 recorded queries), then Gemma 4 e4b, shape
+  A, is re-run on the frozen set and must reach **at least 70% correct
+  and at most 10% hallucinated**, with a second run on rephrased
+  questions. The latency after a lookup gets a holding phrase (vinga's
+  filler) and its own first-token allowance on the lookup round, and
+  the watchdog's interaction with it is tested.
+- **If M5's gate is not met,** vinga ships on the local stack without
+  the lookup tool. It answers from its prompt (the board's facts and the
+  concept summary, which the gate shows works) and says that deeper
+  questions need a larger model. The local-baseline item then covers
+  device questions and the summary, and says so. On a vendor model the
+  lookup is offered as designed.
+
+This is a decision about the local baseline, so it is recorded for
+Rafael on #612 with these numbers, and the baseline item in
+`product-promises.md` is written only in M5, from the gate M5 meets.
 
 ## Smaller decisions
 
@@ -1046,6 +1100,15 @@ Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.1, re
 
 
 1. **P1: The required lookup gate is still open.** Evidence: the plan’s gate (`docs/plans/2026-10-06-vinga-built-in-agent.md:564`) says the plan was committed while measurement was running; its results, winner, harness and Q8 interface are placeholders. Issue #612 requires measurement **before the design is committed**. The plan should record the fixed questions, harness, results and chosen tool interface, then review that completed design before M5 begins.
+
+   *Resolution:* accepted. The gate ran to completion on the models that
+   matter (Gate): 32 frozen questions, ten complete configurations, every
+   answer hand-checked. It chose shape A and Gemma 4 e4b, and it found
+   that the design fails as written on the preset's model. So the plan
+   now carries the measured verdict and M5's own pass bar (at least 70%
+   correct, at most 10% hallucinated on the frozen set and on a
+   rephrased run), with the fallback if that bar is not met. That
+   decision is recorded on #612 for Rafael.
 
 2. **P1: The board-guide rule selects pages that cannot pass its own test.** Evidence: Q6 (`docs/plans/2026-10-06-vinga-built-in-agent.md:415`) maps a reported type to any packaged device-page filename, while D3 (`docs/plans/2026-10-06-vinga-built-in-agent.md:626`) requires every mapped guide to have `## Controls`. Both flashing.md (`docs/devices/flashing.md:1`) and README.md (`docs/devices/README.md:1`) are in the proposed copy and lack that section. The plan should define which pages are board guides and test the matcher against that set, including these two negative cases.
 
