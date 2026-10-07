@@ -925,9 +925,20 @@ lane (`tests/local/`) for real models.
   asserts the browser is bound to `vinga` and is answered. M6: sessions
   reach `[assistant, vinga]`; the tool case is unaffected, since its
   scripted call names a device tool.
-- **The local lane (M5).** An opt-in case replays the gate's question
-  set against the winning shape on a real model, so the measurement can
-  be retaken by anyone with the hardware.
+- **The gate, reproducible from the repository (M5).** M5 commits the
+  gate's inputs as fixtures under `vinga-server/tests/local/lookup_gate/`:
+  the frozen 32-question set with its expected facts and their page
+  lines, the rephrased set M5's second run uses, the 39 queries the
+  models actually sent, and the scorer as a module whose categories
+  (correct, partial, hallucinated, tool-use error, honest decline) are
+  the gate's. Two tests read them: a unit test with no model asserts
+  retrieval puts the right section in the top three for at least 32 of
+  the 39 queries; and an opt-in local-lane case runs a real model over
+  both sets through the real tool and asserts the pass bar (at least
+  70% correct, at most 10% hallucinated, every device command a call).
+  Raw model output stays uncommitted; the hand-check step is replaced
+  by the scorer's rules, with any case it cannot decide reported for a
+  person rather than counted.
 - **Presets (M7).** An integration case imports each preset into a
   blank database, boots, and asserts the served agents are exactly
   `vinga`, no default row is stored, and a claimed device starts on
@@ -1287,6 +1298,12 @@ Reviewed 2026-10-07 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.1
    Evidence: the question set, harness, annotations, and raw runs are kept outside the repository (Gate (`docs/plans/2026-10-06-vinga-built-in-agent.md:597`)), yet M5 claims repeatability only through a local-lane replay (Tests (`docs/plans/2026-10-06-vinga-built-in-agent.md:882`)). The stated 70% correctness, 10% hallucination, retrieval, rephrasing, and watchdog criteria have no committed fixture or executable scorer.
 
    Plan should say: commit the frozen prompts, expected facts, rephrased set, scoring rules, and threshold assertions as local-lane fixtures. Raw model output can remain uncommitted, but a future maintainer must be able to rerun and evaluate the gate without recovering session files.
+
+   *Resolution:* accepted. M5 commits the frozen and rephrased question sets,
+   their expected facts, the recorded queries and the scorer as
+   fixtures, with a model-free unit test holding retrieval to its bar
+   and an opt-in local-lane case asserting the pass bar, so a later
+   maintainer reruns the gate from the repository (Tests).
 
 7. **P3: The “no index” rationale becomes false once vinga is shared by all devices.**
 
