@@ -1087,7 +1087,7 @@ through their generators.
 
 ## Milestones
 
-- [ ] **M1: an unbound device only pairs** (PR TBD). The resolution
+- [x] **[M1: an unbound device only pairs](2026-10-06-vinga-built-in-agent-implementation.md#m1-an-unbound-device-only-pairs)** (PR TBD). The resolution
   rule loses its default fallback in both homes, derived through
   `Config.bound_to`; the live read stops reading the default row (pin
   moved); the boot rule goes; the claim loses `ALREADY_COVERED` and
