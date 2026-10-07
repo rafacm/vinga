@@ -34,6 +34,7 @@ generated  vinga device
 generated  vinga device bind
 generated  vinga device clear-location
 generated  vinga device delete
+generated  vinga device invite
 generated  vinga device pending
 generated  vinga device pending claim
 generated  vinga device pending list
@@ -210,7 +211,11 @@ historical  vinga default-agent set
 historical  vinga default-agent set assistant
 historical  vinga device
 historical  vinga device bind
+historical  vinga device delete
 historical  vinga device invite
+historical  vinga device invite and stop info issuing
+historical  vinga device invite in both CLI lanes
+historical  vinga device invite where comments named info
 historical  vinga device pending
 historical  vinga device pending claim
 historical  vinga device pending frobnicate
@@ -368,7 +373,9 @@ respell  vinga conversation list
 respell  vinga conversation show
 respell  vinga default-agent set
 respell  vinga default-agent set assistant
+respell  vinga device
 respell  vinga device bind
+respell  vinga device invite
 respell  vinga device pending
 respell  vinga device pending claim
 respell  vinga device pending list
