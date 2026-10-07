@@ -53,10 +53,6 @@ from pydantic_settings import (
 # reach an entry declares are the same three values, and two enums
 # would be two structures required to agree. It is a leaf import, over
 # a module that weighs an enum and a dict (#493).
-# And the built-in agent's knowledge, for the persona `prompt_for_agent`
-# answers it with (#612): a package of the standard library alone, so
-# the configuration client's import weight does not move.
-from vinga_server import knowledge
 from vinga_server.boundary import Reach
 from vinga_server.runtime.prompt import Fragment
 from vinga_server.tools import names
@@ -4880,6 +4876,13 @@ class Config(DomainConfig):
         every other persona.
         """
         if self.is_builtin(agent):
+            # Imported here rather than at the top, though the package is
+            # the standard library alone: the configuration client
+            # imports this module and never assembles a prompt, and the
+            # import-weight pin it is held to names every module it
+            # loads (#143).
+            from vinga_server import knowledge
+
             return knowledge.persona()
         return self.agents[agent].prompt
 
