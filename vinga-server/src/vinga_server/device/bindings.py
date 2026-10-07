@@ -217,7 +217,7 @@ class RecordNow:
 
 
 class DeviceBindings:
-    """The live view of the `devices` rows and `default_agent`.
+    """The live view of the `devices` rows.
 
     One per app, built by the composition root and disposed with it.
     Every lookup is its own read transaction: there is no cache, because
@@ -230,7 +230,7 @@ class DeviceBindings:
 
     def __init__(self, generations: "Generations", engine: Engine | None) -> None:
         # The world this server is serving, asked rather than kept, and
-        # asked for one thing only: what the two rows say when the
+        # asked for one thing only: what the binding says when the
         # database cannot be read. A reload replaces the world while
         # this view goes on answering, so a configuration captured here
         # would become a fallback to a world that has been retired.
@@ -455,9 +455,8 @@ class DeviceBindings:
         return None, False
 
     def _stored(self, mac: str) -> tuple[LiveBinding | None, bool]:
-        """This device's binding and the default agent as the database
-        holds them, and whether the answer came from the database at
-        all.
+        """This device's binding as the database holds it, and whether
+        the answer came from the database at all.
 
         The reading itself belongs to the repository, which is where
         what a stored row means is decided; this is the caller that says
