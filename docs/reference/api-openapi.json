@@ -1607,7 +1607,7 @@
       },
       "delete": {
         "summary": "Remove Device",
-        "description": "Remove one device's binding, which with no default agent set\nmeans the device is refused at the handshake. Live, with no\nagent to be loaded or not: the device stops being served at its\nnext check-in, though a conversation already running is left to\nfinish.",
+        "description": "Remove one device's binding, which leaves the device unbound\nwhatever the default agent: it is refused at the handshake, and\nwith onboarding on it is offered a code to be claimed again.\nLive, with no agent to be loaded or not: the device stops being\nserved at its next check-in, though a conversation already\nrunning is left to finish.",
         "operationId": "remove_device_devices__mac__delete",
         "parameters": [
           {

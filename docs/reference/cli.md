@@ -1902,8 +1902,8 @@ Commands:
   bind            bind a device by the MAC you already know, to one or more
                   agents
   show            print devices.<mac>: that board's id, name, place and agents
-  delete          delete devices.<mac>, so the board it names reaches the
-                  default agent
+  delete          delete devices.<mac>, leaving the board it names unbound
+                  whatever the default agent
   rename          give one device another name, which is what an agent says out
                   loud about the board it is speaking through; refused if
                   another device answers to it
@@ -1968,7 +1968,8 @@ Options:
 ```
 Usage: vinga device delete [OPTIONS] {MAC}
 
-  delete devices.<mac>, so the board it names reaches the default agent
+  delete devices.<mac>, leaving the board it names unbound whatever the default
+  agent
 
 Arguments:
   MAC  [required]
