@@ -232,6 +232,23 @@ tools that holds conversations and accrues memory. Older issues say
 carried it through the server's own text are recorded in
 [the 2026-08-12 feature doc](features/2026-08-12-agent-not-persona.md).
 
+**vinga is the built-in agent.** Every deployment has an agent named
+vinga that no operator stored: the server composes it from the build
+it ships in, a persona of its own followed by
+[the paragraph above](#the-model-in-one-paragraph). It answers about
+the device it is speaking through and about vinga itself, naming the
+command that does something rather than running it, and hands over to
+the other agents the device reaches. An operator chooses its
+providers, its voice and the shared fragments its prompt carries
+(which is how its reply language is set) in its `builtin_agent` entry,
+and nothing else: it has no prompt to write and no MCP tools, by
+construction. It is served whenever every provider stage resolves,
+through that entry or through `agent_defaults`, and an agent stored
+under the name vinga before the built-in agent existed is served in
+its place until it is renamed.
+[Overriding vinga](run/configuration.md#overriding-vinga-the-built-in-agent)
+is the procedure.
+
 ## Binding
 
 A binding connects a device to the agents reachable from it, with one
@@ -535,6 +552,15 @@ and never learn. Nothing already stored is deleted by switching it off,
 and switching it back on is an agent that remembers what it remembered
 before.
 
+**vinga's memory is its device's.** The built-in agent keeps no agent
+scope: its `remember` files every fact under the device's scope, with
+no scope to choose, its `recall`, `update_memory`, `forget` and
+`restore_memory` reach the device's facts alone, and its prompt carries
+the device's notes and the conversation's ledger. What it is told on
+one device is never recalled on another. What it is told on a device,
+every agent bound to that device reads, and the other way round, which
+is what device scope is for.
+
 
 Agent memory is distinct from what an agent appears to know inside one
 conversation, and the three are easy to conflate. What the assistant
@@ -562,6 +588,9 @@ vinga-owned code and log their reason, per
 its own past threads, not another agent's. That preserves the focus
 story and the credential scoping that make per-agent MCP configuration
 worth having; it is a privacy boundary, not a convenience default.
+vinga's search is narrower still: its threads are the whole
+deployment's, so it finds and resumes only the threads begun on the
+device it is talking through.
 
 ## Who the user is
 
