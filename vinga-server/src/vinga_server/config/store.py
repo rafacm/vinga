@@ -58,12 +58,14 @@ from vinga_server.config.loader import (
     UnknownEntityError,
 )
 from vinga_server.config.models import (
+    BUILTIN_AGENT,
     DEVICE_LOCATION_BLANK,
     DOMAIN_KEYS,
     PROMPT_FRAGMENT_NAME_RULE,
     PROVIDER_STAGES,
     AgentConfig,
     AgentDefaults,
+    BuiltinAgentConfig,
     DeviceRecord,
     DomainConfig,
     FieldProblem,
@@ -542,6 +544,19 @@ AGENT_EXISTS = (
     "`vinga-server config agent delete <name>`"
 )
 
+# What a write that would create a stored agent named vinga is refused
+# with, whether it is a set, an applied document or a rename (#612).
+# Creating one would displace the built-in agent by a write; an agent of
+# that name stored before the built-in existed is an operator's and is
+# kept, so only a creation is refused, decided against the stored state
+# before the write. The one name in it is the constant, never what the
+# request sent.
+BUILTIN_NAME_RESERVED = (
+    f"agents: {BUILTIN_AGENT} is the built-in agent's name, so no agent may be created "
+    f"under it or renamed to it. Nothing was changed. Choose another name; the "
+    f"built-in agent's own providers, voice and fragments are its builtin_agent entry"
+)
+
 SAME_NAME = (
     "agents: the new name is the name the agent already has, so there is nothing to "
     "rename. Nothing was changed, and the name is not quoted back. Names are compared "
@@ -654,6 +669,11 @@ class ConfigStore:
         """The singleton, which always exists: an unwritten one is the
         empty entry rather than a missing entity."""
         return self._read(_AGENT_DEFAULTS)
+
+    def read_builtin_agent(self) -> Entity[BuiltinAgentConfig]:
+        """The built-in agent's overrides, the second singleton, which
+        always exists for the same reason the defaults do (#612)."""
+        return self._read(_BUILTIN_AGENT)
 
     def _read(self, descriptor: EntityDescriptor, *identity: str) -> Entity:
         """One entity of one kind, or the refusal its kind answers a
@@ -826,6 +846,12 @@ class ConfigStore:
         destination = _identifier(entity_location(_AGENT), new)
         if source == destination:
             raise ConfigError(SAME_NAME)
+        # A rename onto the built-in's name is a creation of a stored
+        # agent under it, and refused as one (#612). Decided on the name
+        # alone, before the lock: renaming an operator's displaced
+        # `vinga` away is the remedy, and that moves FROM the name.
+        if destination == BUILTIN_AGENT:
+            raise ConfigError(BUILTIN_NAME_RESERVED)
         # Outside the transaction and outside every chain lock, which is
         # the order both holders of this one keep. It covers the instant
         # between the commit and the publication below, and it is
@@ -869,6 +895,9 @@ class ConfigStore:
 
     def set_agent_defaults(self, fragment: object) -> None:
         self._write(_AGENT_DEFAULTS, (), fragment)
+
+    def set_builtin_agent(self, fragment: object) -> None:
+        self._write(_BUILTIN_AGENT, (), fragment)
 
     def _write(
         self, descriptor: EntityDescriptor, identity: tuple[str, ...], fragment: object
@@ -1728,7 +1757,7 @@ def _database_problem(exc: SQLAlchemyError) -> ConfigError:
 # own model dumped and validated back. There is no per-kind row mapping
 # any more. A row is its key columns, its `body`, and, where the kind can
 # hold one, its `secrets`; the pair below is the whole of the translation
-# for all five kinds, and a field added to a model needs nothing here.
+# for all six kinds, and a field added to a model needs nothing here.
 #
 # What a kind still says for itself is the two checks around its own
 # write, which are behavior rather than shape: they are written in terms
@@ -1774,10 +1803,18 @@ _MCP_SERVER = entities.descriptor("mcp-server")
 _PROMPT_FRAGMENT = entities.descriptor("prompt-fragment")
 _AGENT = entities.descriptor("agent")
 _AGENT_DEFAULTS = entities.descriptor("agent-defaults")
+_BUILTIN_AGENT = entities.descriptor("builtin-agent")
+
+# The two kinds that are one row rather than entries, read after the
+# rest by `_read_domain` and written under the one fixed key. Derived
+# from the registry for the reason `_KEYED_BY_NAME` below is.
+_SINGLETONS = tuple(
+    descriptor for descriptor in entities.ENTITIES if not descriptor.addressing
+)
 
 # The devices map is a setting rather than an entity, and its two
 # refusals read their sentence off its descriptor for the reason the
-# five kinds read theirs off theirs: one home per sentence.
+# six kinds read theirs off theirs: one home per sentence.
 _NO_SUCH_DEVICE = entities.setting("devices").missing
 
 # And the same absence met from the other address. A separate sentence
@@ -1796,7 +1833,7 @@ _UNRESOLVED_MAC = ""
 
 # The kinds a whole read walks one row per name. The provider is not one
 # of them, because its rows are grouped by stage and the group is
-# checked with a sentence of its own; neither is the singleton, which is
+# checked with a sentence of its own; neither is a singleton, which is
 # one row and is read after the rest.
 _KEYED_BY_NAME = tuple(
     descriptor for descriptor in entities.ENTITIES if descriptor.addressing == ("name",)
@@ -2180,6 +2217,12 @@ def _stage_entity(domain: DomainConfig, prepared: _Prepared) -> _Staged:
     """
     descriptor, identity = prepared.descriptor, prepared.identity
     stored = _entry(domain, descriptor, identity)
+    if descriptor is _AGENT and stored is None and identity[-1] == BUILTIN_AGENT:
+        # A creation of the built-in's name, refused against the state
+        # this transaction read (#612). An agent of that name already
+        # stored is an operator's, and keeping or editing it passes, so
+        # an unchanged export of a displaced deployment applies back.
+        raise ConfigError(BUILTIN_NAME_RESERVED)
     entry = prepared.entry
     if entry is None:
         kept = _keep(descriptor, prepared.location, prepared.data, prepared.marks, stored)
@@ -2643,6 +2686,8 @@ _SECTION_KINDS: dict[str, EntityDescriptor] = {
     descriptor.moved_key: descriptor for descriptor in entities.ENTITIES
 }
 
+_SINGLETON_SECTIONS = frozenset(descriptor.moved_key for descriptor in _SINGLETONS)
+
 
 def _sections(document: object) -> Mapping[str, object]:
     """One document's sections, refused if it is not one.
@@ -2697,11 +2742,11 @@ def _section_entries(
 ) -> list[tuple[str, str, object]]:
     """Every entry one section of a document names."""
     written = sections[section]
-    if section in ("default_agent", "agent_defaults"):
-        # The two sections that hold one thing rather than entries: the
-        # default agent is a name, and the singleton's section IS its
+    if section == "default_agent" or section in _SINGLETON_SECTIONS:
+        # The sections that hold one thing rather than entries: the
+        # default agent is a name, and a singleton's section IS its
         # body, so each is one entry however much is written in it and
-        # neither has an identity under the section.
+        # none has an identity under the section.
         return [(section, "", written)]
     if section == "providers":
         return _provider_entries(written)
@@ -2919,9 +2964,10 @@ def _read_domain(connection: Connection) -> DomainConfig:
     if domain is None:
         raise StoredConfigUnreadableError(problem)
 
-    defaults = connection.execute(select(_table(_AGENT_DEFAULTS))).first()
-    if defaults is not None:
-        domain.agent_defaults = _from_row(_AGENT_DEFAULTS, defaults)
+    for singleton in _SINGLETONS:
+        row = connection.execute(select(_table(singleton))).first()
+        if row is not None:
+            setattr(domain, singleton.moved_key, _from_row(singleton, row))
     default_agent = connection.execute(
         select(schema.domain_settings.c.value).where(
             schema.domain_settings.c.key == schema.DEFAULT_AGENT_KEY
@@ -3593,6 +3639,7 @@ _STORAGE: dict[str, _Storage] = {
     "prompt-fragment": _Storage(before_parse=_check_fragment_name),
     "agent": _Storage(),
     "agent-defaults": _Storage(),
+    "builtin-agent": _Storage(),
 }
 
 
