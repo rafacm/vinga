@@ -91,6 +91,7 @@ and skips rather than lies when the module was not run whole.
 import asyncio
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -650,6 +651,18 @@ def test_the_running_server_is_read_after_an_apply(run) -> None:
     assert said.startswith("vinga - Conversational AI. Sweded.\n")
     assert "server: " in said
     assert "configured: " in said
+
+
+def test_an_invite_link_is_printed_alone_from_the_installed_wheel(run) -> None:
+    """`device invite` from a bare install, after the apply above made
+    `sam` an agent the server serves (#612, Q11): one line on stdout, the
+    link, at the loopback origin this client reached the API on. The
+    token is not asserted on beyond its shape; it is a credential, and
+    the link expires unopened."""
+    said = answered(run("device", "invite", "--agent", "sam"), "device invite")
+
+    assert said.count("\n") == 1
+    assert re.fullmatch(r"https?://localhost(:\d+)?/talk/#[A-Za-z0-9_-]{43}\n", said), said
 
 
 def test_a_board_is_onboarded_by_the_code_on_its_screen(run, live: Live) -> None:

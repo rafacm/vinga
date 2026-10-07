@@ -59,6 +59,7 @@ import itertools
 import json
 import logging
 import os
+import re
 import shlex
 import socket
 import subprocess
@@ -71,6 +72,7 @@ from collections.abc import Iterator, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import NamedTuple
+from urllib.parse import urlsplit
 
 import pytest
 import yaml
@@ -89,7 +91,7 @@ from tests.support.leaks import chain
 from tests.support.stores import dangling_default_agent
 from vinga_server.build_info import revision
 from vinga_server.config import ConfigError, cli, docgen, entities, server_reference
-from vinga_server.config.cli import deployment, grammar, input, local, output, reach
+from vinga_server.config.cli import deployment, devices, grammar, input, local, output, reach
 from vinga_server.config.cli.grammar import installed_version
 from vinga_server.config.loader import CONFIG_FROM_FLAG, CONFIG_NOT_FOUND
 from vinga_server.config.models import (
@@ -1174,6 +1176,26 @@ INSTALLED: dict[str, object] = {
         "sam": {"prompt": "You are Sam.", "prompt_includes": ["household", "wire"]}
     },
 }
+
+
+
+def test_an_invite_link_is_the_whole_of_what_reaches_stdout(
+    deployed: Live, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`device invite` over the wire, against the server the apply above
+    installed `sam` on (#612, Q11): the link alone on stdout, at the
+    loopback origin this CLI reached the API on, and the fixed line
+    saying it worked on stderr, which carries no token."""
+    assert run("device", "invite", "--agent", "sam") == 0
+
+    printed = capsys.readouterr()
+    port = urlsplit(deployed.api_url).port
+    match = re.fullmatch(
+        rf"http://localhost:{port}/talk/#(?P<token>[A-Za-z0-9_-]{{43}})\n", printed.out
+    )
+    assert match is not None, printed.out
+    assert printed.err == f"{devices.INVITED}\n"
+    assert match.group("token") not in printed.err
 
 
 def test_an_apply_installs_what_an_import_wrote(
