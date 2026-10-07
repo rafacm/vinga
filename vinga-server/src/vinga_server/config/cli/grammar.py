@@ -2185,7 +2185,10 @@ COMMANDS: tuple[Command, ...] = (
         kind="device",
         does=DELETE_DEVICE,
         declare=_by_mac,
-        help="delete devices.<mac>, so the board it names reaches the default agent",
+        help=(
+            "delete devices.<mac>, leaving the board it names unbound whatever the "
+            "default agent"
+        ),
         destroys=True,
     ),
     # The other two halves of the device record, each a verb on the

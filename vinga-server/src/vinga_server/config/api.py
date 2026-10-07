@@ -2804,11 +2804,12 @@ def _writes(api: FastAPI) -> None:
     def remove_device(
         mac: str, store: StoreDep, snapshot_only: SnapshotOnlyDep
     ) -> dict[str, Any]:
-        """Remove one device's binding, which with no default agent set
-        means the device is refused at the handshake. Live, with no
-        agent to be loaded or not: the device stops being served at its
-        next check-in, though a conversation already running is left to
-        finish."""
+        """Remove one device's binding, which leaves the device unbound
+        whatever the default agent: it is refused at the handshake, and
+        with onboarding on it is offered a code to be claimed again.
+        Live, with no agent to be loaded or not: the device stops being
+        served at its next check-in, though a conversation already
+        running is left to finish."""
         return _acknowledge(
             f"device {store.delete_device(mac)} deleted",
             _binding_notice(snapshot_only=snapshot_only),
