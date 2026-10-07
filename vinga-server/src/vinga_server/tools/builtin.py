@@ -196,7 +196,7 @@ def switch_agent_tool(agents: Sequence[str]) -> ToolDef:
     )
 
 
-def remember_tool() -> ToolDef:
+def remember_tool(device_only: bool = False) -> ToolDef:
     """Keep one fact across conversations, about the user or about the
     place. Offered to every agent whose `memory` section leaves it on,
     which is every agent that says nothing: remembered facts live in a
@@ -210,7 +210,33 @@ def remember_tool() -> ToolDef:
     persona. A model that gets it wrong writes a true fact in the wrong
     place, which an operator can move; a server that guessed for it would
     be wrong silently.
+
+    `device_only` is the built-in agent's version (#612): its memory is
+    its device's, so there is no scope to choose and the parameter goes,
+    which is also a shorter tool for the small local model it may run
+    on. What it remembers, every assistant on that device then knows.
     """
+    if device_only:
+        return ToolDef(
+            name=names.REMEMBER,
+            description=(
+                "Remember one short fact for future conversations on this device, such "
+                "as a preference, a name, or a routine. One fact per call, phrased so it "
+                "still makes sense on its own weeks from now. Every assistant on this "
+                "device then knows it. Do not use this for things that are only true "
+                "right now."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "The fact to remember, as one short sentence.",
+                    },
+                },
+                "required": ["text"],
+            },
+        )
     return ToolDef(
         name=names.REMEMBER,
         description=(
@@ -768,7 +794,11 @@ NOTHING_MATCHED = (
 
 
 async def remember(
-    store: MemoryStore, context: MemoryContext, agent: str, arguments: dict[str, object]
+    store: MemoryStore,
+    context: MemoryContext,
+    agent: str,
+    arguments: dict[str, object],
+    device_only: bool = False,
 ) -> str:
     """Execute `remember` against the scope the call named, answering the
     confirmation the model then phrases in its own words.
@@ -782,25 +812,34 @@ async def remember(
     the conversation the ledger tools write to: which device a note
     belongs to is a fact of the session, and a model that could name one
     would be writing into another household's notes.
+
+    `device_only` pins the scope to the device's, whatever the call
+    named, for the built-in agent (#612): its tool has no scope to name,
+    and a model that sends one anyway is still writing into the only
+    memory it has.
     """
     text = arguments.get("text")
     if not isinstance(text, str) or not text.strip():
         raise ValueError(REMEMBER_NEEDS_TEXT)
-    scope = _fact_scope(arguments.get("scope"))
+    scope = MemoryScope.DEVICE if device_only else _fact_scope(arguments.get("scope"))
     async with _owner_of(scope, context, agent) as owner:
         fact_id = await store.add(scope, owner, text, agent=agent)
     return f"Remembered [{fact_id}]: {_said(text)}"
 
 
 async def update_memory(
-    store: MemoryStore, context: MemoryContext, agent: str, arguments: dict[str, object]
+    store: MemoryStore,
+    context: MemoryContext,
+    agent: str,
+    arguments: dict[str, object],
+    device_only: bool = False,
 ) -> str:
     """Execute `update_memory` against whichever memory holds the fact."""
     fact_id = _numbered(arguments.get("id"), UPDATE_NEEDS_A_NUMBER_AND_TEXT)
     text = arguments.get("text")
     if not isinstance(text, str) or not text.strip():
         raise ValueError(UPDATE_NEEDS_A_NUMBER_AND_TEXT)
-    async with _reachable(context, agent) as owners:
+    async with _reachable(context, agent, device_only) as owners:
         await _wherever_it_is(
             owners,
             lambda scope, owner: store.update(scope, owner, fact_id, text, agent=agent),
@@ -809,7 +848,11 @@ async def update_memory(
 
 
 async def forget(
-    store: MemoryStore, context: MemoryContext, agent: str, arguments: dict[str, object]
+    store: MemoryStore,
+    context: MemoryContext,
+    agent: str,
+    arguments: dict[str, object],
+    device_only: bool = False,
 ) -> str:
     """Execute `forget`, answering with the words that were removed.
 
@@ -824,7 +867,7 @@ async def forget(
     costs is the fact.
     """
     fact_id = _numbered(arguments.get("id"), FORGET_NEEDS_A_NUMBER)
-    async with _reachable(context, agent) as owners:
+    async with _reachable(context, agent, device_only) as owners:
         removed = await _wherever_it_is(
             owners,
             lambda scope, owner: store.forget(
@@ -840,7 +883,11 @@ async def forget(
 
 
 async def restore_memory(
-    store: MemoryStore, context: MemoryContext, agent: str, arguments: dict[str, object]
+    store: MemoryStore,
+    context: MemoryContext,
+    agent: str,
+    arguments: dict[str, object],
+    device_only: bool = False,
 ) -> str:
     """Execute `restore_memory`, answering with what came back.
 
@@ -857,7 +904,7 @@ async def restore_memory(
     """
     named = arguments.get("id")
     fact_id = None if named is None else _numbered(named, RESTORE_TAKES_A_NUMBER)
-    async with _reachable(context, agent) as owners:
+    async with _reachable(context, agent, device_only) as owners:
         brought = await store.restore(
             owners, _conversation_of(context), fact_id, agent=agent
         )
@@ -865,7 +912,11 @@ async def restore_memory(
 
 
 async def recall(
-    store: MemoryStore, context: MemoryContext, agent: str, arguments: dict[str, object]
+    store: MemoryStore,
+    context: MemoryContext,
+    agent: str,
+    arguments: dict[str, object],
+    device_only: bool = False,
 ) -> str:
     """Execute `recall` over both the memories this session can reach.
 
@@ -874,17 +925,23 @@ async def recall(
     the prompt's own read does. Nothing matching is an ordinary answer
     rather than a refusal: the model asked a question and the answer is
     that there is nothing.
+
+    The built-in agent's lookup (`device_only`) reads its device's
+    facts alone (#612), so a fact told to it on one device is never
+    found on another.
     """
     query = arguments.get("query")
     if not isinstance(query, str) or not query.strip():
         raise ValueError(RECALL_NEEDS_A_QUERY)
-    found = await asyncio.to_thread(store.recall, agent, _device_of(context), query)
+    found = await asyncio.to_thread(
+        store.recall, agent, _device_of(context), query, agent_scope=not device_only
+    )
     return found or NOTHING_MATCHED
 
 
 @contextlib.asynccontextmanager
 async def _reachable(
-    context: MemoryContext, agent: str
+    context: MemoryContext, agent: str, device_only: bool = False
 ) -> AsyncIterator[tuple[tuple[MemoryScope, str], ...]]:
     """The memories this session may reach a fact in, for the length of
     one write.
@@ -902,9 +959,16 @@ async def _reachable(
     address that can move: every one of these three calls writes, and a
     write has to land where the record's facts are filed when it lands
     rather than where they were filed when the call was parsed.
+
+    The built-in agent reaches the device's alone (`device_only`, #612):
+    it reads no agent memory, so a number it could hold names a device
+    fact, and nothing in another device's memory is reachable from here.
     """
     async with _device_memory(context) as owner:
-        yield ((MemoryScope.AGENT, agent), (MemoryScope.DEVICE, owner))
+        if device_only:
+            yield ((MemoryScope.DEVICE, owner),)
+        else:
+            yield ((MemoryScope.AGENT, agent), (MemoryScope.DEVICE, owner))
 
 
 @contextlib.asynccontextmanager

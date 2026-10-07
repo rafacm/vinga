@@ -273,10 +273,14 @@ async def test_the_memory_read_happens_off_the_event_loop(
     real = MemoryStore.read_for_prompt
 
     def read(
-        self: MemoryStore, agent: str, device: str | None, conversation: str | None
+        self: MemoryStore,
+        agent: str,
+        device: str | None,
+        conversation: str | None,
+        **options: bool,
     ) -> PromptMemory:
         reads.append(threading.get_ident())
-        return real(self, agent, device, conversation)
+        return real(self, agent, device, conversation, **options)
 
     monkeypatch.setattr(MemoryStore, "read_for_prompt", read)
     session = session_with(CountingServers(), {"poet": ScriptedLlm(["Said."])}, memory=store)
@@ -300,10 +304,14 @@ async def test_two_rounds_of_one_reply_are_sent_the_memory_read_once(
     real = MemoryStore.read_for_prompt
 
     def read(
-        self: MemoryStore, agent: str, device: str | None, conversation: str | None
+        self: MemoryStore,
+        agent: str,
+        device: str | None,
+        conversation: str | None,
+        **options: bool,
     ) -> PromptMemory:
         reads.append(agent)
-        return real(self, agent, device, conversation)
+        return real(self, agent, device, conversation, **options)
 
     monkeypatch.setattr(MemoryStore, "read_for_prompt", read)
     script = ScriptedLlm([[call("remember", text="the user is vegetarian")], "Noted."])
@@ -338,9 +346,11 @@ async def test_a_lookup_happens_off_the_event_loop(
     lookups: list[int] = []
     real = MemoryStore.recall
 
-    def looked_up(self: MemoryStore, agent: str, device: str, query: str) -> str:
+    def looked_up(
+        self: MemoryStore, agent: str, device: str, query: str, **options: bool
+    ) -> str:
         lookups.append(threading.get_ident())
-        return real(self, agent, device, query)
+        return real(self, agent, device, query, **options)
 
     monkeypatch.setattr(MemoryStore, "recall", looked_up)
     script = ScriptedLlm([[call("recall", query="cheese")], "You like cheese."])

@@ -325,13 +325,16 @@ class _SnapshotKey:
     """What a conversation's prompt snapshot is valid for, and the one
     mechanism that decides whether it still is (#536).
 
-    Five values, each with its own reason. `activation` is bumped by
+    Six values, each with its own reason. `activation` is bumped by
     every agent activation, so a handover, and a handover back to the
     same agent on the same thread, reads again, as the know-how half is
     assembled again. `conversation` is the thread, so a rebind never
     serves one thread's ledger on another. `remembering` is the memory
     switch the snapshot was built under, so an apply that turns it
     reads again and the blocks never disagree with the offered tools.
+    `builtin` is whether the agent was the built-in one (#612), whose
+    memory is its device's alone, resolved on the same clock and for the
+    same reason: the scopes read and the tools offered are one policy.
     `erasures` is the memory store's erasure revision, sampled before
     the reads began and never replaced by a later value, so a hard
     deletion published while they were in flight still makes the next
@@ -344,6 +347,7 @@ class _SnapshotKey:
     activation: int
     conversation: str
     remembering: bool
+    builtin: bool
     erasures: int
     oversized: int
 
@@ -657,7 +661,13 @@ class PipelineRuntime:
         section = self._server.conversations
         self._resumption = (
             resumption.Resumption(
-                threads, section.resumption_budget_tokens, DEFAULT_TOOL_TIMEOUT_S
+                threads,
+                section.resumption_budget_tokens,
+                DEFAULT_TOOL_TIMEOUT_S,
+                # The board this session is talking through, which is
+                # what a thread records as where it began and what the
+                # built-in agent's searches are held to (#612).
+                self._device,
             )
             if threads is not None and section is not None and section.resumption
             else None
@@ -709,6 +719,12 @@ class PipelineRuntime:
         # value before then: an agent is what the policy is about, and
         # nothing asks this outside a reply.
         self._remembering: bool | None = None
+        # And whether that agent is the built-in one (#612), resolved on
+        # the same line for the same reason: its memory and its threads
+        # are its device's, so the scopes this leg's prompt reads and
+        # the memory its tools reach are one decision. None until the
+        # first reply resolves it.
+        self._builtin: bool | None = None
         # The language the ASR provider asked this session to reuse
         # (`AsrResult.lock_language`). Session-scoped on purpose: the
         # provider is shared between sessions and holds no per-session
@@ -757,6 +773,7 @@ class PipelineRuntime:
                 DEFAULT_TOOL_TIMEOUT_S,
                 self._memory_context,
                 self._remembering_now,
+                self._builtin_now,
                 self._resumption,
                 # The other direction through the device rows, handed
                 # straight over rather than kept: nothing else in a
@@ -864,6 +881,14 @@ class PipelineRuntime:
         """
         assert self._remembering is not None
         return self._remembering
+
+    def _builtin_now(self) -> bool:
+        """Whether the agent speaking this reply is the built-in one,
+        as this reply resolved it, for the reason `_remembering_now`
+        reads what it resolved rather than the world. Asserted for the
+        same reason too."""
+        assert self._builtin is not None
+        return self._builtin
 
     def _resolved_memory(self) -> bool:
         """This reply's answer, read out of the world at the moment the
@@ -1846,6 +1871,7 @@ class PipelineRuntime:
         providers = self._providers
         self._remembering = self._resolved_memory()
         assert self._agent is not None
+        self._builtin = self._world_of(self._agent).is_builtin(self._agent)
         # The tools, their declared shapes and where each came from, as
         # one value taken once: the shapes are what the coercion reads
         # and the origins are what a withheld sentence is named from, so
@@ -2662,6 +2688,7 @@ class PipelineRuntime:
             activation=self._activations,
             conversation=self._conversation,
             remembering=self._remembering_now(),
+            builtin=self._builtin_now(),
             erasures=self._memory.erasures,
             oversized=self._oversized,
         )
@@ -2684,6 +2711,9 @@ class PipelineRuntime:
                 self._agent,
                 self._device if record is None else record.mac,
                 self._conversation,
+                # The built-in agent reads no memory of its own: what it
+                # remembers is its device's (#612).
+                agent_scope=not key.builtin,
             )
             # A read that did not answer renders as it always has, the
             # empty blocks with no memory section over them: a section
