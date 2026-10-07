@@ -1,14 +1,15 @@
-"""The two validation phases, run against a snapshot on their own.
+"""The reference check, run against a snapshot on its own.
 
-Boot runs both and reports them together, which the loader tests
-already pin. What matters here is that they separate: writes run the
-reference half, so a half-built configuration can be built up in the
-natural order, and the completeness half stays where a runnable server
-is decided.
+Writes and the boot both run it. There used to be a second phase, the
+completeness rule, which only the boot ran: a default agent required
+when agents existed and no device was bound. #612 removed it, since a
+default agent reaches no device, and the case it used to refuse is
+pinned below as one that passes.
 """
 
 from dataclasses import dataclass, field
 
+from vinga_server.config import Config
 from vinga_server.config.models import (
     AgentConfig,
     AgentDefaults,
@@ -17,7 +18,6 @@ from vinga_server.config.models import (
     PromptFragmentConfig,
     ProviderConfig,
     ProvidersConfig,
-    check_completeness,
     check_references,
 )
 
@@ -54,7 +54,6 @@ def test_a_resolved_snapshot_has_no_problems() -> None:
     )
 
     assert check_references(snapshot) == []
-    assert check_completeness(snapshot) == []
 
 
 def test_an_unknown_provider_reference_is_a_reference_problem() -> None:
@@ -101,33 +100,18 @@ def test_an_unknown_binding_and_default_are_reference_problems() -> None:
     ) in problems
 
 
-def test_the_first_agent_is_a_completeness_problem_only() -> None:
-    """The write-time deadlock this split exists for: an agent cannot be
-    created before default_agent names it, and default_agent cannot name
-    it before it exists. So writing the agent has to be allowed, and
-    booting on it must not be."""
-    snapshot = Snapshot(agents={"sam": AgentConfig()})
+def test_agents_no_device_reaches_are_a_deployment_awaiting_a_claim() -> None:
+    """What the completeness rule used to refuse at boot: agents, no
+    default agent, no device bound. A default agent reaches no device
+    since #612, so requiring one bought nothing, and the configuration
+    composes."""
+    config = Config(agents={"sam": AgentConfig()})
 
-    assert check_references(snapshot) == []
-    assert check_completeness(snapshot) == [
-        "default_agent is required when agents are defined and no device is "
-        "bound to one; set it to one of: sam"
-    ]
+    assert config.agents_for_device("aa:bb:cc:dd:ee:ff") == []
+    assert check_references(Snapshot(agents={"sam": AgentConfig()})) == []
 
 
-def test_a_bound_device_makes_the_default_agent_optional() -> None:
-    snapshot = Snapshot(
-        agents={"sam": AgentConfig()},
-        devices={"aa:bb:cc:dd:ee:ff": ["sam"]},
-    )
-
-    assert check_completeness(snapshot) == []
-
-
-def test_an_empty_snapshot_passes_both_checks() -> None:
+def test_an_empty_snapshot_passes_the_check() -> None:
     """Where every deployment starts, and where the natural creation
     order begins."""
-    snapshot = Snapshot()
-
-    assert check_references(snapshot) == []
-    assert check_completeness(snapshot) == []
+    assert check_references(Snapshot()) == []
