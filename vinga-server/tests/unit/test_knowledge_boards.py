@@ -16,8 +16,8 @@ import pytest
 
 from vinga_server import knowledge
 
-# The most a guide's facts may carry, since every vinga prompt on that
-# board carries them (plan D3). A guide that grows past it fails here,
+# The most a guide's facts may carry, since every prompt the built-in
+# agent sends on that board carries them (plan D3). A guide that grows past it fails here,
 # and the remedy is an "At a glance" section rather than a larger
 # budget, so the prompt does not grow with the page.
 BOARD_FACTS_BUDGET = 3_500
