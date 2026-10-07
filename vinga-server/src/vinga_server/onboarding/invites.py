@@ -77,7 +77,12 @@ from vinga_server.config.loader import (
     InviteRefusedError,
     SnapshotOnlyError,
 )
-from vinga_server.config.models import BROWSER_MOUNT_PATH, ServerConfig, browser_device_name
+from vinga_server.config.models import (
+    BROWSER_MOUNT_PATH,
+    BUILTIN_AGENT,
+    ServerConfig,
+    browser_device_name,
+)
 from vinga_server.config.responses import Invite, RefusalReason
 
 from .browser import BrowserIdentity, Randomness, mint
@@ -100,9 +105,10 @@ ONBOARDING_OFF = (
     "invite link would open nothing. Nothing was issued."
 )
 
-NO_DEFAULT_AGENT = (
-    "no default agent is set, so a browser opening an invite link that names no agent "
-    "would have no agent to be bound to. Nothing was issued."
+DEFAULT_AGENT_NOT_SERVED = (
+    "the default agent, which a browser opening an invite link that names no agent is "
+    "bound to, is not one this server is serving, so the browser would be bound to an "
+    "agent that does not answer. Nothing was issued."
 )
 
 # And the two about the agents an invite names (#612, Q11). Neither
@@ -304,7 +310,7 @@ class Issuer:
         default agent; each is trimmed and a repeat is the one name it
         repeats, which is how a binding stores them. `store` is read for
         what it says now, in the request that asked: which agents exist,
-        or, naming none, whether a default agent is set. `served` is the
+        or, naming none, which agent is the default. `served` is the
         agents of the world this server installed, asked of it per
         request because an apply replaces it. A named agent has to be
         both: stored, or the redemption's write would not resolve it,
@@ -323,8 +329,14 @@ class Issuer:
                 raise InviteRefusedError(
                     AGENT_NOT_SERVED, reason=RefusalReason.AGENT_NOT_SERVING
                 )
-        elif store.read_default_agent() is None:
-            raise InviteRefusedError(NO_DEFAULT_AGENT, reason=RefusalReason.NO_DEFAULT_AGENT)
+        elif (store.read_default_agent() or BUILTIN_AGENT) not in served:
+            # The effective default always exists since #612 (vinga when
+            # none is stored), so what can rule a link out is that the
+            # world installed now does not serve it: on a fresh
+            # deployment, vinga before any provider is configured (D5).
+            raise InviteRefusedError(
+                DEFAULT_AGENT_NOT_SERVED, reason=RefusalReason.DEFAULT_AGENT_NOT_SERVED
+            )
         origin = link_origin(self.server)
         token = self.links.issue(named)
         answer: Invite | None = None

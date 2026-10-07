@@ -362,9 +362,10 @@ REFUSAL_STATUS: dict[type[ConfigError], int] = {
     DeviceNameConflictError: 409,
     # And an invite link that was not issued, because the deployment is in a
     # state where opening one could not bind a browser: onboarding off,
-    # no default agent, or as many links waiting as the store holds.
-    # Nothing was changed, which is the whole of what the status says;
-    # the second clears when a default agent is set and the third as
+    # an agent it would bind that this server is not serving, or as
+    # many links waiting as the store holds. Nothing was changed, which
+    # is the whole of what the status says; the second clears when the
+    # apply that installs the agent has run and the third as
     # links are opened or expire, and the sentence says which it is.
     InviteRefusedError: 409,
     StorageError: 500,
@@ -1877,8 +1878,10 @@ def _runtime(api: FastAPI) -> None:
 
         Each request is a new link. One is refused (409), with nothing
         issued, while device onboarding is off, while this server serves
-        a configuration no store describes, while no default agent is
-        set for an invite that names none, and while as many links are
+        a configuration no store describes, while this server is not
+        serving the default agent (vinga, the built-in agent, when none
+        is set) for an invite that names none (`default-agent-not-served`),
+        and while as many links are
         waiting as the server holds.
         """
         # The docstring is this endpoint's description in the committed

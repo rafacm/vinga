@@ -2244,9 +2244,10 @@ REMEDY_SENTENCES: dict[RefusalReason, str] = {
     ),
     RefusalReason.PROVIDER_MISSING: "Create it first with `vinga provider set`.",
     RefusalReason.MCP_SERVER_MISSING: "Create it first with `vinga mcp-server set`.",
-    RefusalReason.NO_DEFAULT_AGENT: (
-        "Set one with `vinga default-agent set <name>`, and a browser opening a link is "
-        "bound to that agent."
+    RefusalReason.DEFAULT_AGENT_NOT_SERVED: (
+        "`vinga info` says why when the default is vinga, the built-in agent; "
+        "`vinga apply` installs an agent written since; or name the agents the link "
+        "binds with `vinga device invite --agent <name>`."
     ),
 }
 
