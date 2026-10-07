@@ -568,6 +568,7 @@ def test_a_credential_in_a_provider_url_reaches_no_record(
         agents={
             "assistant": {"llm": "vendor", "asr": "mock", "tts": "mock", "vad": "mock"}
         },
+        devices={DEVICE_MAC: ["assistant"]},
         default_agent="assistant",
     )
 

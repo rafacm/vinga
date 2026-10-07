@@ -34,7 +34,7 @@ import pytest
 from starlette.websockets import WebSocketDisconnect
 
 from tests.support import leaks
-from tests.support.configs import POET_MAC, base_config
+from tests.support.configs import DEVICE_MAC, POET_MAC, base_config
 from tests.support.events import events, only
 from tests.support.providers import (
     BrokenTts,
@@ -725,6 +725,7 @@ def masked_and_failing() -> Config:
                 "fallback": {"enabled": True, "phrase": "I could not answer that one."},
             }
         },
+        devices={DEVICE_MAC: ["assistant"]},
         default_agent="assistant",
     )
 

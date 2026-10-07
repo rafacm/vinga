@@ -483,6 +483,36 @@ def planted(store: Any, *statements: Any) -> None:
             connection.execute(statement)
 
 
+# What a planted default agent names: an agent no store holds, so the
+# reference check refuses it. Not a credential and not a name a write
+# would accept here, since no write can leave a default agent naming
+# nothing.
+DANGLING_AGENT = "nobody-by-this-name"
+
+
+def dangling_default_agent(store: Any) -> None:
+    """A stored default agent naming no agent there is, written
+    underneath the repository.
+
+    No write can leave this state, since every write checks references,
+    and that is why it is planted: it is the one shape of stored
+    configuration a boot still refuses on whole once a write has passed
+    everything else. The rule the suites used for that until #612 was
+    the boot's completeness rule (agents with no default agent and no
+    device bound), which went when a default agent stopped reaching any
+    device. The reference check's sentence also lists the agents that
+    are defined, so it is the same publication of stored names that
+    rule's list was, for the suites that hold a refusal to quoting
+    nothing but identities.
+    """
+    planted(
+        store,
+        db_module.schema.domain_settings.insert().values(
+            key=db_module.schema.DEFAULT_AGENT_KEY, value=DANGLING_AGENT
+        ),
+    )
+
+
 def body(entry: BaseModel) -> str:
     """One entity's row body, produced by the repository's own writer.
 

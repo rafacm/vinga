@@ -299,9 +299,10 @@ def test_a_boot_refusal_names_the_stored_entry_with_the_byte_escaped(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """The whole boot, from the file half to the composition, which is
-    what a server runs and what a reload runs again. Three sentences
-    over one planted name: the reference check's location, the list of
-    what could have been meant, and the completeness check's list."""
+    what a server runs and what a reload runs again. Two sentences over
+    one planted name: the reference check's location and the list of what
+    could have been meant. (The completeness check's list was a third
+    until #612 removed that check.)"""
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
 
     with caplog.at_level(logging.DEBUG), pytest.raises(ConfigError) as caught:
@@ -310,7 +311,6 @@ def test_a_boot_refusal_names_the_stored_entry_with_the_byte_escaped(
     message = str(caught.value)
     assert f"agents.{SPOKEN}.llm: names no llm provider that exists" in message
     assert f"(defined: {SPOKEN})" in message
-    assert f"set it to one of: {SPOKEN}" in message
     _carries_no_sentinel(chain(caught.value), *_logged(caplog))
 
 

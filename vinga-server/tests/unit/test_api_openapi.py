@@ -297,7 +297,7 @@ def test_a_write_declares_the_entity_schema_it_takes() -> None:
         ("/devices/{mac}", "put", "DeviceBinding"),
         # Add-by-code takes the same body as bind-by-MAC: the code names
         # the device, and the agents are the same argument.
-        ("/devices/pending/{code}", "post", "DeviceBinding"),
+        ("/devices/pending/{code}", "post", "PendingClaim"),
         ("/default-agent", "put", "DefaultAgentName"),
         ("/agents/{name}/rename", "post", "AgentRename"),
         ("/devices/{mac}/rename", "post", "DeviceRename"),

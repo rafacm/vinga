@@ -91,9 +91,11 @@ def test_a_device_with_no_agent_gets_no_token() -> None:
     assert issued_token(config) == ""
 
 
-def test_the_default_agent_makes_every_device_a_bound_one() -> None:
+def test_the_default_agent_makes_no_device_a_bound_one() -> None:
+    """It did until #612: an unbound device only pairs, so a default
+    agent issues nobody a token."""
     config = bound_config(default_agent="assistant")
-    assert issued_token(config, device_id="11:22:33:44:55:66") != ""
+    assert issued_token(config, device_id="11:22:33:44:55:66") == ""
 
 
 def test_disabled_auth_still_sends_an_empty_token(

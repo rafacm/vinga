@@ -708,8 +708,6 @@ def test_unknown_and_malformed_messages_do_not_end_the_session() -> None:
         # Bound to both: the first entry is the agent the conversation
         # starts on, and nothing else selects it.
         (BOTH_MAC, "TUTOR", TUTOR_TONE, POET_TONE),
-        # Bound to nothing at all: default_agent, which is the poet here.
-        (UNBOUND_MAC, "POET", POET_TONE, TUTOR_TONE),
     ],
 )
 def test_a_device_gets_the_prompt_and_the_voice_of_its_own_agent(
@@ -780,6 +778,18 @@ async def test_a_session_refuses_an_agent_its_device_is_not_bound_to() -> None:
 def test_a_device_with_no_agent_is_turned_away() -> None:
     with TestClient(create_app(Config())) as client:
         with connect(client) as websocket:
+            with pytest.raises(WebSocketDisconnect) as excinfo:
+                websocket.receive_text()
+    assert excinfo.value.code == 1008
+    assert "no agent" in excinfo.value.reason
+
+
+def test_a_device_bound_to_nothing_is_turned_away_whatever_the_default() -> None:
+    """It used to reach `default_agent`, the poet here, which was a
+    parameter of the test above it. An unbound device only pairs since
+    #612, so the connect is refused like any device with no agent."""
+    with TestClient(create_app(two_persona_config())) as client:
+        with connect(client, device_id=UNBOUND_MAC) as websocket:
             with pytest.raises(WebSocketDisconnect) as excinfo:
                 websocket.receive_text()
     assert excinfo.value.code == 1008

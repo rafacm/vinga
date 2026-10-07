@@ -340,8 +340,9 @@ def test_every_mutating_command_says_when_the_write_applies(
     # The application this fixture builds is told of no servable agents,
     # so the default agent it just named is one this server is not
     # serving, and the acknowledgement names the reload that would
-    # install it beside the check-in the row is live at.
-    assert boundaries(capsys.readouterr().err) == {CHECK_IN, RELOAD}
+    # install it, and nothing else: a default agent reaches no device's
+    # check-in since #612.
+    assert boundaries(capsys.readouterr().err) == {RELOAD}
 
     # A read is not a write, and says nothing.
     run("list")

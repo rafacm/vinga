@@ -91,16 +91,34 @@ def test_reply_names_the_server_build_the_device_will_talk_to(
     }
 
 
-def test_a_device_the_configuration_covers_is_never_asked_to_activate() -> None:
-    """The activation section exists for a device nothing has bound and
-    no default agent covers; everything else is answered as it always
-    was. The ceremony's own coverage is test_onboarding_activation.py."""
+def test_a_bound_device_is_never_asked_to_activate() -> None:
+    """The activation section exists for a device nothing has bound;
+    a bound one is answered as it always was. The ceremony's own
+    coverage is test_onboarding_activation.py."""
     config = Config(
-        providers=MOCK_PROVIDERS, agents={"assistant": MOCK_AGENT}, default_agent="assistant"
+        providers=MOCK_PROVIDERS,
+        agents={"assistant": MOCK_AGENT},
+        devices={DEVICE_MAC.lower(): ["assistant"]},
+        default_agent="assistant",
     )
     with client_for(config) as client:
         response = post_system_info(client)
     assert "activation" not in response.json()
+
+
+def test_an_unbound_device_is_asked_to_activate_with_a_default_agent_set() -> None:
+    """A default agent covers no device since #612: the unbound board
+    is offered a code, never a token."""
+    config = Config(
+        providers=MOCK_PROVIDERS,
+        agents={"assistant": MOCK_AGENT},
+        devices={"11:22:33:44:55:66": ["assistant"]},
+        default_agent="assistant",
+    )
+    with client_for(config) as client:
+        body = post_system_info(client).json()
+    assert body["activation"]["code"].isdigit()
+    assert body["websocket"]["token"] == ""
 
 
 def test_activation_is_not_asked_for_with_onboarding_off() -> None:
@@ -129,9 +147,11 @@ def test_server_time_offset_defaults_to_the_hosts_own() -> None:
     )
 
 
-def test_unknown_device_falls_back_to_the_default_agent(
+def test_an_unknown_device_does_not_fall_back_to_the_default_agent(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """It used to (the test's old name said so); an unbound device only
+    pairs since #612."""
     config = Config(
         providers=MOCK_PROVIDERS,
         agents={"assistant": MOCK_AGENT, "kitchen": MOCK_AGENT},
@@ -142,7 +162,8 @@ def test_unknown_device_falls_back_to_the_default_agent(
         with client_for(config) as client:
             response = post_system_info(client)
     assert response.status_code == 200
-    assert "resolved to agent assistant" in caplog.text
+    assert response.json()["websocket"]["token"] == ""
+    assert "resolved to agent" not in caplog.text
 
 
 def test_bound_device_resolves_to_its_own_agent(

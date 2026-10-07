@@ -347,6 +347,8 @@ def recording_config(
             "assistant": dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
             | ({} if prompt is None else {"prompt": prompt})
         },
+        # Bound by name, for the reason `config_with_agent` gives.
+        devices={DEVICE_MAC: ["assistant"]},
         default_agent="assistant",
     )
 

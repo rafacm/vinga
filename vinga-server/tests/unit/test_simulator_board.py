@@ -431,10 +431,11 @@ def test_the_trap_state_names_every_reading_that_produces_it(
     """The tail, enumerated from the decision sites rather than from the
     sentence it replaced.
 
-    Two of these the old sentence missed: a deployment that could not
+    The old sentence missed one of these: a deployment that could not
     read its own record of what is bound offers no code while resolving
-    nothing, and the unloaded agent can be named by `default_agent`
-    rather than by a binding. The last is not a configuration at all: a
+    nothing. A second it carried for a while, the unloaded agent named
+    by `default_agent` rather than by a binding, went with #612, since a
+    default agent resolves no device. The last is not a configuration at all: a
     server too old to say why a token is empty answers an admitted board
     on a token-less deployment in exactly these bytes.
     """
@@ -445,7 +446,7 @@ def test_the_trap_state_names_every_reading_that_produces_it(
     said = capsys.readouterr().out
     assert simulator.MAY_NOT_SPEAK in said
     assert "onboarding is turned off" in said
-    assert "default_agent" in said
+    assert "default_agent" not in said
     assert "not serving yet" in said
     assert "waiting to be claimed would not take another one" in said
     assert "could not read its own record of what is bound" in said

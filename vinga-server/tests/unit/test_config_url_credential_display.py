@@ -52,7 +52,7 @@ from tests.support.config_cli import document, runner
 from tests.support.events import both_formats, fields_of, only
 from tests.support.leaks import chain
 from tests.support.problems import refused as refusal_body
-from tests.support.stores import body, planted
+from tests.support.stores import body, dangling_default_agent, planted
 from vinga_server import logs, serving
 from vinga_server.boundary import Reach
 from vinga_server.build_info import CONTAINER_ENV
@@ -943,19 +943,21 @@ def test_the_boot_refusal_reaches_stderr_carrying_no_credential(
     _carries_no_sentinel(printed.out, printed.err, *_logged(caplog))
 
 
-def test_the_completeness_refusal_lists_the_names_without_their_credential(
+def test_the_reference_refusal_lists_the_names_without_their_credential(
     store: ConfigStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The composition's other sentence, which lists the agents a
-    default could be set to. A list of stored names is the same
-    publication as one of them."""
+    """The composition's sentence that lists the agents a dangling
+    default agent could have meant. A list of stored names is the same
+    publication as one of them. (The boot's completeness rule listed
+    them too, until #612 removed it.)"""
     monkeypatch.delenv("VINGA_CONFIG", raising=False)
     _plant(store, "agent", (HISTORIC,), AgentConfig(prompt="hi"))
+    dangling_default_agent(store)
 
     with pytest.raises(ConfigError) as caught:
         load_boot_config()
 
-    assert f"set it to one of: {HISTORIC_SHOWN}" in str(caught.value)
+    assert f"(defined: {HISTORIC_SHOWN})" in str(caught.value)
     _carries_no_sentinel(chain(caught.value))
 
 
@@ -1128,11 +1130,12 @@ def test_the_check_command_speaks_a_name_that_is_itself_secret_shaped(
     by a refusal that named nothing at all.
     """
     _plant(store, "agent", (SECRET_SHAPED,), AgentConfig(prompt="hi"))
+    dangling_default_agent(store)
 
     assert cli.main(["check"]) == 1
 
     printed = capsys.readouterr()
-    assert f"set it to one of: {SECRET_SHAPED}" in printed.err
+    assert f"(defined: {SECRET_SHAPED})" in printed.err
     assert spoken_identity(SECRET_SHAPED) == SECRET_SHAPED
 
 
