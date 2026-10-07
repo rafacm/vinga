@@ -95,6 +95,7 @@ def spoken_config() -> Config:
             "vad": {"mock": {"type": "mock"}},
         },
         agents={"assistant": dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")},
+        devices={DEVICE_MAC: ["assistant"]},
         default_agent="assistant",
     )
 

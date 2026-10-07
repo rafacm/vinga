@@ -9,6 +9,7 @@ meet is met here too, because it is the same code meeting it.
 
 import pytest
 
+from tests.support.stores import dangling_default_agent
 from vinga_server.boundary import Reach
 from vinga_server.config import Config
 from vinga_server.config.boot import reload_domain_config
@@ -89,17 +90,23 @@ def test_the_re_read_keeps_the_running_server_section(
 
 
 def test_the_re_read_validates_the_whole_snapshot() -> None:
-    """The rules about a runnable deployment, which no write enforces
-    and every composition does, are enforced here too because it is the
-    same composition: an agent nothing can reach is the one the store
-    lets a caller arrive at."""
+    """The rule about a whole snapshot is enforced here too, because it
+    is the same composition: a reference written underneath the
+    repository, which no write could have left, is refused at the
+    re-read. (An agent nothing could reach was the case here until #612
+    removed the boot rule about it.)"""
     running = running_config()
-    seeded(lambda store: store.set_agent("sam", {"prompt": "You are Sam."}))
+    seeded(
+        lambda store: (
+            store.set_agent("sam", {"prompt": "You are Sam."}),
+            dangling_default_agent(store),
+        )
+    )
 
     with pytest.raises(ConfigError) as caught:
         reload_domain_config(running)
 
-    assert "default_agent is required" in str(caught.value)
+    assert "default_agent: names no agent that exists" in str(caught.value)
     assert "sam" in str(caught.value)
 
 

@@ -43,7 +43,8 @@ applied to the TRANSCRIPT before the
 comparison, so a difference the table does not explain is a failure, and
 the table itself is short enough to read.
 
-Four entries are not the rename's, and each is labelled. #341 made
+Four entries are not the rename's, and each is labelled (#612 added
+two more since, labelled the same way, in the table itself). #341 made
 `apply` install what it wrote, which rewrote the header an export opens
 with into the three steps a rebuild then took. #371 swapped the two
 verbs (`apply` writes under the name `import`, `reload` installs under
@@ -93,6 +94,33 @@ MAC = "aa:bb:cc:dd:ee:ff"
 # `agent-defaults` opens with `agent`, and the program word comes last,
 # because the six above it name the longer spelling.
 RESPELLINGS: tuple[tuple[str, str], ...] = (
+    # Not the rename's: #612's, and first because the two steps it
+    # rewrites print the same sentences as two steps below them, so each
+    # is anchored on its own step's header and has to be taken before the
+    # generic entries rewrite those sentences everywhere. A default agent
+    # stopped reaching any device, so its write names the install alone
+    # (the line this client prints for that set) and its clear says what
+    # it now means, with a sentence of its own on the check-in token.
+    (
+        "== default-agent-set\nexit 0\n-- stdout\nwrote default agent sam\n\n-- stderr\n"
+        "The binding applies at the device's next OTA check or connection, but this "
+        "server is not serving the agent it names yet: run `vinga-server config reload`, "
+        "which installs the stored agents without a restart, and the device reaches it at "
+        "the check-in after that.",
+        "== default-agent-set\nexit 0\n-- stdout\nwrote default agent sam\n\n-- stderr\n"
+        "stored, not serving yet: run `vinga apply` to install it on the running "
+        "server, and `vinga diff` to list everything pending.",
+    ),
+    (
+        "== default-agent-clear\nexit 0\n-- stdout\nwrote default agent cleared; the "
+        "devices map is now the allowlist\n\n-- stderr\nThis applies at the device's "
+        "next OTA check or connection: a running server reads device bindings as it "
+        "needs them, so no restart is needed.",
+        "== default-agent-clear\nexit 0\n-- stdout\nwrote default agent cleared; a "
+        "claim now has to name its agents\n\n-- stderr\nThe next claim that names no "
+        "agent reads this, so no restart is needed; no device already bound changes, "
+        "since the default agent is only the agent a newly claimed device starts with.",
+    ),
     ("config set agent-defaults -f", "config agent-defaults set -f"),
     ("config set agent <name>", "config agent set <name>"),
     ("config set provider <stage> <name>", "config provider set <stage> <name>"),

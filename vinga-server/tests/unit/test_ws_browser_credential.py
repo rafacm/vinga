@@ -22,6 +22,7 @@ from tests.support.events import events, fields_of, only
 from tests.support.wire import device_headers, shake_hands
 from vinga_server.app import create_app
 from vinga_server.config import Config
+from vinga_server.config.models import DeviceRecord
 from vinga_server.device.handshake import BROWSER_SUBPROTOCOL, Handshake
 from vinga_server.ota import OTA_PATH
 from vinga_server.ws import WEBSOCKET_PATH, Credential, presented
@@ -52,8 +53,17 @@ def connect(client: TestClient, subprotocols: list[str], headers: dict[str, str]
     )
 
 
-def auth_off() -> Config:
+def bound_browser() -> Config:
+    """`config_with_agent` with the browser bound as well, the way a
+    redeemed try link binds it: an unbound browser only pairs (#612), and
+    what these tests are about is a browser that is admitted."""
     config = config_with_agent()
+    config.devices[BROWSER_MAC] = DeviceRecord(agents=["assistant"])
+    return config
+
+
+def auth_off() -> Config:
+    config = bound_browser()
     config.server.auth.enabled = False
     return config
 
@@ -144,7 +154,7 @@ def test_the_token_is_not_in_a_credentials_representation() -> None:
 
 
 def test_a_browser_with_a_valid_token_is_accepted_selecting_the_protocol() -> None:
-    with TestClient(create_app(config_with_agent())) as client:
+    with TestClient(create_app(bound_browser())) as client:
         token = issued(client)
         with connect(client, offered(token)) as websocket:
             assert websocket.accepted_subprotocol == BROWSER_SUBPROTOCOL
@@ -158,7 +168,7 @@ def test_the_session_serves_the_identity_the_subprotocols_presented(
     so the conversation opens for the browser rather than being turned
     away for a missing Device-Id (the plan review's first finding)."""
     with caplog.at_level(logging.INFO):
-        with TestClient(create_app(config_with_agent())) as client:
+        with TestClient(create_app(bound_browser())) as client:
             with connect(client, offered(issued(client))) as websocket:
                 shake_hands(websocket)
 
@@ -171,7 +181,7 @@ def test_the_whole_start_a_browser_makes_check_in_then_upgrade() -> None:
     """The OTA check-in with the headers a same-origin `fetch` may set,
     then the upgrade with the token that reply handed over, offered as a
     subprotocol."""
-    with TestClient(create_app(config_with_agent())) as client:
+    with TestClient(create_app(bound_browser())) as client:
         reply = client.post(
             OTA_PATH,
             headers={"Device-Id": BROWSER_MAC, "Client-Id": BROWSER_CLIENT},
@@ -199,7 +209,7 @@ def test_a_missing_or_bad_token_never_reaches_the_accept(
     values: list[str], reason: str, caplog: pytest.LogCaptureFixture
 ) -> None:
     with caplog.at_level(logging.WARNING):
-        with TestClient(create_app(config_with_agent())) as client:
+        with TestClient(create_app(bound_browser())) as client:
             with pytest.raises(WebSocketDisconnect) as excinfo:
                 with connect(client, values):
                     pass
@@ -221,7 +231,7 @@ def test_a_missing_or_bad_token_never_reaches_the_accept(
     ],
 )
 def test_a_token_for_another_identity_is_refused(values: str) -> None:
-    with TestClient(create_app(config_with_agent())) as client:
+    with TestClient(create_app(bound_browser())) as client:
         token = issued(client)
         if values == "other mac":
             subprotocols = offered(token, mac="025a3c7e910c")
@@ -238,7 +248,7 @@ def test_headers_win_over_a_valid_subprotocol_credential() -> None:
     """A valid browser credential beside one board header is read as a
     board, which has no token: refused. The precedence, from the side
     where reading the subprotocols would have let it in."""
-    with TestClient(create_app(config_with_agent())) as client:
+    with TestClient(create_app(bound_browser())) as client:
         with pytest.raises(WebSocketDisconnect):
             with connect(client, offered(issued(client)), headers={"Device-Id": BROWSER_MAC}):
                 pass
@@ -247,7 +257,7 @@ def test_headers_win_over_a_valid_subprotocol_credential() -> None:
 def test_a_board_offering_subprotocols_is_still_a_board() -> None:
     """And from the other side: a board's valid headers are what is read,
     and the accept selects nothing, whatever was offered beside them."""
-    with TestClient(create_app(config_with_agent())) as client:
+    with TestClient(create_app(bound_browser())) as client:
         auth = client.app.state.composition.device_auth
         headers = device_headers(auth.issue(DEVICE_UUID, DEVICE_MAC.lower()))
         with connect(client, offered("bogus.1"), headers=headers) as websocket:
@@ -258,7 +268,7 @@ def test_a_board_offering_subprotocols_is_still_a_board() -> None:
 def test_the_token_value_is_never_the_selected_protocol() -> None:
     """Offered first, so an accept that echoed the first offered value
     would echo the token."""
-    with TestClient(create_app(config_with_agent())) as client:
+    with TestClient(create_app(bound_browser())) as client:
         token = issued(client)
         values = [f"vinga.token.{token}", *offered(None)]
         with connect(client, values) as websocket:

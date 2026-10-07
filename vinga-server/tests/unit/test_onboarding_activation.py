@@ -136,11 +136,12 @@ def test_a_bound_device_is_never_asked_to_activate() -> None:
         assert body["websocket"]["token"] != ""
 
 
-def test_a_configured_default_agent_keeps_todays_behavior_for_unknown_devices() -> None:
-    """The upgrade regression. A deployment with a default agent covers
-    every unknown MAC by design, so its devices keep receiving a token
-    and no activation object: upgrading to this release changes nothing
-    for them."""
+def test_a_configured_default_agent_still_offers_unknown_devices_a_code() -> None:
+    """The upgrade's behavior change (#612), where this test used to pin
+    the opposite: a deployment with a default agent covered every unknown
+    MAC, so its devices received a token and no activation object. An
+    unbound device only pairs now, default agent or not, which is what
+    the changelog's upgrade line tells an operator to claim."""
     config = Config(
         providers=MOCK_PROVIDERS, agents={"assistant": MOCK_AGENT}, default_agent="assistant"
     )
@@ -148,8 +149,8 @@ def test_a_configured_default_agent_keeps_todays_behavior_for_unknown_devices() 
 
         body = check_in(client)
 
-        assert "activation" not in body
-        assert body["websocket"]["token"] != ""
+        assert body["activation"]["code"].isdigit()
+        assert body["websocket"]["token"] == ""
 
 
 def test_onboarding_turned_off_issues_no_codes() -> None:

@@ -25,7 +25,7 @@ from typing import Any
 
 import pytest
 
-from tests.support.configs import base_config, capped_config, config_with_agent
+from tests.support.configs import POET_MAC, base_config, capped_config, config_with_agent
 from tests.support.sessions import (
     attached_capture,
     drive_reply,
@@ -500,7 +500,9 @@ class NoHello(LoopingSocket):
     ("config", "socket"),
     [
         (config_with_agent, RefusedDeviceId),
-        (lambda: base_config(default_agent=None), LoopingSocket),
+        # The device under test unbound while a default agent is set,
+        # which since #612 is a device with no agent.
+        (lambda: base_config(devices={POET_MAC: ["poet"]}), LoopingSocket),
         (config_with_agent, NoHello),
     ],
     ids=["a bad Device-Id", "no agent", "no hello"],

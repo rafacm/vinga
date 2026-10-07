@@ -961,8 +961,8 @@ pending, at the next `vinga apply`:
   agent_defaults  changed
   agents          added: assistant
 
-devices and default_agent are read as a device asks for them, so nothing about \
-them waits for an apply.
+devices are read as a device asks for them and default_agent as a claim does, \
+so nothing about them waits for an apply.
 """
 
 

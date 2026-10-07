@@ -28,6 +28,8 @@ from tests.support.configs import DEVICE_HELLO, config_with_agent
 from tests.support.events import fields_of
 from tests.support.leaks import chain, renderings
 from vinga_server.app import create_app
+from vinga_server.config import Config
+from vinga_server.config.models import DeviceRecord
 from vinga_server.device.handshake import BROWSER_SUBPROTOCOL
 from vinga_server.events import Emission, attach_server_tap, detach_server_tap
 from vinga_server.ota import OTA_PATH
@@ -42,6 +44,16 @@ BROWSER_MAC = "02:6e:5d:4c:3b:2a"
 BROWSER_CLIENT = "7a3c1e9f-2b4d-5a6c-8e0f-1d3b5c7a9e2f"
 BOARD_MAC = "aa:bb:cc:dd:ee:01"
 BOARD_CLIENT = "5e2d8c1a-7f3b-4e6d-9a0c-2b4f6d8e1a3c"
+
+
+def bound_config() -> Config:
+    """`config_with_agent` with the browser and the board bound too: an
+    unbound device only pairs (#612), and these tests follow devices that
+    are admitted."""
+    config = config_with_agent()
+    for mac in (BROWSER_MAC, BOARD_MAC):
+        config.devices[mac] = DeviceRecord(agents=["assistant"])
+    return config
 
 
 class Tap:
@@ -84,7 +96,7 @@ def test_a_refused_token_reaches_nothing(
     caplog: pytest.LogCaptureFixture, tap: Tap
 ) -> None:
     with caplog.at_level(logging.DEBUG):
-        with TestClient(create_app(config_with_agent())) as client:
+        with TestClient(create_app(bound_config())) as client:
             with pytest.raises(WebSocketDisconnect) as refused:
                 with client.websocket_connect(
                     WEBSOCKET_PATH,
@@ -108,7 +120,7 @@ def test_an_accepted_token_reaches_only_the_reply_that_handed_it_over(
     caplog: pytest.LogCaptureFixture, tap: Tap
 ) -> None:
     with caplog.at_level(logging.DEBUG):
-        with TestClient(create_app(config_with_agent())) as client:
+        with TestClient(create_app(bound_config())) as client:
             reply = client.post(
                 OTA_PATH,
                 headers={"Device-Id": BROWSER_MAC, "Client-Id": BROWSER_CLIENT},
@@ -168,14 +180,14 @@ def test_a_browsers_identity_reaches_exactly_the_fields_a_boards_does(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     with caplog.at_level(logging.DEBUG):
-        with TestClient(create_app(config_with_agent())) as client:
+        with TestClient(create_app(bound_config())) as client:
             converse(client, BOARD_MAC, BOARD_CLIENT, as_browser=False)
     board_mac = identity_fields(caplog, BOARD_MAC)
     board_client = identity_fields(caplog, BOARD_CLIENT)
     caplog.clear()
 
     with caplog.at_level(logging.DEBUG):
-        with TestClient(create_app(config_with_agent())) as client:
+        with TestClient(create_app(bound_config())) as client:
             converse(client, BROWSER_MAC, BROWSER_CLIENT, as_browser=True)
     browser_mac = identity_fields(caplog, BROWSER_MAC)
     browser_client = identity_fields(caplog, BROWSER_CLIENT)

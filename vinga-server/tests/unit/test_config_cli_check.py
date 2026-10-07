@@ -56,6 +56,7 @@ from sqlalchemy import insert
 
 from tests.support.config_cli import logged
 from tests.support.leaks import chain
+from tests.support.stores import DANGLING_AGENT, dangling_default_agent
 from vinga_server import logs
 from vinga_server.config import cli
 from vinga_server.config.cli import invocation, local, reach
@@ -199,18 +200,27 @@ def test_a_store_that_does_not_compose_names_the_entry_and_the_rule(
     """The sentence #443 was filed for, and the whole reason this
     command exists: `apply` refuses this same state without saying
     where, and here is where."""
-    seeded(lambda store: (pipeline(store), store.set_agent("sam", {"prompt": "You are Sam."})))
+    seeded(
+        lambda store: (
+            pipeline(store),
+            store.set_agent("sam", {"prompt": "You are Sam."}),
+            dangling_default_agent(store),
+        )
+    )
 
     assert cli.main(["check"]) == 1
 
     printed = capsys.readouterr()
     assert printed.out == ""
     refusal = printed.err
-    # The location, the rule, and what to do about it, which is what the
-    # boot composes and this command does not compose again.
+    # The location, the rule, and what could have been meant, which is
+    # what the boot composes and this command does not compose again.
+    # A planted reference rather than the boot's completeness rule, which
+    # went at #612.
     assert "the domain schema of the vinga database" in refusal
-    assert "default_agent is required" in refusal
+    assert "default_agent: names no agent that exists" in refusal
     assert "sam" in refusal
+    assert DANGLING_AGENT not in refusal
 
 
 def test_a_stored_credential_no_key_opens_names_the_entity_and_the_slot(
@@ -313,10 +323,11 @@ def test_a_refusal_about_the_store_repeats_nothing_stored(
     sentinels that does NOT compose, so the sentence being printed is
     one composed over the state the sentinels are in.
 
-    The rule broken is the default agent's, which is the one whose
-    sentence quotes names out of the store: it lists the agents that
-    could be named, and an agent's name is beside the prompt a
-    credential gets pasted into.
+    The rule broken is the default agent's reference, whose sentence
+    quotes names out of the store: it lists the agents that could have
+    been meant, and an agent's name is beside the prompt a credential
+    gets pasted into. (It was the boot's completeness rule, with the same
+    list, until #612 removed that rule.)
     """
     seeded(
         lambda store: (
@@ -330,6 +341,7 @@ def test_a_refusal_about_the_store_repeats_nothing_stored(
             ),
             store.set_secret(SLOT, STORED_SENTINEL),
             store.set_agent("sam", {"prompt": f"You are Sam. {PROMPT_SENTINEL}"}),
+            dangling_default_agent(store),
         )
     )
 
@@ -337,7 +349,7 @@ def test_a_refusal_about_the_store_repeats_nothing_stored(
         assert cli.main(["check"]) == 1
 
     printed = capsys.readouterr()
-    assert "default_agent is required" in printed.err
+    assert "default_agent: names no agent that exists" in printed.err
     absent(printed.out, printed.err, logged(caplog))
 
 
@@ -370,7 +382,8 @@ def _unparseable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
 
 def _will_not_compose(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     """A store carrying a sentinel in every plaintext field, refused by
-    the rule about a runnable deployment."""
+    the reference check over a default agent planted underneath the
+    repository, which no write could have left."""
     seeded(
         lambda store: (
             pipeline(store),
@@ -382,6 +395,7 @@ def _will_not_compose(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
                 },
             ),
             store.set_agent("sam", {"prompt": f"You are Sam. {PROMPT_SENTINEL}"}),
+            dangling_default_agent(store),
         )
     )
     return ""

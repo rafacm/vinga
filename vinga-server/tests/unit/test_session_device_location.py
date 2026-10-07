@@ -65,11 +65,6 @@ OFFICE = "the office"
 
 LANDING = "the landing"
 
-# A board nothing has bound, which the lane's `default_agent` covers.
-# The case the plan calls out by name: a device a default agent stands
-# behind has no record at all, so there is nothing to write a place to.
-UNBOUND_MAC = "aa:bb:cc:dd:ee:09"
-
 # A location shaped so a substring hunt for it cannot match by accident,
 # and shaped as this field's worst real value: a URL carrying a
 # credential, said out loud into a microphone or transcribed out of one.
@@ -116,17 +111,6 @@ def a_named_board(mac: str = POET_MAC, name: str = NAME) -> str:
         store.bind_device(mac, ["poet"])
         store.rename_device(mac, name)
         return store.read_device(mac).entry.id
-
-
-def a_default_agent() -> None:
-    """The other half of the unbound case: an agent every device with no
-    binding of its own reaches, and no row at all for the board that
-    then talks."""
-    with store_at() as store:
-        for stage in STAGES:
-            store.set_provider(stage, "mock", {"type": "mock"})
-        store.set_agent("poet", dict(AGENT))
-        store.set_default_agent("poet")
 
 
 def stored_location(mac: str = POET_MAC) -> str | None:
@@ -428,32 +412,6 @@ async def test_a_place_a_room_said_reaches_no_event_and_no_log(
 
 
 # --- the refusals, as what the agent says -----------------------------
-
-
-async def test_a_device_a_default_agent_covers_is_refused_a_place() -> None:
-    """The plan's own case. A default agent stands behind every board
-    with no binding of its own, so a board can be served, talked to and
-    have no record at all. Creating one is an operator's act: a room
-    that could mint a record by talking could give this server a device
-    nobody installed.
-    """
-    a_default_agent()
-    script = ScriptedLlm(
-        [[call("set_device_location", location=OFFICE)], "I cannot record that."]
-    )
-
-    with placements() as writing:
-        with a_session(script, mac=UNBOUND_MAC, device_access=writing) as session:
-            assert await run_reply(session, "you are in the office now") == [
-                "I cannot record that."
-            ]
-
-    (answer,) = said(script)
-    assert answer.endswith(builtin.NO_DEVICE_RECORD)
-    # What a person is told is what to do about it, and what they are
-    # not told is a command to run: whoever is in the room has no
-    # command line.
-    assert "vinga-server" not in answer
 
 
 async def test_a_server_that_keeps_no_writable_records_says_so() -> None:

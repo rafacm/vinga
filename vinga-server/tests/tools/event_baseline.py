@@ -1933,10 +1933,12 @@ def drive_ota_check_no_agent(directory: Path) -> None:
 
 
 def drive_ota_check_resolved(directory: Path) -> None:
+    """A bound device: the binding is what resolves it, and a default
+    agent would resolve nothing since #612."""
     config = Config(
         providers=MOCK_PROVIDERS,
         agents={"assistant": MOCK_AGENT},
-        default_agent="assistant",
+        devices={NORMALIZED: ["assistant"]},
     )
     with ota_client(apart(config, directory)) as client:
         post_system_info(client)
@@ -1949,7 +1951,7 @@ def drive_ota_check_body_reported(directory: Path) -> None:
     config = Config(
         providers=MOCK_PROVIDERS,
         agents={"assistant": MOCK_AGENT},
-        default_agent="assistant",
+        devices={NORMALIZED: ["assistant"]},
     )
     with ota_client(apart(config, directory)) as client:
         post_system_info(client)

@@ -1352,7 +1352,8 @@ def test_device_macs_are_normalized() -> None:
     assert list(config.devices) == ["aa:bb:cc:dd:ee:ff"]
     assert config.devices["aa:bb:cc:dd:ee:ff"].agents == ["assistant"]
     assert config.agents_for_device("AA:BB:CC:DD:EE:FF") == ["assistant"]
-    assert config.agents_for_device("11:22:33:44:55:66") == ["assistant"]
+    # The default agent reaches no unbound device (#612).
+    assert config.agents_for_device("11:22:33:44:55:66") == []
 
 
 def test_a_device_can_be_bound_to_several_agents() -> None:
@@ -1366,7 +1367,9 @@ def test_a_device_can_be_bound_to_several_agents() -> None:
     # The first entry is the agent a conversation starts on; the rest are
     # what M6's switch_agent will be allowed to reach.
     assert config.agents_for_device("aa:bb:cc:dd:ee:ff") == ["poet", "tutor"]
-    assert config.agents_for_device("11:22:33:44:55:66") == ["kitchen"]
+    # And an unbound one reaches nothing, the default agent included (#612).
+    assert config.agents_for_device("11:22:33:44:55:66") == []
+    assert config.bound_to("11:22:33:44:55:66") == ()
 
 
 def test_a_binding_written_as_one_name_is_refused() -> None:

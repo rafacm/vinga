@@ -39,7 +39,7 @@ from tests.support.stores import rows
 from tests.support.wire import connect, shake_hands
 from vinga_server.app import create_app
 from vinga_server.config import Config, FileConfig, compose_config
-from vinga_server.config.models import domain_fields, normalize_mac
+from vinga_server.config.models import DeviceRecord, domain_fields, normalize_mac
 from vinga_server.config.store import ConfigStore
 
 MAC = normalize_mac(DEVICE_MAC)
@@ -58,21 +58,13 @@ def store() -> Iterator[ConfigStore]:
         yield opened
 
 
-def recording_server(store: ConfigStore, *, bind: str | None = MAC) -> Config:
+def recording_server(store: ConfigStore, *, bind: str = MAC) -> Config:
     """A server that records, whose domain half really is in the
-    database.
-
-    `bind` is the board to bind, or None for the case a default agent
-    covers: a MAC that reaches an agent with no device record behind it
-    at all.
-    """
+    database, with `bind` bound to its one agent."""
     for stage in STAGES:
         store.set_provider(stage, "mock", {"type": "mock"})
     store.set_agent("assistant", dict(AGENT))
-    if bind is not None:
-        store.bind_device(bind, ["assistant"])
-    else:
-        store.set_default_agent("assistant")
+    store.bind_device(bind, ["assistant"])
     return compose_config(
         FileConfig(server={"conversations": {"enabled": True}}),
         domain_fields(store.load().domain),
@@ -155,12 +147,16 @@ def test_a_board_swap_leaves_the_sessions_the_device_already_had(
 
 
 def test_a_device_with_no_record_records_no_name(store: ConfigStore) -> None:
-    """A default agent admits a board nothing bound, which is a MAC with
-    no name anywhere to copy. The column is null, and the MAC beside it
-    is what a reader has, exactly as before this column existed."""
-    config = recording_server(store, bind=None)
+    """A board the served world binds with nothing else said about it,
+    which is a MAC with no name anywhere to copy: a configuration handed
+    to the server binding it by the bare agent list. The column is null,
+    and the MAC beside it is what a reader has, exactly as before this
+    column existed. (A default agent admitted such a board too, until
+    #612 made an unbound device pair instead.)"""
+    config = recording_server(store)
+    config.devices[MAC] = DeviceRecord(agents=["assistant"])
 
-    with TestClient(create_app(config, from_store=True)) as client:
+    with TestClient(create_app(config)) as client:
         opened(client)
 
     (row,) = recorded()
