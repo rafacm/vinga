@@ -874,6 +874,10 @@ def test_the_identity_the_api_answers_is_the_derivation_s_own(
         "onboarding_enabled": True,
         "onboarding_url": derived,
         "onboarding_provenance": origin.provenance,
+        # The one live field, read from the installed world: this one
+        # names no provider in agent_defaults, so the built-in agent is
+        # unprovided for every stage (#612).
+        "builtin_agent": {"status": "unprovided", "stages": ["llm", "asr", "tts", "vad"]},
     }
 
 

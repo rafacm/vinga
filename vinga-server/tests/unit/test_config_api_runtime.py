@@ -1145,6 +1145,8 @@ def test_the_identity_read_answers_what_the_root_composed(
         "onboarding_enabled": True,
         "onboarding_url": ONBOARDING_URL,
         "onboarding_provenance": ONBOARDING_PROVENANCE,
+        # Null from an application that installs no world to ask.
+        "builtin_agent": None,
     }
 
 
