@@ -479,6 +479,34 @@ def test_an_unbound_browser_pairs_with_a_code(visits: Callable[..., Visit], serv
     assert_no_leak(server, visit)
 
 
+def test_with_no_default_agent_an_invite_binds_the_browser_to_vinga(
+    visits: Callable[..., Visit], server: Server
+) -> None:
+    """The built-in agent as the default (#612): the seed's defaults
+    name every stage, so the world serves vinga, and with the lane's own
+    default cleared an invite naming no agent binds the browser to vinga,
+    which answers it."""
+    server.seed(PLAIN_REPLY)
+    server.api("DELETE", "/default-agent")
+    visit = visits(OBSERVE)
+    page = visit.page
+    mac = visit.identity()["mac"]
+
+    record = server.api("GET", f"/devices/{mac}")["entity"]
+    assert record["agents"] == ["vinga"]
+
+    page.locator("#start").click()
+    visit.wait_for("the session", lambda: server.said("session_open", device=mac))
+    visit.wait_for("it was heard", lambda: server.said("heard", device=mac))
+    visit.wait_for(
+        "vinga's reply rendered",
+        lambda: float(page.evaluate("document.documentElement.dataset.vingaPcmSum || '0'")) > 0,
+    )
+    page.locator("#end").click()
+    visit.wait_for("the person's ending", lambda: visit.status() == ENDED_BY_PERSON)
+    assert_no_leak(server, visit)
+
+
 def test_a_microphone_whose_setup_fails_is_released(
     visits: Callable[..., Visit], server: Server
 ) -> None:
