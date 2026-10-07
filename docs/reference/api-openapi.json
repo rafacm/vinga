@@ -2330,7 +2330,7 @@
     "/devices/pending/{code}": {
       "post": {
         "summary": "Add Device",
-        "description": "Bind the device showing this activation code, and retire the\ncode.\n\nThe MAC comes from the pending entry, so the operator binds what\nthe board in front of them is showing rather than a MAC they\nhave to go and find. The write itself is the same repository\ncall `PUT /devices/{mac}` makes, so reference checking and\ntransactionality are inherited rather than restated, and the\nacknowledgement is the same one, naming the MAC that was bound.\n\nThe claim is atomic: the code is reserved before the write and\nconsumed after it, so two operators racing one code produce one\nbind and one retryable refusal. A write that fails releases the\nreservation, leaving the code claimable again, because the\ndevice is still showing it.",
+        "description": "Bind the device showing this activation code, and retire the\ncode.\n\nThe MAC comes from the pending entry, so the operator binds what\nthe board in front of them is showing rather than a MAC they\nhave to go and find. The write itself is the same repository\ncall `PUT /devices/{mac}` makes, so reference checking and\ntransactionality are inherited rather than restated, and the\nacknowledgement is the same one, naming the MAC that was bound.\n\nThe claim is atomic: the code is reserved before the write and\nconsumed after it, so two operators racing one code produce one\nbind and one retryable refusal. A write that fails releases the\nreservation, leaving the code claimable again, because the\ndevice is still showing it.\n\nThe agents are optional, which is where this differs from the\nwrite by MAC (#612): none named binds the device to the default\nagent, which the repository reads inside the write's own\ntransaction, so the acknowledgement is the only place the\noperator learns which agent that was.",
         "operationId": "add_device_devices_pending__code__post",
         "parameters": [
           {
@@ -2348,7 +2348,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/DeviceBinding"
+                "$ref": "#/components/schemas/PendingClaim"
               }
             }
           }
@@ -9086,6 +9086,22 @@
         "title": "DeviceBinding",
         "type": "object"
       },
+      "PendingClaim": {
+        "additionalProperties": false,
+        "description": "What a claim by activation code carries: the agents the device\nis to reach, or none, for the default agent.\n\nA model of its own rather than `DeviceBinding` with a looser field,\nbecause the two writes differ in exactly this: a write by MAC is\nalso the rebind verb, where an omitted agent could mean the default\nor a mistake, and a claim is a new device, which is what a default\nagent is for (#612).",
+        "properties": {
+          "agents": {
+            "description": "The agents this device is bound to, by name, with the meaning they have in a device binding. Left out or empty, the device is bound to the default agent, the agent a newly bound device starts with, and the claim is refused with nothing changed when none is set. Every name has to be an agent that exists, or the claim is refused.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Agents",
+            "type": "array"
+          }
+        },
+        "title": "PendingClaim",
+        "type": "object"
+      },
       "DeviceRename": {
         "additionalProperties": false,
         "description": "What a device rename carries: the name the device is to have.\n\nA body rather than a second path segment, for `AgentRename`'s\nreason: the device is addressed by the MAC a board connects with,\nwhich is the identity the act is performed on, and the name is what\nthe request carries.",
@@ -9139,7 +9155,7 @@
         "description": "What a default-agent write carries. Clearing it is the DELETE,\nnot a null here: one way to say a thing.",
         "properties": {
           "name": {
-            "description": "The agent an unbound device reaches. It has to be an agent that exists. To unset it, DELETE this resource, which leaves the devices map as the allowlist.",
+            "description": "The agent a newly bound device starts with: a claim by activation code that names no agent binds the device to it. It admits no device by itself. It has to be an agent that exists. To unset it, DELETE this resource, after which a claim has to name its agents.",
             "title": "Name",
             "type": "string"
           }

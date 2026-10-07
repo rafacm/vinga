@@ -390,27 +390,25 @@ _LIVE_BINDING_LOCATION = "the stored device bindings"
 # program this server neither ships nor versions, so a sentence
 # composed here naming one prescribes a spelling an image built before
 # a rename no longer has (#386). The state travels as
-# `device-already-bound` and the client spells the commands. Its
-# sibling below has no token because it has no command either: what a
-# default agent covers is a state an operator reads the sentence for.
+# `device-already-bound` and the client spells the commands.
+#
+# It had a sibling until #612, refusing a claim once a default agent
+# had been set, because a default agent covered every unbound device.
+# One covers none now (an unbound device only pairs), so the claim has
+# nothing to refuse over and the sentence went with its decision site.
 ALREADY_BOUND = (
     "devices: this device has been bound since it started showing that activation "
     "code, so the code binds nothing now. Nothing was changed, and the device reaches "
     "its agents at its next check."
 )
 
-ALREADY_COVERED = (
-    "devices: a default agent has been set since this device started showing that "
-    "activation code, and it covers every device that has no binding of its own, so "
-    "the code binds nothing now. Nothing was changed. To give this device an agent of "
-    "its own, bind it by its MAC"
-)
-
 # What enrolling a device refuses with (#613, D5b). The first is the
 # collision a freshly minted MAC can meet, and its caller draws again
 # rather than reading it, so it names no address; the second is the
-# default agent having been cleared since the caller decided to enroll.
-# Neither names a command, for the reason the two above name none.
+# default agent having been cleared since the caller decided to enroll,
+# and it is also what a claim naming no agent meets when none is set
+# (#612), since both are a new device with no agent to start on.
+# Neither names a command, for the reason the one above names none.
 ALREADY_ENROLLED = (
     "devices: a device with this MAC is already configured, so no new device was "
     "created there. Nothing was changed."
@@ -991,20 +989,19 @@ class ConfigStore:
         """
         return self._device_write(_device_change(mac, list(agents)))
 
-    def claim_device(self, mac: str, agents: Sequence[str]) -> BoundDevice:
+    def claim_device(self, mac: str, agents: Sequence[str] = ()) -> BoundDevice:
         """Bind a device that nothing has configured yet, or refuse.
 
         `bind_device` with a condition, and the condition is the whole
-        of it: the row must not exist, and no default agent may be set,
-        both read inside the same transaction as the write. That is what
-        an activation code needs and what a MAC does not. A code is
-        issued to a device the database had nothing to say about, and it
-        then sits on a screen for minutes while anything may happen to
-        the configuration underneath it: another operator binding the
-        same board by its MAC, or a default agent being set that covers
-        every board at once. An upsert would let the older decision
-        replace the newer one, silently, and whoever made the newer one
-        would have no reason to look.
+        of it: the row must not exist, read inside the same transaction
+        as the write. That is what an activation code needs and what a
+        MAC does not. A code is issued to a device the database had
+        nothing to say about, and it then sits on a screen for minutes
+        while anything may happen to the configuration underneath it,
+        such as another operator binding the same board by its MAC. An
+        upsert would let the older decision replace the newer one,
+        silently, and whoever made the newer one would have no reason
+        to look.
 
         Refused rather than merged, because there is no merge to make:
         the two writes say different things about one device and only
@@ -1012,12 +1009,22 @@ class ConfigStore:
         refusal costs is one command, and the device is configured
         either way: it reaches its agent at its next check.
 
-        Both refusals are fixed sentences naming no address, for the
+        `agents` empty means none named, and the device is bound to the
+        default agent, read under the same lock the way enrolment reads
+        it (#612): that is what a default agent is now, the agent a
+        newly bound device starts with. With none set the claim is
+        refused and nothing is written. A default agent being set while
+        the code was on a screen is no longer a refusal: it covers no
+        device, so it decided nothing about this one.
+
+        The refusals are fixed sentences naming no address, for the
         reason recorded where they are written: this is the one path
         here a caller reaches without sending the MAC, and its sentence
         travels into an API body, a log and the stderr of whatever holds
         the code.
         """
+        if not agents:
+            return self._device_write(_DeviceBinding(mac=_mac(mac)), unconfigured=True)
         return self._device_write(_device_change(mac, list(agents)), unconfigured=True)
 
     def enroll_device(self, mac: str, name: str) -> BoundDevice:
@@ -1283,8 +1290,10 @@ class ConfigStore:
         something that is not there is a request that addressed nothing;
         `unconfigured` is the activation code's condition, refusing a
         device the configuration has already spoken about. `enrolling`
-        is a try link's: no row may exist, a default agent must, and the
-        binding is to that agent, read here under the lock.
+        is a try link's: no row may exist either. Both of the last two
+        create a device, and one arriving with no agents named is bound
+        to the default agent, read here under the lock, or refused when
+        none is set.
 
         `identified` is the third way in, and it is an ADDRESS rather
         than a condition: the binding arrives with no MAC on it and the
@@ -1307,16 +1316,13 @@ class ConfigStore:
             stored = domain.devices.get(binding.mac)
             if existing and stored is None:
                 raise UnknownEntityError(_NO_SUCH_DEVICE)
-            if unconfigured:
-                if stored is not None:
-                    raise DeviceAlreadyBoundError(
-                        ALREADY_BOUND, reason=RefusalReason.DEVICE_ALREADY_BOUND
-                    )
-                if domain.default_agent is not None:
-                    raise DeviceAlreadyBoundError(ALREADY_COVERED)
-            if enrolling:
-                if stored is not None:
-                    raise DeviceAlreadyBoundError(ALREADY_ENROLLED)
+            if unconfigured and stored is not None:
+                raise DeviceAlreadyBoundError(
+                    ALREADY_BOUND, reason=RefusalReason.DEVICE_ALREADY_BOUND
+                )
+            if enrolling and stored is not None:
+                raise DeviceAlreadyBoundError(ALREADY_ENROLLED)
+            if (unconfigured or enrolling) and binding.agents is None:
                 if domain.default_agent is None:
                     raise ConfigError(NOTHING_TO_ENROLL_ONTO)
                 binding = replace(binding, agents=(domain.default_agent,))

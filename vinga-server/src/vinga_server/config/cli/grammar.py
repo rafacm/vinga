@@ -1644,7 +1644,12 @@ def _bound_by_mac(row: Command) -> Callable[..., None]:
 
 def _bound_by_code(row: Command) -> Callable[..., None]:
     """The same binding, addressed by the six digits on a board's screen
-    instead of by a MAC nobody has had to find."""
+    instead of by a MAC nobody has had to find.
+
+    The agents are a payload group of zero or more, where `device bind`'s
+    are one or more (#612): a claim is a new device, which is what the
+    default agent is for, while a bind by MAC is also the rebind verb, and
+    there an omitted agent could mean the default or a mistake."""
 
     def run(
         context: typer.Context,
@@ -1654,7 +1659,13 @@ def _bound_by_code(row: Command) -> Callable[..., None]:
                 metavar="CODE", help="the six digits the device is showing and speaking"
             ),
         ],
-        agents: Annotated[list[str], typer.Argument(metavar="AGENT")],
+        agents: Annotated[
+            list[str] | None,
+            typer.Argument(
+                metavar="AGENT",
+                help="the agents to bind it to; none binds it to the default agent",
+            ),
+        ] = None,
         config: ConfigOption = None,
         api_url: ApiUrlOption = None,
         force: ForceOption = None,
@@ -1663,7 +1674,7 @@ def _bound_by_code(row: Command) -> Callable[..., None]:
         row.perform(
             _invocation(
                 row, context, config, api_url, force, no_input,
-                code=code, agents=tuple(agents),
+                code=code, agents=tuple(agents or ()),
             )
         )
 
@@ -2262,7 +2273,8 @@ COMMANDS: tuple[Command, ...] = (
         declare=_bound_by_code,
         help=(
             "bind the device showing this activation code, which is the six digits on "
-            "its screen; use device bind when you know the MAC instead"
+            "its screen, to the agents named or else to the default agent; use device "
+            "bind when you know the MAC instead"
         ),
     ),
     # The setting that is a noun with two verbs. `<name>` is payload
