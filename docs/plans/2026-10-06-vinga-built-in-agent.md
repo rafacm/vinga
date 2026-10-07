@@ -783,8 +783,14 @@ lane (`tests/local/`) for real models.
   credential is planted at a check-in and asserted absent from
   `llm.systems`, both log formats and every event (M4). A lookup query
   carrying a credential-shaped string is asserted absent from both log
-  formats and every event field; it may appear only in the conversation
-  record, the content surface (M5). `builtin_agent_not_served` is
+  formats and every event field. It may appear only in the two content
+  surfaces: the conversation record, and the tool-argument field of the
+  LLM-input telemetry span, which exists only when LLM input export is
+  switched on (`runtime/pipeline.py` stages tool arguments for it, and
+  the event catalog documents that field as content). The test runs
+  with export off, where the span carries no arguments, and with it on,
+  where the query is in that field and still in no log line or other
+  event field (M5). `builtin_agent_not_served` is
   asserted to carry only its closed-set tokens (M3).
 - **Pins.** The live-binding statement pin moves in its own commit
   (M1). An operator agent's assembled prompt is pinned byte-identical
@@ -878,8 +884,10 @@ lane (`tests/local/`) for real models.
 
 - **No-leak**: the reported board type never enters a prompt, a
   sentence or an event beyond the bounded `ota_check` field it already
-  rides; a lookup query is conversation content and reaches no log or
-  event field; `builtin_agent_not_served` carries closed-set tokens
+  rides; a lookup query is conversation content: it reaches the
+  conversation record and, only with LLM input export on, the
+  telemetry span's tool-argument field, and no log line or other event
+  field; `builtin_agent_not_served` carries closed-set tokens
   only; the displacement and override refusals quote no stored text
   (the name they concern is the constant `vinga`). Sentinels as under
   Tests.
@@ -1080,5 +1088,10 @@ Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.1, re
    `unprovided`.
 
 6. **P2: The lookup-query no-leak assertion omits an authorized content channel.** Evidence: the test plan (`docs/plans/2026-10-06-vinga-built-in-agent.md:737`) says a query may appear only in the conversation record. The pipeline (`vinga-server/src/vinga_server/runtime/pipeline.py:793`) also stages tool arguments for a telemetry span when LLM input export is enabled; the event catalog (`vinga-server/src/vinga_server/events/catalog.py:4178`) documents that content field. The plan should classify that opt-in span as an authorized content surface and test both export-off and export-on behavior, while keeping the query out of ordinary logs and event fields.
+
+   *Resolution:* accepted. The opt-in LLM-input span's tool-argument
+   field is named as the second content surface beside the conversation
+   record, and M5's sentinel test runs with export off and on (Tests,
+   Standing lenses).
 
 **Verdict: not ready.** The lookup decision is unmeasured, and the stated board-guide test cannot pass as written.
