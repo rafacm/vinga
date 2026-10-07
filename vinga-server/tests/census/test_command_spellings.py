@@ -995,6 +995,36 @@ def test_a_fragment_is_a_record_the_way_the_changelog_is() -> None:
     assert manifest_of(fragment) == manifest_of(folded)
 
 
+# The built-in agent's knowledge
+#
+# vinga answers from the Use pages and from the copy of them packaged
+# inside the server (`tests/census/test_packaged_pages.py`). What keeps
+# the commands it names runnable is this census holding every one of
+# them to the registered grammar, which it does only while those pages
+# classify `respell`. So the class is pinned here (plan D10): an entry
+# added to `_HISTORICAL_PATHS` that covered a Use page, or the copy,
+# would exempt vinga's knowledge from the live grammar, and it fails
+# this test rather than passing unnoticed. The copies need no rule of
+# their own: they quote what their sources quote, in the same class, so
+# the distinct-pair manifest does not move for them.
+
+
+def test_vinga_s_knowledge_is_held_to_the_live_grammar() -> None:
+    from tests.census.test_packaged_pages import COPY, sources
+
+    found = sources()
+    paths = [
+        *(source.relative_to(REPO_ROOT).as_posix() for source in found.values()),
+        *((COPY / name).relative_to(REPO_ROOT).as_posix() for name in found),
+    ]
+
+    assert "docs/devices/README.md" in paths
+    assert "vinga-server/src/vinga_server/knowledge/pages/devices/README.md" in paths
+    assert {path: [row.kind for row in found_in(LIVE, path)] for path in paths} == {
+        path: ["respell"] for path in paths
+    }
+
+
 # What the manifest aggregates, and what it aggregates away
 #
 # Properties of the rendering rather than of today's tree, so they are
