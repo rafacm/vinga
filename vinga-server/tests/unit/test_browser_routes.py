@@ -5,8 +5,9 @@ Content-Security-Policy that keeps its scripts and connections on its
 own origin; `GET /try/static/<version>/<name>` serves the allowlisted
 modules immutable and nothing else (D2, D2b). `POST
 /x/<key>/try-identity` mints an identity on the onboarding alias, behind
-its key guard, and refuses while a default agent is set (D4, D4a). All
-of it is mounted with the alias and never without it.
+its key guard, on every deployment (D4; #612 removed D4a's refusals,
+since no unbound device is admitted any more). All of it is mounted
+with the alias and never without it.
 """
 
 import re
@@ -18,17 +19,16 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from tests.conftest import TEST_API_SECRET
 from tests.support.checkin import SYSTEM_INFO, unbound_config
 from tests.support.configs import config_with_agent, load_config_from_data
 from tests.support.leaks import chain
-from tests.support.registry import booted, store_at
+from tests.support.registry import booted
 from vinga_server.app import create_app
 from vinga_server.browser import (
     ALLOWLIST,
     PAGE_PATH,
     STATIC_PATH,
-    TRY_IDENTITY_UNAVAILABLE,
-    TRY_LINK_NEEDED,
     Assets,
     build_router,
 )
@@ -42,6 +42,8 @@ AUTH_SECRET_ENV = "VINGA_AUTH_SECRET"
 # The module as the page names it: relative to the page, which every
 # caller here fetched at `/try/`.
 MODULE = re.compile(r'src="(static/([0-9a-f]+)/page\.js)"')
+
+BEARER = {"Authorization": f"Bearer {TEST_API_SECRET}"}
 
 
 @pytest.fixture(autouse=True)
@@ -326,21 +328,53 @@ def test_each_start_is_a_new_identity() -> None:
     assert first != second
 
 
-def test_with_a_default_agent_the_mint_refuses_and_admits_nothing() -> None:
-    """D4a: a default agent would admit a fresh MAC with no code, so the
-    page is told to ask for a try link, and nothing is handed over or
-    left behind."""
-    with TestClient(create_app(config_with_agent())) as client:
-        refused = client.post(f"{short_path(client)}try-identity")
-        pending = client.app.state.composition.pending.listing()
-
-    assert refused.status_code == 409
-    assert refused.json() == {"error": TRY_LINK_NEEDED}
-    assert refused.headers["cache-control"] == "no-store"
-    assert pending == ()
+def _checked_in(client: TestClient, base: str, minted: dict[str, str]) -> dict:
+    """The check-in a minted browser makes next, as the page makes it."""
+    reply = client.post(
+        base,
+        json={**SYSTEM_INFO, "board": {"type": "vinga-browser"}},
+        headers={"Device-Id": minted["mac"], "Client-Id": minted["client_id"]},
+    )
+    assert reply.status_code == 200
+    return reply.json()
 
 
-# Carried by the failing read, so a refusal that repeated anything of the
+def test_a_minted_browser_pairs_and_is_admitted_only_once_claimed() -> None:
+    """The admission path M1 opens is no wider than the one it closes
+    (#612, plan review round 2): with a default agent set, which used to
+    be the mint's refusal, a freshly minted identity checks in, is
+    offered a code and no token, and is still refused a token at its
+    next check-in, until an operator claims that code. Then, and only
+    then, it is admitted, bound to the default agent the claim named
+    none instead of."""
+    config = booted(default_agent="assistant")
+    with TestClient(create_app(config, from_store=True)) as client:
+        base = short_path(client)
+        minted = client.post(f"{base}try-identity")
+        assert minted.status_code == 200
+        identity = minted.json()
+
+        first = _checked_in(client, base, identity)
+        assert first["websocket"]["token"] == ""
+        code = first["activation"]["code"]
+        assert code.isdigit()
+
+        again = _checked_in(client, base, identity)
+        assert again["websocket"]["token"] == ""
+        assert again["activation"]["code"] == code
+
+        claimed = client.post(f"/api/devices/pending/{code}", json={}, headers=BEARER)
+        assert claimed.status_code == 200, claimed.text
+
+        admitted = _checked_in(client, base, identity)
+        bound = client.get(f"/api/devices/{identity['mac']}", headers=BEARER)
+
+    assert admitted["websocket"]["token"] != ""
+    assert "activation" not in admitted
+    assert bound.json()["entity"]["agents"] == ["assistant"]
+
+
+# Carried by the failing read, so an answer that repeated anything of the
 # failure would carry it too.
 READ_FAILURE = "sk-test-browser-mint-read-failure-never-a-real-credential"
 
@@ -349,45 +383,25 @@ def _failing_read(*_: object) -> None:
     raise RuntimeError(f"disk I/O error near {READ_FAILURE}")
 
 
-@pytest.mark.parametrize("stored_default", [False, True])
-def test_a_mint_that_cannot_read_the_bindings_refuses_until_it_can(
-    monkeypatch: pytest.MonkeyPatch, stored_default: bool
+def test_a_mint_does_not_depend_on_reading_the_bindings(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """D4a asks whether a fresh MAC would be admitted unbound, and when
-    the database cannot be read the answer comes from the served
-    configuration, which says nothing of a default agent set after it
-    was loaded. So an empty answer from there is refused, in fixed words
-    a retry can outlive, rather than read as "nobody would admit it".
-
-    The server boots with no default agent; one is then set in the
-    database (or not), the read fails, and the same request is made
-    again once it recovers: a mint with nothing set, the try-link
-    refusal with one."""
-    with TestClient(create_app(booted(), from_store=True)) as client:
-        if stored_default:
-            with store_at() as store:
-                store.set_default_agent("assistant")
-        path = f"{short_path(client)}try-identity"
-
+    """The mint used to ask the bindings whether a fresh MAC would be
+    admitted unbound, and refused with a 503 when the database could not
+    say (D4a). No unbound MAC is admitted since #612, so there is nothing
+    to ask: a mint while the read is failing answers an identity, carries
+    nothing of the failure, and leaves the pending table alone."""
+    with TestClient(create_app(booted(default_agent="assistant"), from_store=True)) as client:
         with monkeypatch.context() as failing:
             failing.setattr("vinga_server.device.bindings.read_live_binding", _failing_read)
-            refused = client.post(path)
-        recovered = client.post(path)
+            minted = client.post(f"{short_path(client)}try-identity")
         pending = client.app.state.composition.pending.listing()
 
-    assert refused.status_code == 503
-    assert refused.json() == {"error": TRY_IDENTITY_UNAVAILABLE}
-    assert refused.headers["cache-control"] == "no-store"
-    assert READ_FAILURE not in refused.text
-    assert all(READ_FAILURE not in value for value in refused.headers.values())
+    assert minted.status_code == 200
+    assert set(minted.json()) == {"mac", "client_id"}
+    assert minted.headers["cache-control"] == "no-store"
+    assert READ_FAILURE not in minted.text
     assert pending == ()
-
-    if stored_default:
-        assert recovered.status_code == 409
-        assert recovered.json() == {"error": TRY_LINK_NEEDED}
-    else:
-        assert recovered.status_code == 200
-        assert set(recovered.json()) == {"mac", "client_id"}
 
 
 @pytest.mark.parametrize("wrong", ["AAAAAAAA", "aaaaaaab", "nonsense-key"])

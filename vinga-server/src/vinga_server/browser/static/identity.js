@@ -5,9 +5,9 @@
 // page's fragment, is redeemed with one same-origin POST, which answers
 // the identity and the onboarding path to check in at. A browser that
 // holds no identity and no link starts from the onboarding URL instead,
-// pasted once, and asks the server to mint one under it, which the
-// server refuses while a default agent would admit it unpaired. No
-// script here invents a MAC.
+// pasted once, and asks the server to mint one under it, which it then
+// pairs with by the code its check-in shows. No script here invents a
+// MAC.
 //
 // The device token is not kept: the page checks in before every
 // conversation, as a board does at boot, and holds the token it is
@@ -101,8 +101,8 @@ export async function redeem(token) {
 }
 
 // Ask the server for an identity under the onboarding URL a person
-// pasted. Refused, with the server's own sentence, while a default
-// agent would admit a new browser without pairing.
+// pasted. The server mints one on every deployment; what admits the
+// browser is the claim of the code it is shown next.
 export async function start(pasted) {
   const onboardingPath = urls.pasted(pasted.trim());
   if (onboardingPath === null) {

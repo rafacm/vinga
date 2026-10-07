@@ -22,33 +22,13 @@ fragment, can redeem it. The redemption answers the identity and the
 onboarding path in its body, which the page keeps and checks in at,
 while its own address stays `/try/`.
 
-The mint refuses while a default agent is set (D4a). A default agent
-admits every unknown MAC without a code, so a browser minted there
-would reach an agent unbound, which is what the issue rules out; until
-#612 makes every unbound device pair, a browser on such a deployment
-starts from a try link instead. The question asked is the check-in's
-own, about the identity just minted: would this MAC resolve to an
-agent with nobody having bound it? A minted MAC is new, so it does
-exactly when a default agent covers it, and asking the bindings rather
-than reading the default agent keeps one rule rather than two that
-could disagree. When the database cannot be read, the bindings answer
-from the served configuration instead, and an empty answer from there
-cannot say no default agent is set, only that none was when it was
-loaded; the mint refuses that too, with a 503 a retry may outlive. A
-refusal hands nothing over and writes nothing.
-
-The refusal is asked at the mint and nowhere after it, so one window
-stays open, deliberately. A browser minted while no default agent is
-set, which never pairs, is admitted without a code once an operator
-later sets one: its MAC is unbound, and a default agent covers every
-unbound MAC. That adds no capability. D4a is a product rule (a cleared
-browser pairs), not an access boundary: under a default agent the stock
-OTA check-in hands a token to any unknown MAC, so whoever holds the
-onboarding path can already reach the default agent with a made-up MAC,
-and an identity minted earlier gains nothing over that. Remembering
-which MACs were minted, to make them pair anyway, would be the second
-admission rule D4a exists to avoid; #612 closes the window by making
-every unbound device pair.
+The mint always mints. It used to refuse while a default agent was set
+(D4a), because a default agent admitted every unknown MAC without a
+code, and to refuse again when it could not find out whether one was
+set. Since #612 an unbound device only pairs, on every deployment, so a
+minted identity is admitted only once an operator claims the code its
+check-in shows, and there is nothing left for the mint to ask. A mint
+hands over an identity and writes nothing.
 """
 
 import json
@@ -59,7 +39,6 @@ from fastapi.responses import JSONResponse
 from vinga_server.composition import Composition
 from vinga_server.config.api import store_dependency
 from vinga_server.config.models import BROWSER_MOUNT_PATH, ONBOARDING_MOUNT_PATH
-from vinga_server.device.bindings import DeviceBindings
 from vinga_server.onboarding.browser import mint
 from vinga_server.onboarding.keys import _guarded, onboarding_path
 from vinga_server.onboarding.try_links import redeem
@@ -76,25 +55,6 @@ from .assets import (
 
 # What a browser appends to the onboarding path to ask for an identity.
 TRY_IDENTITY_SEGMENT = "try-identity"
-
-# What the mint answers while a default agent is set. Fixed, and the
-# page shows it as it stands.
-TRY_LINK_NEEDED = (
-    "This server connects every new device to its default agent, so a browser "
-    "joins it through a try link rather than by pairing. Ask the person who "
-    "runs it for one."
-)
-
-# What the mint answers when it cannot find out whether a new browser
-# would be admitted unbound: the database could not be read, and the
-# served configuration answering in its place cannot be trusted about a
-# default agent it does not name. Fixed, saying nothing of the failure,
-# which the bindings view has already logged; a retry may succeed, which
-# is why it is a 503 and not the try-link refusal.
-TRY_IDENTITY_UNAVAILABLE = (
-    "This server cannot check right now whether a new browser may start here. "
-    "Try again in a moment."
-)
 
 # Where the page redeems a try link's token.
 REDEEM_PATH = f"{BROWSER_MOUNT_PATH}/redeem"
@@ -199,24 +159,10 @@ def build_router(key: str | None, assets: Assets | None = None) -> APIRouter:
 
 
 async def try_identity(request: Request) -> Response:
-    """A fresh identity for a browser that holds none, or the fixed
-    refusal while a default agent would admit it unbound, or while this
-    server cannot find out whether one would."""
-    comp: Composition = request.app.state.composition
-    bindings: DeviceBindings = comp.bindings
+    """A fresh identity for a browser that holds none. Unconditional: what
+    admits it is a claim of the code its check-in is then shown, never
+    the mint (#612)."""
     identity = mint()
-    bound = await bindings.resolve(identity.mac)
-    if bound.names:
-        return JSONResponse({"error": TRY_LINK_NEEDED}, status_code=409, headers=_NO_STORE)
-    if not bound.authoritative:
-        # The activation ceremony's `"unreadable"` arm, for the same
-        # reason: an empty answer from the snapshot fallback is not the
-        # database saying no default agent is set, it is this server not
-        # having been able to read it. A default agent set since the
-        # snapshot was loaded would admit the identity minted here at
-        # its next check-in, with no code. The warning naming the
-        # failure is already in the log, from the view itself.
-        return JSONResponse({"error": TRY_IDENTITY_UNAVAILABLE}, status_code=503, headers=_NO_STORE)
     return JSONResponse({"mac": identity.mac, "client_id": identity.client_id}, headers=_NO_STORE)
 
 
