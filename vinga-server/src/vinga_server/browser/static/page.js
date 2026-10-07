@@ -217,7 +217,7 @@ async function main() {
     try {
       device = await identity.redeem(token);
       document.documentElement.dataset.vingaBound = "true";
-      say("This browser is now a device of this server, bound to its default agent. Press Start to talk.");
+      say("This browser is now a device of this server. Press Start to talk.");
     } catch (refusal) {
       say(refusal.message);
     }
