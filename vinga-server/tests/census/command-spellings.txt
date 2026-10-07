@@ -20,6 +20,10 @@ generated  vinga agent-defaults export
 generated  vinga agent-defaults set
 generated  vinga agent-defaults show
 generated  vinga apply
+generated  vinga builtin-agent
+generated  vinga builtin-agent export
+generated  vinga builtin-agent set
+generated  vinga builtin-agent show
 generated  vinga check
 generated  vinga cli-reference
 generated  vinga conversation
@@ -100,6 +104,7 @@ generated  vinga reference
 generated  vinga schema
 generated  vinga schema agent
 generated  vinga schema agent-defaults
+generated  vinga schema builtin-agent
 generated  vinga schema mcp-server
 generated  vinga schema prompt-fragment
 generated  vinga schema provider
@@ -112,6 +117,7 @@ generated  vinga show
 generated  vinga simulator
 generated  vinga simulator check-in
 generated  vinga simulator run
+generated  vinga-server config agent rename vinga
 generated  vinga-server config apply
 generated  vinga-server config device bind
 generated  vinga-server config device pending claim
@@ -198,6 +204,9 @@ historical  vinga agent show kids
 historical  vinga agent-defaults
 historical  vinga agent-defaults set
 historical  vinga apply
+historical  vinga builtin-agent
+historical  vinga builtin-agent set
+historical  vinga builtin-agent show
 historical  vinga check
 historical  vinga config apply
 historical  vinga config import
@@ -209,6 +218,7 @@ historical  vinga default-agent
 historical  vinga default-agent clear
 historical  vinga default-agent set
 historical  vinga default-agent set assistant
+historical  vinga default-agent set vinga
 historical  vinga device
 historical  vinga device bind
 historical  vinga device delete
@@ -359,19 +369,21 @@ respell  vinga agent
 respell  vinga agent export assistant
 respell  vinga agent preview
 respell  vinga agent rename
+respell  vinga agent rename vinga old-vinga
 respell  vinga agent set
 respell  vinga agent set assistant
 respell  vinga agent show kids
 respell  vinga agent-defaults export
 respell  vinga agent-defaults set
 respell  vinga apply
+respell  vinga builtin-agent set
+respell  vinga builtin-agent show
 respell  vinga check
 respell  vinga config list
 respell  vinga conversation
 respell  vinga conversation delete
 respell  vinga conversation list
 respell  vinga conversation show
-respell  vinga default-agent set
 respell  vinga default-agent set assistant
 respell  vinga device
 respell  vinga device bind
@@ -444,11 +456,13 @@ respell  vinga show
 respell  vinga simulator
 respell  vinga simulator check-in
 respell  vinga simulator run
+respell  vinga-server config agent
 respell  vinga-server config agent delete
 respell  vinga-server config agent export assistant
 respell  vinga-server config agent preview
 respell  vinga-server config agent preview assistant
 respell  vinga-server config agent preview house
+respell  vinga-server config agent rename vinga
 respell  vinga-server config agent set assistant
 respell  vinga-server config agent set house
 respell  vinga-server config agent set kids
@@ -456,6 +470,7 @@ respell  vinga-server config agent set sam
 respell  vinga-server config agent-defaults export
 respell  vinga-server config agent-defaults set
 respell  vinga-server config apply
+respell  vinga-server config builtin-agent set
 respell  vinga-server config check
 respell  vinga-server config cli-reference
 respell  vinga-server config conversation delete
