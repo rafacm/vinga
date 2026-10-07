@@ -578,3 +578,173 @@ Verification after the round: `uv run ruff check .` clean; the unit lane
 generated documents current; link check and Run and Use page check
 clean. The integration and browser lanes were not rerun for a notice
 choice, two descriptions and a guide paragraph.
+
+## M1b: browsers join by invite
+
+**Attribution:** anthropic/claude-opus-5-5, thinking high; Claude Code 2.1.291; 2026-10-07.
+
+### What landed
+
+| Plan item (Q11) | Where | Commit |
+| --- | --- | --- |
+| One vocabulary: `try_links.py` is `invites.py`, `TryLinks` is `Invites`, every reason, sentence and suite says "invite" | `onboarding/invites.py`, `onboarding/__init__.py` (`INVITE_TTL_S`, `INVITE_CAPACITY`, `INVITE_MINTS`), `config/responses.py` (`Invite`), `config/loader.py` (`InviteRefusedError`), `config/api.py` and its two description files, `composition.py`, `app.py`, the page's JavaScript, `tests/unit/test_invite*.py`, `test_invites.py`, `test_config_cli_invite.py` | `Rename try links to invites in the code` |
+| The route and its body; the agents travel with the token and are bound at redemption | `POST /api/runtime/invites` with a required `InviteRequest` body (`config/api.py`, `config/responses.py`); `Issuer.issue(agents, store, served)` and `Invites.issue(agents)` / `claim -> Invitation` (`onboarding/invites.py`); `ConfigStore.enroll_device(mac, name, agents)` and `read_agent_names` (`config/store.py`) | `Carry an invite's agents from issuance to binding` |
+| The page at `/talk/`, moving its static routes and the `ota_path` reservation | `config/models.py` (`BROWSER_MOUNT_PATH`), `browser/static/urls.js` (its copy of the redeem path), the route inventory | `Serve the browser page at /talk/` |
+| `vinga device invite [--agent NAME]...`; `vinga info` reporting only | `config/cli/devices.py` (`INVITE`, `_situated_link`, `_invite_link`), `config/cli/grammar.py` (`_invited_by`, the row, `info`'s two acts), `config/cli/acts.py` and `reach.py` (`Act.declined` and `Refused` removed) | `Add vinga device invite and stop info issuing` |
+| The page's joined sentence | `browser/static/page.js` | `Say a redeemed browser joined, not to which agent` |
+| The documentation footprint | as listed below | `Name vinga device invite where comments named info`, `Document invite links and the page at /talk/` |
+| The fragment | `changelog.d/612-invite-links.md` | `Add the changelog fragment for invite links` |
+
+Design footprint as planned: `onboarding/invites.py` keeps
+`try_links.py`'s depth under its new name and gains the bound agents
+(the API route stays a body read and one `issue` call); the CLI gains
+one verb under an existing noun, and loses two act-level mechanisms
+(`Act.declined`, `reach.Refused`) that only `info`'s link needed.
+
+### Deviations from the plan
+
+1. **The identity route was renamed too.** Q11 lists the module, the
+   class, the reasons and the page path. The page's identity mint, on
+   the onboarding alias, was `/x/<key>/try-identity`, named for the
+   page's old address; leaving it would have kept a "try" route behind
+   a page called `/talk/`. It is `/x/<key>/browser-identity` now
+   (`IDENTITY_SEGMENT`, `browser_identity` in `browser/router.py`), and
+   the old segment answers the stock 404 like the other old paths. An
+   enrolled browser holds its identity and never calls this route, so
+   nothing already joined depends on the old name.
+2. **The page's joined sentence changed.** `page.js` told a redeemed
+   browser it was "bound to its default agent", which is false for an
+   invite that named agents; it now says what the pairing path already
+   says, that the browser is a device of this server.
+3. **`Act.declined` went, and so did `reach.Refused`.** The brief allows
+   dropping `completes`/`declined` where nothing else uses them.
+   `declined` had no other user, and `Refused` (the `ConfigError`
+   subclass `reach._answer` raised for a validated problem body) existed
+   only so `_performed` could tell an API refusal of `info`'s link from
+   any other failure; both went, and `_performed` is back to stopping
+   at the first refusal, as before #613. `completes` stays: the invite
+   still needs the loopback origin only the client knows (D5c).
+4. **The invite act lives in `config/cli/devices.py`**, beside the noun
+   that owns it, rather than in `deployment.py` where `info`'s act
+   lived; it sends the binding's own body (`_binding`), which is
+   exactly `{"agents": [...]}`, rather than a second function building
+   the same object.
+5. **A glossary entry, "Invite link".** Not in the plan's M1b list; the
+   concept ships here, so it is named here.
+
+### Resolutions
+
+- **Refusal reasons.** An unknown named agent is a 422 carrying
+  `agents-unknown`, the claim's existing reason and status; an unserved
+  one is a 409 carrying `agent-not-serving`, the reason an unserved
+  agent's prompt read already carries, its docstring widened to say so.
+  No `RefusalReason` member was added or renamed: `no-default-agent`
+  still has a site (issuance naming none) until M3 renames it. Both
+  sentences (`AGENTS_UNKNOWN`, `AGENT_NOT_SERVED`) quote no name, and
+  the CLI's existing remedies (`vinga list`, `vinga apply`) follow.
+- **Stored and served, both.** A named agent has to be in the store (or
+  the redemption's write would not resolve it) and in the installed
+  world (or the browser would reach an agent that does not answer).
+  The store half reads names alone, through a new
+  `ConfigStore.read_agent_names`, rather than an agent read that would
+  decrypt stored secrets.
+- **The default agent is read at redemption, not frozen at issuance.**
+  An invite naming none carries an empty tuple, and redemption binds
+  whatever the default is when the browser opens it, read inside the
+  write's transaction as before; named agents are what ride with the
+  token. That is what "the agent a newly bound device starts with"
+  means, and M3's D5 refusal stays at issuance.
+- **Names are trimmed and a repeat collapses** (`--agent kids --agent
+  kids` binds `kids` once), the shape a binding stores; a blank name is
+  simply not an agent the store has, so it meets `agents-unknown`.
+- **The body is required.** `{}` or `{"agents": []}` names none; a
+  request with no body is a 422. A body lost on the way would otherwise
+  bind the browser to the default agent rather than the agents it named.
+- **`device invite`'s output.** The link alone on stdout, and one fixed
+  line on stderr (`INVITED`) that repeats no agent name. With no origin
+  either end can name, it fails with `NO_LINK_ORIGIN` on stderr and an
+  empty stdout, rather than printing the sentence where the link would
+  be as `info` did: a script holding `$(vinga device invite)` must never
+  hold a sentence. The link issued in that case stays live until it
+  expires, as `info`'s did.
+- **`--agent`'s help states its default** (`(default: the default
+  agent)`), which `test_every_command_describes_every_parameter_it_declares`
+  requires of every option that takes a value.
+
+### Discoveries
+
+1. **`vinga device delete`'s help said the board "reaches the default
+   agent"** afterwards, which M1 made false. Noticed here and left to
+   M1's review, which fixed it (`cff79346`, M1's round, finding 2)
+   before this milestone was rebased onto it.
+2. **What still says "try", by an untruncated grep** (`git grep -i -E
+   "/try\b|/try/|try link|try-link|try_link|try-identity|try token|runtime/try"`
+   outside `docs/plans`, `docs/features` and `CHANGELOG.md`, 16 lines,
+   kept in this worktree's `.logs/try-inventory-after.txt`): the M1 ADR's
+   "try links are unchanged for now", a record of that decision;
+   conversations migration `1012`'s docstring and its upgrade test's,
+   records of #613 that a migration does not rewrite; the reach-in
+   manifest's line for the old CLI suite, regenerated by the census run
+   that closes this milestone; the old-path tests; and the browser
+   guide's sentence saying a bookmark to `/try/` shows nothing (and its
+   packaged copy). No identifier is spelled `try_*`, `TRY_*` or
+   `Try*` any more.
+
+### Tests first, and the mutations
+
+Every new test was run red before its code changed (`.logs/c2-red.log`,
+`.logs/c4-red.log`), except the old-path test, written with the move
+and run red through the two mutations that put the old paths back.
+Each mutation was applied once, run, and restored by copy
+and `touch` (`.logs/m1b-mutations.log`).
+
+| Mutation | Killed by |
+| --- | --- |
+| `--agent` ignored at redemption (`enroll_device` handed `()`) | `test_redeeming_binds_exactly_the_agents_the_invite_named`, `test_named_agents_are_bound_though_the_default_was_cleared_since`, `test_a_named_agent_deleted_since_issuance_binds_nothing` |
+| The claim hands back no agents (`Invitation()`) | both new `test_invites.py` cases and the three redemption cases above |
+| An unserved named agent issued (served check removed) | `test_an_invite_naming_an_agent_this_server_is_not_serving_issues_nothing` |
+| An unknown named agent issued (store check removed) | five `test_an_invite_naming_an_agent_that_does_not_exist_issues_nothing` cases, `test_an_agent_served_but_deleted_from_the_store_since_issues_nothing`, both `test_a_refused_invite_quotes_no_name_it_was_sent` cases |
+| `info` still issuing (the invite act back in `info`'s acts) | 24 `test_config_cli_info.py` cases, `test_two_runs_against_one_state_are_the_same_bytes` and `test_both_acts_are_answered_by_the_address_the_banner_named` among them |
+| The old page path still served (`BROWSER_MOUNT_PATH` back to `/try`) | five `test_the_page_s_old_paths_answer_the_stock_404` cases, `test_a_path_that_is_not_under_the_page_is_allowed[/try/]`, the route inventory, and the page's own cases |
+| The old identity segment still served | both `{alias}try-identity` cases of the old-path test, the route inventory, the mint's cases |
+
+No survivor.
+
+### Verification
+
+All on the Raspberry Pi 5, logs in this worktree's `.logs/`. Both lanes
+ran with `-n auto --dist loadfile` (four cores, so four workers; `-q`
+does not print the count), never the `-n 2` fallback: the unit lane
+started at 46.3 °C, the integration runs at 57.9 °C and 55.1 °C.
+
+- `uv run ruff check .`: all checks passed.
+- Unit lane: `8472 passed, 19 skipped in 1002.11s (0:16:42)`
+  (`.logs/final-unit.log`).
+- Integration lane, first run: `2 failed, 356 passed in 919.97s`
+  (`.logs/final-integration.log`, the machine shared with another
+  lane at load 5). The two were `test_the_lane_ran_every_command_of_the_registration_table`
+  (wheel) and `test_the_lane_drove_every_command_of_the_registration_table`
+  (live): the new row had no case in either CLI lane, which
+  `Drive vinga device invite in both CLI lanes` adds. Second run:
+  `360 passed in 223.07s (0:03:43)` (`.logs/final-integration-2.log`).
+- The browser lane, through `tests/browser/run.sh` in
+  `mcr.microsoft.com/playwright/python:v1.63.0-noble` under Podman
+  (`--network host`, the development database on 127.0.0.1): `8 passed
+  in 46.16s` (`.logs/browser-lane.log`), the page at `/talk/`, its links
+  from `POST /api/runtime/invites`.
+- The generated documents regenerated through their generators (the
+  domain, server, conversations, metrics-views, events, OpenAPI and CLI
+  references) leave no diff after the last code commit, and the CLI
+  recipes read from the committed page equal the renderer's.
+- `scripts/check_doc_links.py`: `checked 337 files, 0 failures`;
+  `scripts/check_run_use_pages.py`: `checked 37 Run and Use pages, 0
+  findings`; `scripts/fold_changelog.py check`: `checked 2 fragments, 0
+  failures`.
+- `tests/census`: run last, after this section is committed, recorded
+  in the hand-back.
+
+Not verified: the smoke lane and the image (nothing in the seeds or the
+image build changed, and neither was run), the wheel-level drift checks
+CI runs against an installed wheel beyond the wheel lane's own case,
+and any real browser outside the lane: no person opened an invite link
+against this build.
