@@ -104,7 +104,7 @@ RELEASED_GRACE_S = 60.0
 # link left in a chat history is spent bearer material soon after.
 INVITE_TTL_S = 600.0
 
-# How many unredeemed links the store holds at once. Each `vinga info`
+# How many unredeemed links the store holds at once. Each `vinga device invite`
 # issues one, so this is a handful of operators running it a few times
 # each inside ten minutes, with room to spare; past it a new link is
 # refused until one is opened or expires, which is what keeps neither

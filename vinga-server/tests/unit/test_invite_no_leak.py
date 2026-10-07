@@ -3,7 +3,7 @@
 The token is a secret. It appears in exactly two places this server
 handles: the issuance response to the operator's authenticated request,
 and the inbound body of `POST /talk/redeem`. (The third, the operator's
-own terminal, is `vinga info`'s stdout, held in the CLI's suite.) It
+own terminal, is `vinga device invite`'s stdout, held in the CLI's suite.) It
 reaches no log record in either format and no record's fields, no event
 a server tap is handed, no other response body or header, no exception,
 and nothing after it is spent.

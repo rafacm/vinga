@@ -1,13 +1,15 @@
-"""Redeeming an invite link from the page (#613, D5, D5b, D5d, D5e).
+"""Redeeming an invite link from the page (#613, D5, D5b, D5d, D5e;
+#612, Q11).
 
 The link is `<origin>/talk/#<token>`. A fragment never reaches a server,
 so `GET /talk/` is the same inert page for everybody and spends nothing:
 a link preview, a prefetch or a scanner fetching it learns nothing and
 uses nothing up. The page's script reads the fragment, clears it, and
 redeems the token with a same-origin `POST /talk/redeem`, which spends
-it, mints an identity, writes the device bound to the default agent and
-named in one transaction, and answers the identity and the onboarding
-path the browser checks in at.
+it, mints an identity, writes the device bound to the agents the
+invite named (the default agent when it named none) and named in one
+transaction, and answers the identity and the onboarding path the
+browser checks in at.
 
 Every way of not redeeming answers one fixed refusal, byte for byte: a
 token never issued, one expired, one spent, one presented from another
@@ -16,7 +18,7 @@ body that is not one, spends nothing.
 
 The deployments are real: a store written through the repository, a
 server composed from it with bindings read live, the link issued
-through the configuration API as `vinga info` issues it.
+through the configuration API as `vinga device invite` issues it.
 """
 
 import asyncio
