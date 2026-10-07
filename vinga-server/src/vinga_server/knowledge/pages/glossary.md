@@ -200,8 +200,8 @@ binds to an agent, and what accrues [memory](#memory) and
 conversations. Most are physical: three units of one [board](#board)
 are three devices, and everything a board guide says is true of all
 three. A web browser can be one too, running the page the server
-serves at `/try/`: it checks in and converses as a board does, under a
-MAC the server made up for it, and a try link records it as
+serves at `/talk/`: it checks in and converses as a board does, under a
+MAC the server made up for it, and an invite link records it as
 `Browser <mac>` ([its guide](devices/browser.md)). A device reports
 which board it is at every check-in (a browser says `vinga-browser`),
 so a board is observed rather than configured.
@@ -222,7 +222,7 @@ What a device is called, held on the
 speaking through it ("you are on the kitchen speaker"). Free-form,
 because a slug reads badly in speech, and unique across the deployment
 once case and whitespace are folded together. A record created by
-binding a board is called `Device <mac>`, and one a try link creates
+binding a board is called `Device <mac>`, and one an invite link creates
 for a browser `Browser <mac>`, until somebody gives it a better name,
 so no onboarding flow asks for one the operator does not yet have.
 Both spellings are reserved for the device whose MAC they name, and
@@ -323,6 +323,16 @@ A realtime session with no conversation for the
 configured time is closed by the server; the device reconnects on
 the next button press. Exists because a realtime device streams its
 microphone continuously and would otherwise hold it open forever.
+
+### Invite link
+
+A single-use address that joins the web browser opening it to a
+deployment as a [device](#device), bound before its first word to the
+agents the link names, or to the [default agent](#default-agent) when
+it names none. `vinga device invite` prints one, and nothing else
+issues one; it works once, for ten minutes, and a restart of the server
+ends it. A browser can also join without one by pairing with a code,
+as a board does ([Onboarding a device](run/onboarding-a-device.md#a-browser-by-an-invite-link)).
 
 ### Listening modes
 

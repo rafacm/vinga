@@ -229,12 +229,15 @@ hint at it. The URL to type comes from `vinga-server config ota-url`,
 on your own terminal, or from `GET /api/runtime/info` behind the API's
 token. The derived key is a deployment-scoped path segment rather than
 a per-device credential, and that trade is deliberate and recorded.
-No device token is printed anywhere either. A try link's token is
-printed in one place, by `vinga info` on your own terminal, and answered
-by one request, the API's `POST /api/runtime/try-links` behind its
-token; it is spent by the first browser that opens the link, and is
-gone after ten minutes or a restart, whichever comes first
-([Onboarding a device](onboarding-a-device.md#a-browser-by-a-try-link)).
+No device token is printed anywhere either. An invite link's token is
+printed in one place, by `vinga device invite` on your own terminal's
+stdout, and answered by one request, the API's
+`POST /api/runtime/invites` behind its token; it is spent by the first
+browser that opens the link, and is gone after ten minutes or a
+restart, whichever comes first. Nothing else issues one: `vinga info`
+reports and prints no link, and a browser that opens the page with no
+link pairs by a code like any board, admitted only once you claim it
+([Onboarding a device](onboarding-a-device.md#a-browser-by-an-invite-link)).
 
 The WebSocket path never moves: the token is what protects it.
 
@@ -242,10 +245,10 @@ The WebSocket path never moves: the token is what protects it.
 
 **Nothing else is exposed.** `/x/<key>/`, `/xiaozhi/ota/` (or wherever
 you put it), each with an `activate` beneath it that a waiting board
-polls, `/x/<key>/try-identity`, where a browser with no try link asks
-for an identity, `/xiaozhi/v1/`, `/healthz`, `/readyz`, the browser page
-at `/try/` with its modules under `/try/static/`, which are static and
-secret-free, `/try/redeem`, which spends a try link's single-use token
+polls, `/x/<key>/browser-identity`, where a browser with no invite link
+asks for an identity, `/xiaozhi/v1/`, `/healthz`, `/readyz`, the browser
+page at `/talk/` with its modules under `/talk/static/`, which are static
+and secret-free, `/talk/redeem`, which spends an invite link's single-use token
 and answers only a request from the page's own origin, and the
 configuration API under `/api/`, which answers 401 to anything not
 carrying its bearer token. FastAPI's

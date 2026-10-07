@@ -102,7 +102,7 @@ replaced, and what anybody told an assistant about themselves was never
 the hardware's to lose.
 
 A device may also be a web browser, running the page the server serves
-at `/try/`: it speaks the protocol a board speaks, with the computer's
+at `/talk/`: it speaks the protocol a board speaks, with the computer's
 microphone and speakers, and the runtime treats it as it treats a
 board ([the browser client's guide](devices/browser.md)).
 
@@ -156,7 +156,7 @@ on purpose:
   a conversation may change, free text, and deliberately not unique,
   because two devices in one room is normal. Binding a board creates
   its record and calls it `Device <mac>` until somebody names it, and
-  a try link calls the browser it binds `Browser <mac>`, so no
+  an invite link calls the browser it binds `Browser <mac>`, so no
   onboarding flow asks for a name the operator does not yet have.
   Both are read when an agent starts speaking on a conversation, with
   its memory, and put in the agent's prompt for the rest of that

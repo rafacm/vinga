@@ -15,7 +15,7 @@ targets are in the table, one guide per model of hardware:
 Beside them, and not hardware, is the
 [**browser client**](browser.md): a page your server serves that makes
 a web browser on a computer a device, with the computer's microphone
-and speakers. It joins by a try link or by pairing with a code, and it
+and speakers. It joins by an invite link or by pairing with a code, and it
 has been checked in headless Chromium alone; its guide says what that
 covers.
 

@@ -110,7 +110,7 @@ the image ships, from the directory the compose file is in, since it
 was built with the server and cannot disagree with it:
 
 ```bash
-docker compose exec -T vinga vinga info | grep -v -e '/try/#' -e '/x/'
+docker compose exec -T vinga vinga info | grep -v '/x/'
 ```
 
 When a client on the workstation is needed instead, install it at the
@@ -127,36 +127,29 @@ so it uses the environment the server runs from rather than changing
 it:
 
 ```bash
-uv run --no-sync --project <checkout>/vinga-server vinga info | grep -v -e '/try/#' -e '/x/'
+uv run --no-sync --project <checkout>/vinga-server vinga info | grep -v '/x/'
 ```
 
 From here on this page writes `vinga` for whichever of these you use.
 
-**Run `vinga info` with two lines filtered out, every time**, as the
-two commands above do, whichever client you use. Each is a credential,
-each sits on a line of its own, and the filter drops exactly those two
-lines:
+**Run `vinga info` with one line filtered out, every time**, as the
+two commands above do, whichever client you use. That line is a
+credential, it sits on a line of its own, and the filter drops exactly
+it: **the onboarding URL**, the line carrying `/x/`. Its path segment is
+the deployment's onboarding key, which stands in front of the endpoint
+that issues device tokens, so the server writes it to no log and a
+proxy in front of it must not either
+([Exposing a deployment](exposing-a-deployment.md)).
 
-- **The onboarding URL**, the line carrying `/x/`. Its path segment is
-  the deployment's onboarding key, which stands in front of the
-  endpoint that issues device tokens, so the server writes it to no log
-  and a proxy in front of it must not either
-  ([Exposing a deployment](exposing-a-deployment.md)).
-- **The try link**, the line carrying `/try/#`. Each run prints a new
-  one, and until a browser opens it or ten minutes pass it is a
-  credential: whoever opens it first makes their browser a device of
-  this deployment, talking to its default agent
-  ([the browser client](../devices/browser.md)).
-
-Filtered, neither reaches your transcript or your provider's logs, and
-the label above each still tells you what you need. The onboarding
-URL's label says onboarding is on and where its address came from (a
-sentence saying onboarding is off takes its place otherwise); the try
-link's ends in a colon when a link was issued, and carries a sentence
-saying why when none was. Everything else `vinga info` reports, the
-server's revision and the counts of what is configured, is untouched.
-Section 7 is how you use the onboarding URL without seeing it, and
-the try link is the person's.
+Filtered, it reaches neither your transcript nor your provider's logs,
+and the label above it still tells you what you need: that onboarding
+is on and where its address came from (a sentence saying onboarding is
+off takes its place otherwise). Everything else `vinga info` reports,
+the server's revision and the counts of what is configured, is
+untouched. Section 7 is how you use the onboarding URL without seeing
+it. `vinga info` prints no other credential: it issues no invite link,
+and the one command that does, `vinga device invite`, is the person's
+to run (section 4).
 
 ## 2. Learn the model before the first question
 
@@ -199,8 +192,9 @@ serving, so what you sent is not what is there.
 **Secrets are typed by the person.** Never ask for a key, a token or a
 password, never put one in a command you run, and never open, print or
 search a file one was written into: `.env`, another env file, the
-board's NVS file. The onboarding URL and a try link are secrets too,
-which is why section 1 filters both out of `vinga info`. A secret you
+board's NVS file. The onboarding URL and an invite link are secrets
+too, which is why section 1 filters the first out of `vinga info` and
+the second is printed only by a command the person runs. A secret you
 receive is in your transcript and in your provider's logs, and it
 cannot be taken back from either.
 
@@ -269,9 +263,12 @@ change back.
   the CSV is deleted afterwards. The person runs all of it; the
   procedure on [the common board page](../devices/README.md) is the
   same. The check is the board's check-in, in section 7.
-- **A try link.** The person prints it, with the client you use run at
-  their own prompt and not filtered, and opens it in a browser; section
-  7 says when and in which browser. The check is that browser's
+- **An invite link.** The person prints it with `vinga device invite`,
+  the client you use run at their own prompt, and opens it in a
+  browser; section 7 says when and in which browser. The link is all
+  the command prints on stdout, and what it prints on stderr (that it
+  worked, or why no link was issued) carries no credential, so the
+  person may read that line back to you. The check is that browser's
   check-in on the event stream, never the link.
 
 ## 5. The order of the work
@@ -310,7 +307,7 @@ the client's `--help` holds the rest.
 Read what is there before you ask anything:
 
 ```bash
-vinga info | grep -v -e '/try/#' -e '/x/'
+vinga info | grep -v '/x/'
 vinga list
 vinga diff
 ```
@@ -427,9 +424,6 @@ halves are `docker compose exec -T`:
 docker compose exec -T vinga vinga simulator run "$(docker compose exec -T vinga vinga info | grep '/x/')"
 ```
 
-That `vinga info` issues a try link too, which nobody sees and which
-expires unopened in ten minutes.
-
 The simulator prints `heard:` and `said:` lines, and on a turn that
 worked the stream shows, among others and in this order, `ota_check`,
 `session_open`, `heard`, `llm_round`, `speaking_started`, `replied`
@@ -509,38 +503,43 @@ check what answers at the address it was given. That check,
 it is the person's to run (section 4), not yours.
 
 **A browser** lets the person hear the agent themselves, with no board
-and nothing to install: the page the server serves at `/try/` is a
+and nothing to install: the page the server serves at `/talk/` is a
 device that talks through their computer's microphone and speakers
-([the browser client's guide](../devices/browser.md)). It joins with a
-try link, and the link is the person's to print and open (section 4).
-Offer it once the simulator's turn has worked.
+([the browser client's guide](../devices/browser.md)). It joins with an
+invite link, which `vinga device invite` prints and which is the
+person's to print and open (section 4). Offer it once the simulator's
+turn has worked.
 
-First read whether a link can be issued, from the filtered
-`vinga info` you already ran. The `try link` line ends in a colon when
-one was issued. Otherwise it carries a sentence saying why: no
-default agent set (a link binds a browser to the default agent, and
-whether to set one is the person's answer to section 6, not yours),
-onboarding switched off, no address a browser could open the page
-at, or as many links waiting to be opened as the server holds, which
-every `vinga info` run adds one to for ten minutes.
+First read whether a link can be issued, from what you already know:
+the filtered `vinga info` says whether onboarding is on, and its
+`configured:` line names the default agent. A link that names no agent
+binds the browser to the default agent, so with none set either the
+person names one with `--agent <name>` or sets a default, and which is
+the person's answer to section 6, not yours. A named agent has to be
+one the server is serving, so one written since the last `vinga apply`
+waits for it.
 
 Then ask which computer the person means to open it on. A link names the
 deployment's `server.public_url` when that is an `https://` address,
 and otherwise `localhost`, when the client reached the server on its
 own computer, as the image's client does by default. A `localhost` link
 works only in a browser on the server's own computer: anywhere else the page says it
-lacks a secure connection and starts nothing. A deployment reached
+lacks a secure connection and starts nothing. With neither, the command
+prints no link and says so. A deployment reached
 from other computers gets `https://` through
 [Exposing a deployment](exposing-a-deployment.md), which is a change to
 propose to the person, not to make.
 
 Start the stream first, as for the simulator, with no `--device`: the
 browser's MAC does not exist until the link is opened. Then hand the
-step over. Give the person the client command you have been using,
-without the filter, to run at their own prompt in the directory you
-ran it from (through the image, `docker compose exec vinga vinga info`),
-and tell them to open the link it prints, press Start, allow the
-microphone and say something. The page has been checked in headless
+step over. Give the person the command to run at their own prompt in
+the directory you ran the client from: `vinga device invite`, with
+`--agent <name>` for each agent the browser should reach if it is not
+to be the default agent (through the image,
+`docker compose exec vinga vinga device invite`). Tell them to open the
+link it prints, press Start, allow the microphone and say something.
+When it prints no link, the line it printed instead says why, and they
+may read that line to you. The page has been checked in headless
 Chromium alone, so a Chromium-based browser such as Chrome is the
 nearest to what was checked. Never ask them to paste the link to you.
 
@@ -549,7 +548,7 @@ shows `ota_check` with `board` `vinga-browser` and a MAC no board has,
 `session_open`, and the turn events above, ending in `session_closed`
 when the person presses End, or when nobody has spoken for the idle
 timeout. `vinga list` then shows the new device as `Browser <mac>`,
-bound to the default agent.
+bound to the agents the link named, or to the default agent.
 
 ## Where to go next
 
