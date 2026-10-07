@@ -98,3 +98,23 @@ def test_a_page_with_no_title_is_titled_by_its_path() -> None:
 def test_a_missing_section_is_refused_by_name_rather_than_read_as_empty() -> None:
     with pytest.raises(LookupError, match="no section headed 'Not a heading'"):
         knowledge.section("concepts.md", "Not a heading")
+
+
+# The concept summary
+
+
+def test_the_summary_s_heading_is_in_the_packaged_concepts_page() -> None:
+    """Plan D2. The summary is extracted at run time, so renaming the
+    heading would empty it; this is what makes that a red run."""
+    headings = [cut.heading for cut in knowledge.sections() if cut.page == "concepts.md"]
+
+    assert "The model in one paragraph" in headings
+
+
+def test_the_persona_is_the_concept_summary_verbatim() -> None:
+    """The page's own section, so there is no second copy of it to
+    drift. The persona file joins it in M3."""
+    summary = knowledge.section("concepts.md", "The model in one paragraph").text
+
+    assert knowledge.persona() == summary.rstrip()
+    assert "A **device** is a physical endpoint" in knowledge.persona()
