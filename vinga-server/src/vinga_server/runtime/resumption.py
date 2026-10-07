@@ -248,7 +248,9 @@ class Resumption:
         only if this agent was offered it and has not searched since."""
         return conversation in self._offered.get(agent, ())
 
-    async def resumed(self, agent: str, conversation: str) -> "Resumed | str":
+    async def resumed(
+        self, agent: str, conversation: str, on_device: bool = False
+    ) -> "Resumed | str":
         """The thread, ready to move onto, or the sentence saying why
         not.
 
@@ -261,7 +263,7 @@ class Resumption:
         after its coverage, and the hydrator pins the one in front of
         the others. Nothing here has to know that happened.
         """
-        found = await self._backlog(agent, conversation)
+        found = await self._backlog(agent, conversation, on_device)
         if isinstance(found, str):
             return found
         context = hydration.hydrated(
@@ -290,7 +292,9 @@ class Resumption:
         thread and answering it is the next thing that happens."""
         self._awaiting[agent] = conversation
 
-    async def recap(self, agent: str, conversation: str) -> "Recap | str":
+    async def recap(
+        self, agent: str, conversation: str, on_device: bool = False
+    ) -> "Recap | str":
         """What a consented recap will be made from, or the sentence
         saying why it cannot be.
 
@@ -312,7 +316,7 @@ class Resumption:
         far end of that interval, and they are read here because here is
         where the thread was really looked at.
         """
-        found = await self._backlog(agent, conversation)
+        found = await self._backlog(agent, conversation, on_device)
         if isinstance(found, str):
             return found
         read = hydration.hydrated(
@@ -375,7 +379,7 @@ class Resumption:
         self._on_device.clear()
 
     async def _backlog(
-        self, agent: str, conversation: str
+        self, agent: str, conversation: str, on_device: bool = False
     ) -> "threads.Backlog | str":
         """One thread as the store holds it, or the sentence saying why
         this agent may not have it.
@@ -401,11 +405,15 @@ class Resumption:
             # reading another agent's thread is the failure this feature
             # must not have.
             return builtin.NO_SUCH_CANDIDATE
-        if agent in self._on_device and found.device != self._device:
-            # The same defense for a search held to this device (#612):
-            # unreachable while the search filtered by the column, and
-            # checked anyway, because one device resuming what was said
-            # on another is the leak device-scoped threads close.
+        if (on_device or agent in self._on_device) and found.device != self._device:
+            # The same defense for an agent whose threads are its
+            # device's (#612): held by who is picking now (`on_device`)
+            # as well as by how the offer was searched, since an apply
+            # can make the agent of one live session the built-in one
+            # between the search and the pick. Unreachable while the
+            # search filtered by the column, and checked anyway, because
+            # one device resuming what was said on another is the leak
+            # device-scoped threads close.
             return builtin.NO_SUCH_CANDIDATE
         return found
 

@@ -10,14 +10,17 @@ the grants it inherits.
 
 from typing import Any
 
-from tests.support.configs import POET_MAC, STDIO_SERVER, base_config
+from tests.support.configs import BOTH_MAC, POET_MAC, STDIO_SERVER, base_config, world
 from tests.support.providers import RecordingLlm, ScriptedLlm, results_of
-from tests.support.sessions import call, run_reply, session_for
-from tests.support.stores import StoredThreads, memory_rows
+from tests.support.sessions import agent_providers, call, run_reply, session_for
+from tests.support.stores import StoredThreads, a_backlog, a_candidate, memory_rows
 from tests.support.stores import memory as lane_memory
 from vinga_server import knowledge
 from vinga_server.config import Config
-from vinga_server.config.models import BUILTIN_AGENT
+from vinga_server.config.models import BUILTIN_AGENT, BuiltinStatus
+from vinga_server.config.secrets import SecretStore
+from vinga_server.conversations import threads
+from vinga_server.generation import Generation
 from vinga_server.memory.store import MemoryScope
 from vinga_server.tools import builtin, names
 from vinga_server.tools.mcp import McpServers
@@ -26,6 +29,11 @@ KITCHEN = "aa:bb:cc:dd:ee:21"
 HALL = "aa:bb:cc:dd:ee:22"
 
 FACT = "the kettle whistles when it boils"
+
+# A thread the hall board began, and what was said on it, which must not
+# reach the kitchen.
+ELSEWHERE = "9f0c1d2e3a4b5c6d7e8f90a1b2c3d4e5"
+HISTORY = (("the hall alarm code is 4417", "Noted."),)
 
 
 def vinga_world(**overrides: Any) -> Config:
@@ -202,3 +210,55 @@ async def test_vinga_cannot_reach_an_agent_fact_by_its_number() -> None:
     (row,) = [one for one in memory_rows("facts") if one["id"] == fact_id]
     assert row["fact"] == FACT
     assert row["forgotten_at"] is None
+
+
+async def test_an_offer_held_by_a_legacy_vinga_is_not_honoured_once_the_built_in_answers() -> (
+    None
+):
+    """Review round 1, finding 1: a session opened as an operator's
+    legacy agent named vinga searches unscoped, so its offer can hold
+    another device's thread. Once that row is deleted and an apply
+    installs the built-in agent, the same live session speaks as the
+    built-in, whose threads are its device's alone: picking the held
+    thread is refused, nothing of it is read, and the offer is gone."""
+    resuming = {"conversations": {"enabled": True, "resumption": True}}
+    legacy = base_config(
+        server=resuming,
+        agents={
+            "poet": {"prompt": "POET", "tts": "tenor"},
+            "tutor": {"prompt": "TUTOR", "tts": "alto"},
+            BUILTIN_AGENT: {"prompt": "THE OLD VINGA", "tts": "tenor"},
+        },
+        devices={KITCHEN: [BUILTIN_AGENT], POET_MAC: ["poet"], BOTH_MAC: ["poet", "tutor"]},
+    )
+    installed = vinga_world(server=resuming)
+    assert legacy.builtin_state.status is BuiltinStatus.DISPLACED
+    assert installed.is_builtin(BUILTIN_AGENT)
+    store = StoredThreads(
+        found={
+            BUILTIN_AGENT: threads.Candidates(matched=True, found=(a_candidate(ELSEWHERE),))
+        },
+        held={ELSEWHERE: a_backlog(ELSEWHERE, agent=BUILTIN_AGENT, said=HISTORY, device=HALL)},
+    )
+    script = ScriptedLlm(
+        [
+            [call("resume_conversation", description="the galaxy")],
+            "I found one.",
+            [call("resume_conversation", conversation=ELSEWHERE)],
+            "Never mind.",
+        ]
+    )
+    holder = world(legacy, providers=agent_providers(legacy, {BUILTIN_AGENT: script}))
+    session = session_for(
+        legacy, KITCHEN, {BUILTIN_AGENT: script}, threads=store, generations=holder
+    )
+
+    await run_reply(session, "find the galaxy one")
+    with holder.applying() as install:
+        install(Generation(installed, SecretStore()))
+    await run_reply(session, "that one")
+
+    assert store.held_to == [None]
+    assert results_of(script)[-1] == builtin.NO_SUCH_CANDIDATE
+    assert store.read == []
+    assert all(HISTORY[0][0] not in system for system in script.systems)
