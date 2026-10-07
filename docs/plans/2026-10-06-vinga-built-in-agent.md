@@ -413,8 +413,14 @@ at every start). RAM wins; reopen if field use shows the vague answer
 is common.
 
 The mapping is derived from the packaged guide filenames, not
-tabulated: a reported type, casefolded and stripped, names the guide
-whose stem equals it or equals `waveshare-` plus it, so
+tabulated, and it searches only the **board guides**: the packaged
+`devices/*.md` pages other than the two that are not about one device,
+`README.md` (the common page) and `flashing.md` (the flashing
+procedure). That set is one constant beside the matcher, its exclusions
+named, so a new device guide joins it by existing and a new non-guide
+page is a decision rather than an accident. A reported type,
+casefolded and stripped, names the board guide whose stem equals it or
+equals `waveshare-` plus it, so
 `esp32-s3-touch-lcd-1.54` and `waveshare-esp32-s3-touch-lcd-1.54` both
 reach the LCD guide; `vinga-browser` reaches `browser.md`. An absent
 type, `unknown`, or a type with no guide gets the fixed vague text
@@ -625,9 +631,12 @@ silently emptying vinga's summary.
 
 **D3. Board facts and the vague text.** A guide's facts are its lead
 (the text before its first `##`) and its `## Controls` section,
-verbatim: 1,807 to 3,161 characters across the four mapped guides at
-`c5b592e2`. A test holds every mapped guide to having both and to a
-budget of 3,500 characters, so a guide that grows past it fails a test
+verbatim: 1,807 to 3,161 characters across the four board guides at
+`c5b592e2`. A test holds every board guide (Q6's set) to having both and
+to a budget of 3,500 characters, and the matcher is tested against that
+set and against its two exclusions: `readme`, `devices/readme`,
+`flashing` and `waveshare-flashing` reported as a board type each get
+the vague text, never the page, so a guide that grows past it fails a test
 and grows an "At a glance" section rather than silently inflating every
 vinga prompt. The vague text says the server has not been told which
 board this is, that the answer should come from the common page
@@ -995,6 +1004,12 @@ Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.1, re
 1. **P1: The required lookup gate is still open.** Evidence: the plan’s gate (`docs/plans/2026-10-06-vinga-built-in-agent.md:564`) says the plan was committed while measurement was running; its results, winner, harness and Q8 interface are placeholders. Issue #612 requires measurement **before the design is committed**. The plan should record the fixed questions, harness, results and chosen tool interface, then review that completed design before M5 begins.
 
 2. **P1: The board-guide rule selects pages that cannot pass its own test.** Evidence: Q6 (`docs/plans/2026-10-06-vinga-built-in-agent.md:415`) maps a reported type to any packaged device-page filename, while D3 (`docs/plans/2026-10-06-vinga-built-in-agent.md:626`) requires every mapped guide to have `## Controls`. Both flashing.md (`docs/devices/flashing.md:1`) and README.md (`docs/devices/README.md:1`) are in the proposed copy and lack that section. The plan should define which pages are board guides and test the matcher against that set, including these two negative cases.
+
+   *Resolution:* accepted. The matcher searches only the board guides,
+   one named set beside it that excludes `README.md` and `flashing.md`
+   (Q6), and D3's tests hold that set to the facts rule and drive the
+   matcher with both exclusions spelled as board types, which must get
+   the vague text.
 
 3. **P2: An existing blank `vinga` agent silently changes identity on upgrade.** Evidence: Q2 (`docs/plans/2026-10-06-vinga-built-in-agent.md:250`) treats a stored `agents.vinga` row as legacy only when `prompt` or `mcp` is non-empty. AgentConfig (`vinga-server/src/vinga_server/config/models.py:3530`) permits both to be empty; such a row can still have provider settings or prompt fragments. The plan would replace that agent’s blank persona with the built-in persona and could remove inherited MCP grants without warning. It should specify how a pre-upgrade row is distinguished from a new override, and test the blank-row upgrade.
 
