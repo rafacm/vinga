@@ -29,10 +29,10 @@ from vinga_server.config.api import (
     mount_api,
 )
 from vinga_server.config.loader import DatabaseBusyError
-from vinga_server.config.models import PROGRAM, SERVER_PROGRAM, DatabaseConfig
+from vinga_server.config.models import BUILTIN_AGENT, PROGRAM, SERVER_PROGRAM, DatabaseConfig
 from vinga_server.config.responses import RefusalReason
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
-from vinga_server.config.store import ALREADY_BOUND, NOTHING_TO_ENROLL_ONTO, ConfigStore
+from vinga_server.config.store import ALREADY_BOUND, ConfigStore
 from vinga_server.db import open_database
 from vinga_server.onboarding import CODE_TTL_S, PendingDevices
 
@@ -514,21 +514,20 @@ def test_a_claim_naming_no_agent_binds_the_default_agent(
     assert client.get("/devices/pending").json() == {}
 
 
-def test_a_claim_naming_no_agent_with_no_default_leaves_the_code_claimable(
+def test_a_claim_naming_no_agent_with_no_default_binds_the_built_in_agent(
     client: TestClient, pending: PendingDevices
 ) -> None:
-    """Nothing is created, the store's own sentence travels (it quotes
-    nothing the request carried, since the request carried no names),
-    and the board is still showing a number that works."""
+    """D7 (#612): unset is vinga, so a claim naming no agent on a
+    deployment with no default agent binds the board to the built-in
+    agent and says so, and the code is spent."""
     code = _waiting(pending)
 
-    refused = client.post(f"/devices/pending/{code}", json={})
+    claimed = client.post(f"/devices/pending/{code}", json={})
 
-    assert refused.status_code == 422
-    assert refused.json()["detail"] == NOTHING_TO_ENROLL_ONTO
-    assert MAC not in refused.text
-    assert client.get("/devices").json() == {}
-    assert _claim(client, code).status_code == 200
+    assert claimed.status_code == 200, claimed.text
+    assert claimed.json()["wrote"] == f"device {MAC} bound to {BUILTIN_AGENT}"
+    assert client.get(f"/devices/{MAC}").json()["entity"]["agents"] == [BUILTIN_AGENT]
+    assert client.get("/devices/pending").json() == {}
 
 
 def test_a_superseded_claim_leaves_the_address_on_no_surface(

@@ -1117,9 +1117,10 @@ class DefaultAgent(BaseModel):
 
     name: str | None = Field(
         description=(
-            "The default agent's name, or null when none is set, in which case a "
-            "claim by activation code has to name its agents. It admits no device "
-            "either way: the devices map is always the allowlist."
+            "The default agent's name, or null when none is set, in which case the "
+            "default is vinga, the built-in agent, and a claim by activation code that "
+            "names no agent binds the device to it. It admits no device either way: "
+            "the devices map is always the allowlist."
         ),
     )
 
@@ -1584,8 +1585,9 @@ class DefaultAgentName(BaseModel):
         description=(
             "The agent a newly bound device starts with: a claim by activation code "
             "that names no agent binds the device to it. It admits no device by "
-            "itself. It has to be an agent that exists. To unset it, DELETE this "
-            "resource, after which a claim has to name its agents."
+            "itself. It has to be an agent that exists, or vinga, the built-in agent. "
+            "To unset it, DELETE this resource, after which a claim naming no agent "
+            "binds the device to vinga, exactly as naming vinga here does."
         )
     )
 

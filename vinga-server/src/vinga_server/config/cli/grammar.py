@@ -2343,7 +2343,7 @@ COMMANDS: tuple[Command, ...] = (
         words=("default-agent", "clear"),
         does=CLEAR_DEFAULT_AGENT,
         declare=_plain,
-        help="unset it, after which a claim has to name its agents",
+        help="unset it, after which a claim naming no agent binds vinga, the built-in agent",
         destroys=True,
     ),
     # The flat verbs: their subject is the whole deployment, or nothing

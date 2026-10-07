@@ -76,6 +76,7 @@ from vinga_server.config.models import (
     check_mcp_entry_names,
     check_references,
     default_device_name,
+    effective_default_agent,
     fold_device_name,
     hides_value,
     holds_control_character,
@@ -401,21 +402,16 @@ ALREADY_BOUND = (
     "its agents at its next check."
 )
 
-# What enrolling a device refuses with (#613, D5b). The first is the
-# collision a freshly minted MAC can meet, and its caller draws again
-# rather than reading it, so it names no address; the second is the
-# default agent having been cleared since the caller decided to enroll,
-# and it is also what a claim naming no agent meets when none is set
-# (#612), since both are a new device with no agent to start on.
-# Neither names a command, for the reason the one above names none.
+# What enrolling a device refuses with (#613, D5b): the collision a
+# freshly minted MAC can meet, and its caller draws again rather than
+# reading it, so it names no address. There used to be a second, for a
+# new device arriving with no agent named while no default agent was
+# set; since #612 the effective default is always there (vinga when
+# none is stored), so it went with its decision site. It names no
+# command, for the reason the one above names none.
 ALREADY_ENROLLED = (
     "devices: a device with this MAC is already configured, so no new device was "
     "created there. Nothing was changed."
-)
-
-NOTHING_TO_ENROLL_ONTO = (
-    "devices: no default agent is set, so a new device has no agent to be bound to. "
-    "Nothing was created."
 )
 
 # What a device write refuses with when the name or the id it would
@@ -1334,8 +1330,10 @@ class ConfigStore:
         device the configuration has already spoken about. `enrolling`
         is an invite link's: no row may exist either. Both of the last two
         create a device, and one arriving with no agents named is bound
-        to the default agent, read here under the lock, or refused when
-        none is set.
+        to the effective default agent, read here under the lock: the
+        stored `default_agent`, or vinga, the built-in agent, when none
+        is stored (#612). There is always one, so there is no refusal
+        for its absence.
 
         `identified` is the third way in, and it is an ADDRESS rather
         than a condition: the binding arrives with no MAC on it and the
@@ -1365,9 +1363,7 @@ class ConfigStore:
             if enrolling and stored is not None:
                 raise DeviceAlreadyBoundError(ALREADY_ENROLLED)
             if (unconfigured or enrolling) and binding.agents is None:
-                if domain.default_agent is None:
-                    raise ConfigError(NOTHING_TO_ENROLL_ONTO)
-                binding = replace(binding, agents=(domain.default_agent,))
+                binding = replace(binding, agents=(effective_default_agent(domain),))
             held = _names_held(domain)
             staged = _stage_device(domain, binding)
             _refuse_unresolved(domain)

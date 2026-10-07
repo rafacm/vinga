@@ -642,19 +642,18 @@ def test_add_device_naming_no_agent_binds_the_default_agent(
     assert capsys.readouterr().out == "wrote device aa:bb:cc:dd:ee:ff bound to sam\n"
 
 
-def test_add_device_naming_no_agent_with_no_default_says_so(
+def test_add_device_naming_no_agent_with_no_default_binds_the_built_in_agent(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    """Unset is vinga, the built-in agent (#612, D7), so the claim binds
+    the board to it and the acknowledgement says which agent that is."""
     _an_agent(run)
     code = _showing(run)
     capsys.readouterr()
 
-    assert run("device", "pending", "claim", code) == 1
+    assert run("device", "pending", "claim", code) == 0
 
-    captured = capsys.readouterr()
-    assert "no default agent is set" in captured.err
-    assert captured.out == ""
-    assert "Traceback" not in captured.err
+    assert capsys.readouterr().out == "wrote device aa:bb:cc:dd:ee:ff bound to vinga\n"
 
 
 def test_add_device_retires_the_code(run, capsys: pytest.CaptureFixture[str]) -> None:

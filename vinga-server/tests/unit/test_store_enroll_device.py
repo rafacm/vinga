@@ -24,7 +24,7 @@ from sqlalchemy import select
 from tests.support.stores import stored_rows
 from vinga_server.config import ConfigError
 from vinga_server.config.loader import DeviceAlreadyBoundError, UnknownEntityError
-from vinga_server.config.models import DatabaseConfig, is_device_id
+from vinga_server.config.models import BUILTIN_AGENT, DatabaseConfig, is_device_id
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key, load_keys
 from vinga_server.config.store import ConfigStore
 from vinga_server.db import open_database, schema
@@ -104,15 +104,17 @@ def test_a_mac_that_already_has_a_row_is_refused_and_left_alone(store: ConfigSto
     assert after.id == before.id
 
 
-def test_with_no_default_agent_nothing_is_created(store: ConfigStore) -> None:
+def test_with_no_default_agent_the_browser_is_bound_to_the_built_in_agent(
+    store: ConfigStore,
+) -> None:
+    """Unset is vinga, the built-in agent (#612, D7), so an invite
+    naming no agent redeemed on a deployment with no default agent binds
+    the browser to it."""
     _agents(store, default=None)
 
-    with pytest.raises(ConfigError) as refused:
-        store.enroll_device(MAC, NAME)
+    store.enroll_device(MAC, NAME)
 
-    assert not isinstance(refused.value, DeviceAlreadyBoundError)
-    with pytest.raises(UnknownEntityError):
-        store.read_device(MAC)
+    assert store.read_device(MAC).entry.agents == [BUILTIN_AGENT]
 
 
 def test_a_name_that_cannot_be_given_leaves_no_device_behind(store: ConfigStore) -> None:

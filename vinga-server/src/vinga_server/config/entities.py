@@ -866,8 +866,9 @@ SETTINGS: tuple[Setting, ...] = (
             "<code>`) binds the board to it. It admits no device by itself: a device "
             "with no binding of its own reaches no agent and is offered a code, "
             "whether or not this is set, so the devices map is always the allowlist.",
-            f"`{PROGRAM} default-agent clear` unsets it, after which a claim has to "
-            "name its agents. Nothing requires it to be set.",
+            f"Unset, it is {BUILTIN_AGENT}, the built-in agent: "
+            f"`{PROGRAM} default-agent clear` and `{PROGRAM} default-agent set "
+            f"{BUILTIN_AGENT}` mean the same thing, so nothing requires it to be set.",
         ),
         route="/default-agent",
     ),

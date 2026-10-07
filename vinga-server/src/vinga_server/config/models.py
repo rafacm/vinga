@@ -4342,7 +4342,7 @@ DOMAIN_DESCRIPTIONS: dict[str, str] = {
         "that names no agent binds the device to it. It admits nothing by itself: "
         "a device with no binding of its own reaches no agent and is offered a code, "
         "set or not, so the devices map is always the allowlist. Leaving it unset "
-        "means a claim has to name its agents."
+        "means vinga, the built-in agent: unset and vinga are the same setting."
     ),
 }
 
@@ -4609,6 +4609,14 @@ def check_references(snapshot: DomainSnapshot) -> list[str]:
                 )
 
     return problems
+
+
+def effective_default_agent(snapshot: DomainSnapshot) -> str:
+    """The agent a newly bound device starts with: the stored
+    `default_agent`, or vinga, the built-in agent, when none is stored
+    (#612, D7). Unset and `default_agent: vinga` mean the same thing, and
+    there is always an answer."""
+    return snapshot.default_agent or BUILTIN_AGENT
 
 
 def resolvable_agents(snapshot: DomainSnapshot) -> frozenset[str]:
