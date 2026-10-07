@@ -187,3 +187,26 @@ the `-n 2` fallback.
 Not verified: the image itself was not built (the wheel built from the
 image's context stands in for it), and the browser lane was not run,
 since nothing it drives changed.
+
+### PR review round
+
+Reviewed 2026-10-07 by openai/gpt-6-sol, thinking high via codex CLI 0.160.1, read-only sandbox, at commit 2a13f297 ([the round](https://github.com/rafacm/vinga/pull/631#issuecomment-6031810978)). The fix is by anthropic/claude-opus-5-5, thinking high, M2's own implementer.
+
+1. **P1: a missing section's error quoted its input.** `section(page,
+   heading)` put both caller-supplied values into its `LookupError`, so
+   a credential-shaped value reached the exception text and any
+   traceback. *Resolution:* the error is one fixed sentence,
+   `NO_SUCH_SECTION`, quoting neither; the caller passed both values and
+   already knows which section it asked for. It was the package's only
+   raise (grep over `knowledge/`). A test plants a sentinel as the page,
+   the heading and both, and asserts it absent from the message, the
+   args and the cause and context chain; it failed on the old code
+   three times (`dc8f758b`).
+
+The round's CI run also went red on the census: the spellings manifest
+missed two prose phrases this implementation doc quotes, because the
+lane ran before the doc was tracked; regenerated in `8e5be536`.
+
+Verification after the round: `uv run ruff check .` clean; the unit lane
+(`-n auto --dist loadfile`) `8415 passed, 19 skipped in 1153.80s`;
+`tests/census`, last, `69 passed`.
