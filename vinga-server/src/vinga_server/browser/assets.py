@@ -6,7 +6,7 @@ that is not in `ALLOWLIST` is not a file this server has, whatever the
 filesystem beside it holds, so there is no listing and no path to
 traverse (#613, D2).
 
-Modules are addressed by version, `/try/static/<version>/<name>`, named
+Modules are addressed by version, `/talk/static/<version>/<name>`, named
 by the page relative to itself so a path prefix in front of the
 deployment is kept, and
 served immutable; the page that names them is served `no-store`, so a
@@ -76,7 +76,7 @@ CONTENT_SECURITY_POLICY = (
     "img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 )
 
-# Said on every response under /try/: nothing the page does is to name
+# Said on every response under /talk/: nothing the page does is to name
 # its own address to anybody, and nothing is to be read as another type.
 COMMON_HEADERS: Mapping[str, str] = {
     "Referrer-Policy": "no-referrer",
@@ -123,11 +123,11 @@ class Assets:
         self.version = digest.hexdigest()[:VERSION_LENGTH]
         # Relative to the page, never from the root: a deployment served
         # under a path prefix (`server.public_url` may carry one) is
-        # reached at `<prefix>/try/`, and a root-relative module path
+        # reached at `<prefix>/talk/`, and a root-relative module path
         # would reach past the prefix. Two renderings, one per spelling of
         # the page's own path, because a relative reference resolves
-        # against the directory: `static/...` from `/try/`, and
-        # `try/static/...` from `/try`, which a browser reads as a file in
+        # against the directory: `static/...` from `/talk/`, and
+        # `talk/static/...` from `/talk`, which a browser reads as a file in
         # the directory above.
         relative = STATIC_PATH.removeprefix(PAGE_PATH)
         mount = PAGE_PATH.strip("/").rsplit("/", 1)[-1]
@@ -152,7 +152,7 @@ class Assets:
     def page(self, slashed: bool = True) -> bytes:
         """The page, naming this version's modules relative to itself.
         `slashed` is which spelling of the page's path it is answering:
-        `/try/` (the default) or `/try`."""
+        `/talk/` (the default) or `/talk`."""
         return self._pages[slashed]
 
     def file(self, version: str, name: str) -> tuple[bytes, str] | None:

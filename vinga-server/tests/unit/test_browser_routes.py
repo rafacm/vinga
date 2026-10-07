@@ -1,10 +1,10 @@
 """The browser client's home and an unbound browser's start (#613).
 
-`GET /try/` serves the page keyless and `no-store`, under a
+`GET /talk/` serves the page keyless and `no-store`, under a
 Content-Security-Policy that keeps its scripts and connections on its
-own origin; `GET /try/static/<version>/<name>` serves the allowlisted
+own origin; `GET /talk/static/<version>/<name>` serves the allowlisted
 modules immutable and nothing else (D2, D2b). `POST
-/x/<key>/try-identity` mints an identity on the onboarding alias, behind
+/x/<key>/browser-identity` mints an identity on the onboarding alias, behind
 its key guard, on every deployment (D4; #612 removed D4a's refusals,
 since no unbound device is admitted any more). All of it is mounted
 with the alias and never without it.
@@ -40,7 +40,7 @@ from vinga_server.onboarding.browser import CLIENT_ID_NAMESPACE
 AUTH_SECRET_ENV = "VINGA_AUTH_SECRET"
 
 # The module as the page names it: relative to the page, which every
-# caller here fetched at `/try/`.
+# caller here fetched at `/talk/`.
 MODULE = re.compile(r'src="(static/([0-9a-f]+)/page\.js)"')
 
 BEARER = {"Authorization": f"Bearer {TEST_API_SECRET}"}
@@ -56,7 +56,7 @@ def short_path(client: TestClient) -> str:
 
 
 def module_path(page: str) -> str:
-    """The module's path, resolved against the page at `/try/` the way a
+    """The module's path, resolved against the page at `/talk/` the way a
     browser resolves it."""
     match = MODULE.search(page)
     assert match is not None, page
@@ -76,7 +76,7 @@ def client(page: bytes) -> dict[str, bytes]:
 # --- the page ------------------------------------------------------------
 
 
-@pytest.mark.parametrize("path", ["/try/", "/try"])
+@pytest.mark.parametrize("path", ["/talk/", "/talk"])
 def test_the_page_is_served_keyless_and_never_stored(path: str) -> None:
     with TestClient(create_app(config_with_agent())) as client:
         answer = client.get(path, follow_redirects=False)
@@ -90,7 +90,7 @@ def test_the_page_is_served_keyless_and_never_stored(path: str) -> None:
 
 def test_the_page_keeps_its_scripts_and_connections_on_its_own_origin() -> None:
     with TestClient(create_app(config_with_agent())) as client:
-        policy = client.get("/try/").headers["content-security-policy"]
+        policy = client.get("/talk/").headers["content-security-policy"]
 
     directives = dict(
         (part.split(" ", 1) + [""])[:2] for part in (one.strip() for one in policy.split(";"))
@@ -106,7 +106,7 @@ def test_the_page_keeps_its_scripts_and_connections_on_its_own_origin() -> None:
 
 def test_the_page_names_its_module_under_the_current_version_and_it_is_served() -> None:
     with TestClient(create_app(config_with_agent())) as client:
-        path = module_path(client.get("/try/").text)
+        path = module_path(client.get("/talk/").text)
         answer = client.get(path)
 
     assert path == f"{STATIC_PATH}/{Assets.packaged().version}/page.js"
@@ -166,12 +166,12 @@ def test_only_the_allowlist_is_served(name: str) -> None:
 @pytest.mark.parametrize(
     "path",
     [
-        "/try/static/page.js",
-        "/try/static/../browser/assets.py",
-        "/try/static/{version}/../assets.py",
-        "/try/static/{version}/static/page.js",
-        "/try/index.html",
-        "/try/page.js",
+        "/talk/static/page.js",
+        "/talk/static/../browser/assets.py",
+        "/talk/static/{version}/../assets.py",
+        "/talk/static/{version}/static/page.js",
+        "/talk/index.html",
+        "/talk/page.js",
     ],
 )
 def test_no_other_path_under_try_reaches_a_file(path: str) -> None:
@@ -205,7 +205,7 @@ def test_a_refused_module_is_the_stock_404_in_either_spelling(trailing: str, ver
 @pytest.mark.parametrize("trailing", ["", "/"])
 def test_a_module_is_served_in_either_spelling(trailing: str) -> None:
     with TestClient(create_app(config_with_agent())) as client:
-        path = module_path(client.get("/try/").text)
+        path = module_path(client.get("/talk/").text)
         answer = client.get(f"{path}{trailing}", follow_redirects=False)
 
     assert answer.status_code == 200
@@ -233,8 +233,8 @@ def test_a_new_version_is_a_new_path_and_the_old_one_is_refused() -> None:
     old_app.include_router(build_router(None, before))
     new_app.include_router(build_router(None, after))
     with TestClient(old_app) as old, TestClient(new_app) as new:
-        old_path = module_path(old.get("/try/").text)
-        new_path = module_path(new.get("/try/").text)
+        old_path = module_path(old.get("/talk/").text)
+        new_path = module_path(new.get("/talk/").text)
 
         assert old.get(old_path).content == b"// the old client\n"
         assert new.get(new_path).content == b"// the new client\n"
@@ -263,14 +263,14 @@ def test_nothing_is_mounted_with_onboarding_off() -> None:
     config.server.onboarding.enabled = False
     with TestClient(create_app(config)) as client:
         version = Assets.packaged().version
-        assert client.get("/try/").status_code == 404
+        assert client.get("/talk/").status_code == 404
         assert client.get(f"{STATIC_PATH}/{version}/page.js").status_code == 404
 
 
-@pytest.mark.parametrize("path", ["/try/", "/try/xiaozhi-ota-5e1d9c0b/"])
+@pytest.mark.parametrize("path", ["/talk/", "/talk/xiaozhi-ota-5e1d9c0b/"])
 def test_an_ota_path_under_the_page_is_refused(path: str) -> None:
     """The OTA router is registered first, so an OTA path at or under
-    /try/ would answer the page's own requests. Refused, naming the
+    /talk/ would answer the page's own requests. Refused, naming the
     prefix and never the configured segment."""
     with pytest.raises(ConfigError) as caught:
         load_config_from_data({"server": {"ota_path": path}})
@@ -280,10 +280,39 @@ def test_an_ota_path_under_the_page_is_refused(path: str) -> None:
     assert "xiaozhi-ota-5e1d9c0b" not in chain(caught.value)
 
 
-def test_a_path_that_merely_starts_with_try_is_still_allowed() -> None:
-    config = load_config_from_data({"server": {"ota_path": "/tryout/"}})
+@pytest.mark.parametrize("path", ["/talkative/", "/try/"])
+def test_a_path_that_is_not_under_the_page_is_allowed(path: str) -> None:
+    """One merely starting with the page's prefix, and the page's old
+    prefix, which moved with the page (#612, Q11): the reservation reads
+    the one constant the routes do."""
+    config = load_config_from_data({"server": {"ota_path": path}})
 
-    assert config.server.ota_path == "/tryout/"
+    assert config.server.ota_path == path
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("GET", "/try/"),
+        ("GET", "/try"),
+        ("GET", "/try/static/{version}/page.js"),
+        ("POST", "/try/redeem"),
+        ("POST", "/try/redeem/"),
+        ("POST", "{alias}try-identity"),
+        ("POST", "{alias}try-identity/"),
+    ],
+)
+def test_the_page_s_old_paths_answer_the_stock_404(method: str, path: str) -> None:
+    """The page moved to `/talk/` and its identity route to
+    `browser-identity` with no alias left behind (#612, Q11): each old
+    path answers exactly what a path nobody serves answers."""
+    with TestClient(create_app(booted(default_agent="assistant"), from_store=True)) as client:
+        address = path.format(version=Assets.packaged().version, alias=short_path(client))
+        old = client.request(method, address, json={"token": "A" * 43})
+        unserved = client.request(method, "/never-served-by-anything", json={"token": "A" * 43})
+
+    assert old.status_code == 404
+    assert old.content == unserved.content
 
 
 def test_the_ota_path_description_names_the_page_reservation() -> None:
@@ -301,7 +330,7 @@ def test_a_browser_with_no_identity_is_minted_one_and_shown_a_code() -> None:
     D4's pairing, end to end."""
     with TestClient(create_app(unbound_config())) as client:
         base = short_path(client)
-        minted = client.post(f"{base}try-identity")
+        minted = client.post(f"{base}browser-identity")
         assert minted.status_code == 200
         assert minted.headers["cache-control"] == "no-store"
         body = minted.json()
@@ -322,8 +351,8 @@ def test_a_browser_with_no_identity_is_minted_one_and_shown_a_code() -> None:
 def test_each_start_is_a_new_identity() -> None:
     with TestClient(create_app(unbound_config())) as client:
         base = short_path(client)
-        first = client.post(f"{base}try-identity").json()
-        second = client.post(f"{base}try-identity").json()
+        first = client.post(f"{base}browser-identity").json()
+        second = client.post(f"{base}browser-identity").json()
 
     assert first != second
 
@@ -350,7 +379,7 @@ def test_a_minted_browser_pairs_and_is_admitted_only_once_claimed() -> None:
     config = booted(default_agent="assistant")
     with TestClient(create_app(config, from_store=True)) as client:
         base = short_path(client)
-        minted = client.post(f"{base}try-identity")
+        minted = client.post(f"{base}browser-identity")
         assert minted.status_code == 200
         identity = minted.json()
 
@@ -394,7 +423,7 @@ def test_a_mint_does_not_depend_on_reading_the_bindings(
     with TestClient(create_app(booted(default_agent="assistant"), from_store=True)) as client:
         with monkeypatch.context() as failing:
             failing.setattr("vinga_server.device.bindings.read_live_binding", _failing_read)
-            minted = client.post(f"{short_path(client)}try-identity")
+            minted = client.post(f"{short_path(client)}browser-identity")
         pending = client.app.state.composition.pending.listing()
 
     assert minted.status_code == 200
@@ -407,7 +436,7 @@ def test_a_mint_does_not_depend_on_reading_the_bindings(
 @pytest.mark.parametrize("wrong", ["AAAAAAAA", "aaaaaaab", "nonsense-key"])
 def test_a_wrong_key_meets_the_alias_stock_404(wrong: str) -> None:
     with TestClient(create_app(unbound_config())) as client:
-        missed = client.post(f"/x/{wrong}/try-identity")
+        missed = client.post(f"/x/{wrong}/browser-identity")
         expected = client.post(f"/x/{wrong}/")
 
     assert missed.status_code == expected.status_code == 404
@@ -423,10 +452,10 @@ def test_with_auth_off_the_mint_is_on_the_keyless_alias(
     config.server.auth.enabled = False
     with TestClient(create_app(config)) as client:
         assert short_path(client) == "/x/"
-        assert client.post("/x/try-identity").status_code == 200
-        assert client.post("/x/try-identity/").status_code == 200
+        assert client.post("/x/browser-identity").status_code == 200
+        assert client.post("/x/browser-identity/").status_code == 200
 
 
 def test_the_mint_is_a_post() -> None:
     with TestClient(create_app(unbound_config())) as client:
-        assert client.get(f"{short_path(client)}try-identity").status_code == 405
+        assert client.get(f"{short_path(client)}browser-identity").status_code == 405

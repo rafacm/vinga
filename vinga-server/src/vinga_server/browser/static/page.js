@@ -1,7 +1,7 @@
 // What the person sees, and the order things happen in (#613, D3).
 //
 // The page is inert until its script runs. An invite link is
-// `<origin>/try/#<token>`; the token is in the fragment, which the
+// `<origin>/talk/#<token>`; the token is in the fragment, which the
 // browser sends to no server, so this script is the only thing that
 // ever reads it: it takes it and clears it from the address bar and
 // from this history entry before anything else, then spends it once.

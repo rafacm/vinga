@@ -2,15 +2,15 @@
 
 `server.public_url` may carry a path prefix (`https://example/vinga`):
 a proxy serves the deployment under it and strips it before the server
-sees the request. A page that names a URL from the root (`/try/...`)
+sees the request. A page that names a URL from the root (`/talk/...`)
 then reaches past the prefix to whatever else the proxy serves at the
 root, or to nothing. So every URL the page uses is relative to the page
 it was served at: its module, its redemption, and the onboarding path a
 redemption hands back, which comes relative to the deployment's root
-and is resolved by the page against the page's own base minus `try/`.
+and is resolved by the page against the page's own base minus `talk/`.
 
 Driven through a shim that strips the prefix the way such a proxy does,
-so what is resolved against `http://testserver/vinga/try/` is what the
+so what is resolved against `http://testserver/vinga/talk/` is what the
 application then answers.
 """
 
@@ -39,7 +39,7 @@ MODULE = re.compile(r'src="([^"]*page\.js)"')
 SOCKET = re.compile(r'<meta name="vinga-socket" content="([^"]*)">')
 
 # How `urls.js` finds the deployment's root: a URL relative to its own
-# address, `<root>try/static/<version>/urls.js`, read out of the module
+# address, `<root>talk/static/<version>/urls.js`, read out of the module
 # itself so what is resolved here is what the browser resolves.
 URLS_ROOT = re.compile(r'const ROOT = new URL\("([^"]*)", import\.meta\.url\);')
 
@@ -80,7 +80,7 @@ def behind_a_prefix() -> Iterator[TestClient]:
         yield proxied
 
 
-@pytest.mark.parametrize("spelling", ["/try/", "/try"])
+@pytest.mark.parametrize("spelling", ["/talk/", "/talk"])
 def test_every_reference_the_page_makes_stays_under_the_prefix(spelling: str) -> None:
     with behind_a_prefix() as proxied:
         page_url = f"http://testserver{PREFIX}{spelling}"
@@ -93,7 +93,7 @@ def test_every_reference_the_page_makes_stays_under_the_prefix(spelling: str) ->
             assert not reference.startswith("/"), reference
             assert not urlsplit(reference).scheme, reference
             resolved = urljoin(page_url, reference)
-            assert urlsplit(resolved).path.startswith(f"{PREFIX}/try/static/"), resolved
+            assert urlsplit(resolved).path.startswith(f"{PREFIX}/talk/static/"), resolved
             assert proxied.get(resolved).status_code == 200, resolved
 
 
@@ -128,13 +128,13 @@ def client_root(proxied: TestClient, page_url: str) -> str:
     return urljoin(urls, relative.group(1))
 
 
-@pytest.mark.parametrize("spelling", ["/try/", "/try"])
+@pytest.mark.parametrize("spelling", ["/talk/", "/talk"])
 def test_the_client_s_root_is_the_deployment_s_under_the_prefix(spelling: str) -> None:
     with behind_a_prefix() as proxied:
         root = client_root(proxied, f"http://testserver{PREFIX}{spelling}")
 
         assert urlsplit(root).path == f"{PREFIX}/"
-        assert urlsplit(urljoin(root, "try/redeem")).path == f"{PREFIX}{REDEEM_PATH}"
+        assert urlsplit(urljoin(root, "talk/redeem")).path == f"{PREFIX}{REDEEM_PATH}"
 
 
 def test_the_browser_s_whole_way_in_stays_under_the_prefix() -> None:
@@ -145,14 +145,14 @@ def test_the_browser_s_whole_way_in_stays_under_the_prefix() -> None:
     own module, with the identity and the token offered as a browser
     offers them."""
     with behind_a_prefix() as proxied:
-        page_url = f"http://testserver{PREFIX}/try/"
+        page_url = f"http://testserver{PREFIX}/talk/"
         page = proxied.get(page_url).text
         root = client_root(proxied, page_url)
         issued = proxied.post(f"{PREFIX}/api/runtime/invites", json={}, headers=BEARER)
         token = issued.json()["page"]
         body = proxied.post(
-            urljoin(root, "try/redeem"),
-            json={"token": token.removeprefix("/try/#")},
+            urljoin(root, "talk/redeem"),
+            json={"token": token.removeprefix("/talk/#")},
             headers=SAME_ORIGIN,
         ).json()
         reply = proxied.post(
@@ -180,8 +180,8 @@ def test_the_onboarding_path_a_redemption_hands_over_resolves_under_the_prefix()
     with behind_a_prefix() as proxied:
         issued = proxied.post(f"{PREFIX}/api/runtime/invites", json={}, headers=BEARER)
         token = issued.json()["page"]
-        token = token.removeprefix("/try/#")
-        page_url = f"http://testserver{PREFIX}/try/"
+        token = token.removeprefix("/talk/#")
+        page_url = f"http://testserver{PREFIX}/talk/"
         redeem_url = urljoin(page_url, "redeem")
         assert urlsplit(redeem_url).path == f"{PREFIX}{REDEEM_PATH}"
 

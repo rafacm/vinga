@@ -1046,7 +1046,7 @@ class Invite(BaseModel):
     )
     page: str = Field(
         description=(
-            "The browser page's path with the token in its fragment, `/try/#<token>`, "
+            "The browser page's path with the token in its fragment, `/talk/#<token>`, "
             "to be appended to the origin. The token is a credential: it is spent by "
             "the first browser that opens the link and expires unopened after "
             "`lifetime_s`, and a restart of this server ends it early."

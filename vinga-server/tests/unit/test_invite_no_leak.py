@@ -2,7 +2,7 @@
 
 The token is a secret. It appears in exactly two places this server
 handles: the issuance response to the operator's authenticated request,
-and the inbound body of `POST /try/redeem`. (The third, the operator's
+and the inbound body of `POST /talk/redeem`. (The third, the operator's
 own terminal, is `vinga info`'s stdout, held in the CLI's suite.) It
 reaches no log record in either format and no record's fields, no event
 a server tap is handed, no other response body or header, no exception,
@@ -127,7 +127,7 @@ def test_the_token_is_answered_by_the_issuance_alone(
             client.get(path, headers=BEARER)
             for path in ("/api/runtime/info", "/api/devices", "/api/config")
         ]
-        page = client.get("/try/")
+        page = client.get("/talk/")
 
     assert again.status_code == 403
     for response in (redeemed, checked, again, page, *reads):
@@ -238,7 +238,7 @@ def test_the_redemption_names_the_browser_in_no_record(
     when the browser checks in, in the fields a board's check-in uses
     (held by `test_browser_no_leak.py`)."""
     with caplog.at_level(logging.DEBUG), deployment() as (_, client):
-        token = client.post(ISSUE, json={}, headers=BEARER).json()["page"].removeprefix("/try/#")
+        token = client.post(ISSUE, json={}, headers=BEARER).json()["page"].removeprefix("/talk/#")
         body = client.post(REDEEM_PATH, json={"token": token}, headers=SAME_ORIGIN).json()
 
     with store_at() as store:

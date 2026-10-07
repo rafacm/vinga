@@ -1,9 +1,9 @@
 """The invite link: a short-lived, single-use token that binds a browser.
 
-`vinga info` prints `<origin>/try/#<token>`. The token travels in the
+`vinga info` prints `<origin>/talk/#<token>`. The token travels in the
 URL's fragment, which a browser sends to no server and puts in no
 `Referer`, so no proxy or access log in front of this server can record
-it; the page at `/try/` reads it, clears it from the address bar and
+it; the page at `/talk/` reads it, clears it from the address bar and
 redeems it with a same-origin POST (#613, D5). Redeeming spends the
 token, mints a browser identity and writes the device bound and named,
 in one transaction, before the browser's first word.

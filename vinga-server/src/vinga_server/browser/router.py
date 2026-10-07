@@ -4,23 +4,23 @@ how an unbound browser starts.
 Four things, mounted together whenever onboarding is enabled, since a
 browser needs the onboarding alias to check in at all (#613, D2):
 
-- `GET /try/`, the page, keyless and `no-store`;
-- `GET /try/static/<version>/<name>`, its modules, immutable;
-- `POST /try/redeem`, which spends an invite link's token and binds the
+- `GET /talk/`, the page, keyless and `no-store`;
+- `GET /talk/static/<version>/<name>`, its modules, immutable;
+- `POST /talk/redeem`, which spends an invite link's token and binds the
   browser presenting it (D5), keyless because the token is the
   credential, and refused from any origin but the page's own;
-- `POST /x/<key>/try-identity`, on the onboarding alias and behind its
+- `POST /x/<key>/browser-identity`, on the onboarding alias and behind its
   key guard, which mints an identity for a browser that holds none
   (D4). A wrong key meets the alias's stock 404, through the same
   guard every other alias route stands behind.
 
 The page is inert. An invite link carries its token in the URL's fragment,
-which no browser sends to any server, so `GET /try/` is the same page
+which no browser sends to any server, so `GET /talk/` is the same page
 for a person, a link preview, a prefetch and a scanner, and spends
 nothing for any of them; only the page's own script, reading the
 fragment, can redeem it. The redemption answers the identity and the
 onboarding path in its body, which the page keeps and checks in at,
-while its own address stays `/try/`.
+while its own address stays `/talk/`.
 
 The mint always mints. It used to refuse while a default agent was set
 (D4a), because a default agent admitted every unknown MAC without a
@@ -54,7 +54,7 @@ from .assets import (
 )
 
 # What a browser appends to the onboarding path to ask for an identity.
-TRY_IDENTITY_SEGMENT = "try-identity"
+IDENTITY_SEGMENT = "browser-identity"
 
 # Where the page redeems an invite link's token.
 REDEEM_PATH = f"{BROWSER_MOUNT_PATH}/redeem"
@@ -140,7 +140,7 @@ def build_router(key: str | None, assets: Assets | None = None) -> APIRouter:
                 # Relative to the deployment's root rather than from the
                 # server's: behind a proxy that serves this deployment
                 # under a path prefix, the page resolves it against its
-                # own address minus `try/`, which keeps the prefix.
+                # own address minus `talk/`, which keeps the prefix.
                 "onboarding_path": onboarding_path(key).removeprefix("/"),
             },
             headers=_REDEEM_HEADERS,
@@ -150,15 +150,15 @@ def build_router(key: str | None, assets: Assets | None = None) -> APIRouter:
         router.post(spelling)(redeem_link)
 
     if key is None:
-        for spelling in spellings(f"{onboarding_path(None)}{TRY_IDENTITY_SEGMENT}/"):
-            router.post(spelling)(try_identity)
+        for spelling in spellings(f"{onboarding_path(None)}{IDENTITY_SEGMENT}/"):
+            router.post(spelling)(browser_identity)
     else:
-        for spelling in spellings(f"{ONBOARDING_MOUNT_PATH}/{{key}}/{TRY_IDENTITY_SEGMENT}/"):
-            router.post(spelling)(_guarded(key, try_identity))
+        for spelling in spellings(f"{ONBOARDING_MOUNT_PATH}/{{key}}/{IDENTITY_SEGMENT}/"):
+            router.post(spelling)(_guarded(key, browser_identity))
     return router
 
 
-async def try_identity(request: Request) -> Response:
+async def browser_identity(request: Request) -> Response:
     """A fresh identity for a browser that holds none. Unconditional: what
     admits it is a claim of the code its check-in is then shown, never
     the mint (#612)."""
@@ -168,7 +168,7 @@ async def try_identity(request: Request) -> Response:
 
 def same_origin(request: Request) -> bool:
     """Whether this request comes from a page of this server's own
-    origin, which for a redemption is the page at `/try/`.
+    origin, which for a redemption is the page at `/talk/`.
 
     The browser says so itself, and nothing else is believed:
     `Sec-Fetch-Site` is set by the browser, never by a page, and a proxy

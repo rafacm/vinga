@@ -34,7 +34,7 @@ def test_a_registered_value_is_redacted_wherever_it_appears() -> None:
 def test_both_token_shapes_are_redacted_unregistered() -> None:
     redact = Redactor()
     text = (
-        f'{{"page": "/try/#{INVITE_TOKEN}"}} '
+        f'{{"page": "/talk/#{INVITE_TOKEN}"}} '
         f"Authorization: Bearer {DEVICE_TOKEN} "
         f"offered vinga.token.{DEVICE_TOKEN}"
     )

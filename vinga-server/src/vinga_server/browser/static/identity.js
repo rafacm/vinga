@@ -112,7 +112,7 @@ export async function start(pasted) {
     );
   }
   const body = await answered(
-    fetch(urls.onboarding(onboardingPath, "try-identity"), {
+    fetch(urls.onboarding(onboardingPath, "browser-identity"), {
       method: "POST",
       cache: "no-store",
       credentials: "omit",

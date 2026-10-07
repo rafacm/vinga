@@ -552,7 +552,7 @@ def test_two_runs_against_one_state_are_the_same_bytes(
         if one != other
     ]
     assert len(differing) == 1
-    assert all("/try/#" in line for line in differing[0])
+    assert all("/talk/#" in line for line in differing[0])
     assert first.err == second.err == ""
 
 

@@ -1805,7 +1805,7 @@ def _runtime(api: FastAPI) -> None:
 
         The answer carries a credential, and this is the one response
         that does. `page` is the browser page's path with a token in its
-        fragment, `/try/#<token>`; whichever browser opens the link
+        fragment, `/talk/#<token>`; whichever browser opens the link
         first redeems the token, and it is spent by that. Unopened, it
         expires after `lifetime_s` seconds, and a restart of this server
         ends it sooner, since links are held in the server's memory and
