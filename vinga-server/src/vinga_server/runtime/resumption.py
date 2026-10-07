@@ -75,7 +75,7 @@ class ThreadReads(Protocol):
     """
 
     def candidates(
-        self, agent: str, description: str
+        self, agent: str, description: str, device: str | None = None
     ) -> "threads.Candidates | threads.Unreadable": ...
 
     def backlog(
@@ -149,11 +149,24 @@ class Resumption:
     """
 
     def __init__(
-        self, reads: ThreadReads, budget_tokens: int, timeout_s: float
+        self,
+        reads: ThreadReads,
+        budget_tokens: int,
+        timeout_s: float,
+        device: str | None = None,
     ) -> None:
         self._reads = reads
         self._budget_tokens = budget_tokens
         self._timeout_s = timeout_s
+        # The board this session talks through, which a search held to
+        # its device searches by and a pick from one is checked against
+        # (#612). None is a session with no device to hold anything to,
+        # which offers nothing held to one.
+        self._device = device
+        # Which of the agents' offers were made by a search held to this
+        # device, so a pick from one is refused unless the thread really
+        # was begun here.
+        self._on_device: set[str] = set()
         # What each agent was last offered, in the order it was read
         # out. Replaced by a newer search and dropped whole at every
         # transition, so an id never outlives the conversation it was
@@ -171,8 +184,15 @@ class Resumption:
         # above are.
         self._awaiting: dict[str, str] = {}
 
-    async def described(self, agent: str, description: str) -> str:
+    async def described(
+        self, agent: str, description: str, on_device: bool = False
+    ) -> str:
         """Search, and answer what the model reads out.
+
+        `on_device` holds the search to the threads begun on this
+        session's board, which is how the built-in agent searches
+        (#612): its threads are the deployment's, and what one device
+        resumes must be what was said on it.
 
         The answer is a sentence either way. Nothing scoring is not a
         dead end: the newest threads come back with a line saying so, so
@@ -193,9 +213,19 @@ class Resumption:
         is a tool that answered a sentence either way.
         """
         async with self._searching:
-            answer = await self._ask(lambda: self._reads.candidates(agent, description))
+            device = self._device if on_device else None
+            if on_device and device is None:
+                # Nothing to hold the search to, so nothing it may offer.
+                return builtin.NOTHING_TO_RESUME
+            answer = await self._ask(
+                lambda: self._reads.candidates(agent, description, device)
+            )
             if isinstance(answer, str):
                 return answer
+            if on_device:
+                self._on_device.add(agent)
+            else:
+                self._on_device.discard(agent)
             # A newer search replaces what this agent may pick, and with
             # it any question it had already asked about one of the old
             # ones: the user has moved on, and an answer to a question
@@ -342,6 +372,7 @@ class Resumption:
         """
         self._offered.clear()
         self._awaiting.clear()
+        self._on_device.clear()
 
     async def _backlog(
         self, agent: str, conversation: str
@@ -369,6 +400,12 @@ class Resumption:
             # is the one the whole entity is keyed on, and an agent
             # reading another agent's thread is the failure this feature
             # must not have.
+            return builtin.NO_SUCH_CANDIDATE
+        if agent in self._on_device and found.device != self._device:
+            # The same defense for a search held to this device (#612):
+            # unreachable while the search filtered by the column, and
+            # checked anyway, because one device resuming what was said
+            # on another is the leak device-scoped threads close.
             return builtin.NO_SUCH_CANDIDATE
         return found
 

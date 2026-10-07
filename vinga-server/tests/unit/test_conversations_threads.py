@@ -301,9 +301,14 @@ def spoken(
     name: str,
     heard: str,
     agent: str = "sam",
+    mac: str | None = None,
 ) -> None:
-    """One thread of one agent, opened with one utterance."""
-    store.open_session(session, 100.0, MANIFEST | {"agent": agent, "agents": [agent]})
+    """One thread of one agent, opened with one utterance, on the
+    manifest's device or the one named."""
+    opened = MANIFEST | {"agent": agent, "agents": [agent]}
+    if mac is not None:
+        opened = opened | {"device": {**MANIFEST["device"], "mac": mac}}
+    store.open_session(session, 100.0, opened)
     store.record_turn(
         session,
         TurnRecord(
@@ -312,11 +317,11 @@ def spoken(
     )
 
 
-def asked(agent: str, description: str) -> threads.Candidates:
+def asked(agent: str, description: str, device: str | None = None) -> threads.Candidates:
     engine = open_conversations(DatabaseConfig())
     try:
         with engine.connect() as connection:
-            return threads.candidates(connection, agent, description)
+            return threads.candidates(connection, agent, description, device)
     finally:
         engine.dispose()
 
@@ -422,6 +427,49 @@ def test_discovery_is_scoped_to_the_agent_that_asked(stores) -> None:
     assert [one.conversation for one in asked("nadia", "andromeda").found] == [
         thread("hers")
     ]
+
+
+# The two boards the built-in agent's threads are told apart by (#612).
+KITCHEN = "aa:bb:cc:dd:ee:01"
+HALL = "aa:bb:cc:dd:ee:02"
+
+
+def test_a_search_held_to_a_device_finds_only_the_threads_begun_there(stores) -> None:
+    """The built-in agent's search (#612): one agent's threads are the
+    whole deployment's, and held to a device the scan sees only the ones
+    that board began, however well another board's thread matches."""
+    store = stores(retention_days=0)
+    store.start()
+    spoken(store, "a", "kitchen", "the andromeda galaxy", agent="vinga", mac=KITCHEN)
+    spoken(store, "b", "hall", "the andromeda galaxy", agent="vinga", mac=HALL)
+    store.stop()
+
+    held = asked("vinga", "andromeda galaxy", device=HALL)
+    unheld = asked("vinga", "andromeda galaxy")
+
+    assert [one.conversation for one in held.found] == [thread("hall")]
+    assert {one.conversation for one in unheld.found} == {thread("kitchen"), thread("hall")}
+
+
+def test_a_search_held_to_a_device_with_none_offers_nothing(stores) -> None:
+    store = stores(retention_days=0)
+    store.start()
+    spoken(store, "a", "kitchen", "the andromeda galaxy", agent="vinga", mac=KITCHEN)
+    store.stop()
+
+    assert asked("vinga", "andromeda galaxy", device=HALL).found == ()
+
+
+def test_the_backlog_answers_the_board_the_thread_was_begun_on(stores) -> None:
+    store = stores(retention_days=0)
+    store.start()
+    spoken(store, "a", "kitchen", "the andromeda galaxy", agent="vinga", mac=KITCHEN)
+    store.stop()
+
+    found = read_backlog(thread("kitchen"))
+
+    assert found is not None
+    assert found.device == KITCHEN
 
 
 def test_a_thread_stored_with_no_text_scores_nothing_and_still_lists(stores) -> None:

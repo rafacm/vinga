@@ -682,7 +682,9 @@ def transcript_rows(
     ]
 
 
-def candidates(connection: Any, agent: str, description: str) -> Candidates:
+def candidates(
+    connection: Any, agent: str, description: str, device: str | None = None
+) -> Candidates:
     """The threads of one agent a spoken description might have meant.
 
     Matching, not merely listing, and deliberately not full-text search
@@ -714,6 +716,12 @@ def candidates(connection: Any, agent: str, description: str) -> Candidates:
     is not bounded further on purpose: a bound is what would make the
     reviewer's case (a relevant thread outside the newest few) unfindable,
     which is the whole property this function exists to have.
+
+    `device` narrows the scan to the threads begun on one board, which
+    is the built-in agent's search (#612): its threads are the whole
+    deployment's, and what it may resume is what was said on the device
+    it is talking through. The column is the one every thread already
+    records, in canonical MAC form.
     """
     wanted = _tokens(description)
     scored: list[tuple[int, str, int, Candidate]] = []
@@ -729,7 +737,10 @@ def candidates(connection: Any, agent: str, description: str) -> Candidates:
             .limit(1)
             .scalar_subquery()
             .label("opening"),
-        ).where(conversations.c.agent == agent)
+        ).where(
+            conversations.c.agent == agent,
+            *(() if device is None else (conversations.c.device == device,)),
+        )
     ):
         score = len(wanted & (_tokens(row.title) | _tokens(row.opening)))
         scored.append(
@@ -790,7 +801,9 @@ class Backlog:
 
     `agent` is answered rather than filtered on, so a caller that asked
     for a thread belonging to somebody else is refused in its own words
-    rather than told the thread does not exist. `incomplete` is the mark
+    rather than told the thread does not exist. `device` is answered the
+    same way, the board the thread was begun on, so a caller held to one
+    device can refuse a thread begun on another (#612). `incomplete` is the mark
     a lost write left, which a resume conveys as a caveat: an
     acknowledgement speaks for one turn, and a hole in the middle of a
     thread is exactly what no per-turn answer can describe.
@@ -805,6 +818,7 @@ class Backlog:
     incomplete: bool
     milestone: Milestone | None = None
     turns: tuple[StoredTurn, ...] = ()
+    device: str | None = None
 
 
 def latest_milestone(connection: Any, conversation: str) -> Milestone | None:
@@ -865,9 +879,9 @@ def backlog(connection: Any, conversation: str) -> Backlog | None:
     began.
     """
     found = connection.execute(
-        select(conversations.c.agent, conversations.c.incomplete).where(
-            conversations.c.conversation == conversation
-        )
+        select(
+            conversations.c.agent, conversations.c.incomplete, conversations.c.device
+        ).where(conversations.c.conversation == conversation)
     ).first()
     if found is None:
         return None
@@ -913,6 +927,7 @@ def backlog(connection: Any, conversation: str) -> Backlog | None:
     return Backlog(
         conversation=conversation,
         agent=found.agent,
+        device=found.device,
         incomplete=bool(found.incomplete),
         milestone=milestone,
         turns=tuple(
@@ -979,9 +994,14 @@ class Reads:
     def __init__(self, database: DatabaseConfig) -> None:
         self._database = database
 
-    def candidates(self, agent: str, description: str) -> "Candidates | Unreadable":
-        """The threads of one agent a description might have meant."""
-        return self._read(lambda connection: candidates(connection, agent, description))
+    def candidates(
+        self, agent: str, description: str, device: str | None = None
+    ) -> "Candidates | Unreadable":
+        """The threads of one agent a description might have meant,
+        begun on one device when one is named."""
+        return self._read(
+            lambda connection: candidates(connection, agent, description, device)
+        )
 
     def backlog(self, conversation: str) -> "Backlog | None | Unreadable":
         """One thread, whole, or None where there is no such thread."""

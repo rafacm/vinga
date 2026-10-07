@@ -579,7 +579,7 @@ class SlowSearches(StoredThreads):
         self._answers = answers
         self._delays = delays
 
-    def candidates(self, agent: str, description: str) -> Any:
+    def candidates(self, agent: str, description: str, device: str | None = None) -> Any:
         time.sleep(self._delays.get(description, 0.0))
         self.asked.append((agent, description))
         return threads.Candidates(
