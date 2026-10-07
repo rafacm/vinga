@@ -1109,7 +1109,7 @@ through their generators.
   line. Design footprint: `onboarding/invites.py` keeps
   `try_links.py`'s depth under its new name and gains the bound agents;
   the CLI gains one verb under an existing noun.
-- [x] **[M2: the Use door, packaged](2026-10-06-vinga-built-in-agent-implementation.md#m2-the-use-door-packaged)** (PR TBD). `knowledge/` with the
+- [x] **[M2: the Use door, packaged](2026-10-06-vinga-built-in-agent-implementation.md#m2-the-use-door-packaged)** ([PR #631](https://github.com/rafacm/vinga/pull/631)). `knowledge/` with the
   committed copy, sections, the board-guide mapping (D3 budget test),
   the concept summary (D2 test), the cached reader; the census module
   that regenerates and checks the copy; the D10 pin; the wheel-level
