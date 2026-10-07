@@ -89,10 +89,11 @@ SCHEMA = "domain"
 
 metadata = MetaData(schema=SCHEMA, naming_convention=NAMING_CONVENTION)
 
-# The one row agent_defaults may hold. The value is arbitrary and never
-# shown; the check constraint on it is what makes the singleton a
-# property of the schema rather than a convention in the repository.
-AGENT_DEFAULTS_ID = "singleton"
+# The one row each singleton table may hold, agent_defaults and
+# builtin_agent alike. The value is arbitrary and never shown; the check
+# constraint on it is what makes the singleton a property of the schema
+# rather than a convention in the repository.
+SINGLETON_ID = "singleton"
 
 providers = Table(
     "providers",
@@ -139,7 +140,18 @@ agent_defaults = Table(
     metadata,
     Column("id", Text, primary_key=True),
     Column("body", Text, nullable=False),
-    CheckConstraint(f"id = '{AGENT_DEFAULTS_ID}'", name="singleton"),
+    CheckConstraint(f"id = '{SINGLETON_ID}'", name="singleton"),
+)
+
+# The built-in agent's overrides (#612), shaped like agent_defaults for
+# the reason the two are written alike: one entry for the deployment,
+# replaced whole, its body the dumped BuiltinAgentConfig.
+builtin_agent = Table(
+    "builtin_agent",
+    metadata,
+    Column("id", Text, primary_key=True),
+    Column("body", Text, nullable=False),
+    CheckConstraint(f"id = '{SINGLETON_ID}'", name="singleton"),
 )
 
 agents = Table(

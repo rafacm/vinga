@@ -50,7 +50,7 @@ from vinga_server.db import DOMAIN_CHAIN, open_database, read_engine, write_engi
 # and the whole of what this release upgrades from.
 BASELINE = "3003_device_record"
 
-HEAD = "3004_reach_replaces_egress"
+HEAD = "3005_builtin_agent"
 
 # One row per legacy shape, per entry kind. The explicit null is the
 # delta round's finding and the one a reader would not think to write:

@@ -124,7 +124,7 @@ def store(tmp_path: Path) -> Iterator[ConfigStore]:
 
 def _row_identity(descriptor: EntityDescriptor, identity: tuple[str, ...]) -> dict[str, object]:
     if not descriptor.addressing:
-        return {"id": schema.AGENT_DEFAULTS_ID}
+        return {"id": schema.SINGLETON_ID}
     return dict(zip(descriptor.addressing, identity, strict=True))
 
 
