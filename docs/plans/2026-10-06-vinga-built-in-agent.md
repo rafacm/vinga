@@ -986,3 +986,22 @@ through their generators.
   preset boot case. Existing deployments are untouched: importing a
   preset is additive, so an `assistant` already stored stays.
 
+
+## Plan review round
+
+Reviewed 2026-10-06 by openai/gpt-6-sol, thinking high via codex CLI 0.160.1, read-only sandbox, runtime 5m48s, at commit a5e57a25, plan blob 62b7b8bf.
+
+
+1. **P1: The required lookup gate is still open.** Evidence: the plan’s gate (`docs/plans/2026-10-06-vinga-built-in-agent.md:564`) says the plan was committed while measurement was running; its results, winner, harness and Q8 interface are placeholders. Issue #612 requires measurement **before the design is committed**. The plan should record the fixed questions, harness, results and chosen tool interface, then review that completed design before M5 begins.
+
+2. **P1: The board-guide rule selects pages that cannot pass its own test.** Evidence: Q6 (`docs/plans/2026-10-06-vinga-built-in-agent.md:415`) maps a reported type to any packaged device-page filename, while D3 (`docs/plans/2026-10-06-vinga-built-in-agent.md:626`) requires every mapped guide to have `## Controls`. Both flashing.md (`docs/devices/flashing.md:1`) and README.md (`docs/devices/README.md:1`) are in the proposed copy and lack that section. The plan should define which pages are board guides and test the matcher against that set, including these two negative cases.
+
+3. **P2: An existing blank `vinga` agent silently changes identity on upgrade.** Evidence: Q2 (`docs/plans/2026-10-06-vinga-built-in-agent.md:250`) treats a stored `agents.vinga` row as legacy only when `prompt` or `mcp` is non-empty. AgentConfig (`vinga-server/src/vinga_server/config/models.py:3530`) permits both to be empty; such a row can still have provider settings or prompt fragments. The plan would replace that agent’s blank persona with the built-in persona and could remove inherited MCP grants without warning. It should specify how a pre-upgrade row is distinguished from a new override, and test the blank-row upgrade.
+
+4. **P2: The collision remedy breaks export-and-apply round trips.** Evidence: Q1 (`docs/plans/2026-10-06-vinga-built-in-agent.md:233`) places the `agents.vinga` refusal in per-entry write staging. apply (`vinga-server/src/vinga_server/config/store.py:901`) prepares every document entry, and _parsed (`vinga-server/src/vinga_server/config/store.py:1954`) runs that write check before deciding an entry is unchanged. An export containing a displaced legacy `vinga` row would therefore fail when applied back unchanged. The plan should preserve that round trip for legacy rows, with a test, while refusing new incompatible writes.
+
+5. **P2: `vinga info` needs a live status source that the plan does not name.** Evidence: D6 (`docs/plans/2026-10-06-vinga-built-in-agent.md:655`) promises status after every apply. The existing runtime info response (`vinga-server/src/vinga_server/config/api.py:1721`) is composed once at startup from process and file settings. The plan should specify a read against the installed generation for built-in status and test that `vinga info` changes after an apply makes vinga served, displaced or unprovided.
+
+6. **P2: The lookup-query no-leak assertion omits an authorized content channel.** Evidence: the test plan (`docs/plans/2026-10-06-vinga-built-in-agent.md:737`) says a query may appear only in the conversation record. The pipeline (`vinga-server/src/vinga_server/runtime/pipeline.py:793`) also stages tool arguments for a telemetry span when LLM input export is enabled; the event catalog (`vinga-server/src/vinga_server/events/catalog.py:4178`) documents that content field. The plan should classify that opt-in span as an authorized content surface and test both export-off and export-on behavior, while keeping the query out of ordinary logs and event fields.
+
+**Verdict: not ready.** The lookup decision is unmeasured, and the stated board-guide test cannot pass as written.
