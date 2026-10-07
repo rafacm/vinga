@@ -100,6 +100,7 @@ from vinga_server.config.loader import (
 )
 from vinga_server.config.models import (
     API_MOUNT_PATH,
+    BuiltinState,
     Config,
     DatabaseConfig,
     DomainConfig,
@@ -116,6 +117,7 @@ from vinga_server.config.responses import (
     AgentRename,
     AppliedDocument,
     AssembledPrompt,
+    BuiltinAgentStatus,
     ConfigDiff,
     ConfigDiffReader,
     ConfigDocument,
@@ -997,6 +999,11 @@ class ApiRuntime:
     config_diff: ConfigDiffReader | None
     snapshot_only: bool = False
     identity: RuntimeInfo | None = None
+    # Whether the world installed right now serves the built-in agent
+    # (#612), asked per request: the one live field of the runtime info,
+    # since an apply can change it. None for an application built
+    # without a server around it, which installs no world.
+    builtin_state: Callable[[], BuiltinState] | None = None
     # Everyone watching the running server's events, which the stream
     # route subscribes on behalf of one reader at a time. None is the
     # honest answer for an application built without a server around it,
@@ -1147,6 +1154,7 @@ def build_api_runtime(
     live: LiveEvents | None = None,
     keepalive_s: float = KEEPALIVE_S,
     memory_erased: Callable[[], None] | None = None,
+    builtin_state: Callable[[], BuiltinState] | None = None,
     invites: Issuer | None = None,
 ) -> ApiRuntime:
     """What a request to this application resolves out of the server
@@ -1195,6 +1203,7 @@ def build_api_runtime(
         config_diff=config_diff,
         snapshot_only=snapshot_only,
         identity=identity,
+        builtin_state=builtin_state,
         live=live,
         keepalive_s=keepalive_s,
         invites=invites,
@@ -1402,6 +1411,16 @@ def _identity(request: Request) -> RuntimeInfo | None:
 
 
 IdentityDep = Annotated[RuntimeInfo | None, Depends(_identity)]
+
+
+def _builtin_state(request: Request) -> Callable[[], BuiltinState] | None:
+    """What says whether the installed world serves the built-in agent,
+    or None for an application built without a server around it."""
+    runtime: ApiRuntime = request.app.state.api_runtime
+    return runtime.builtin_state
+
+
+BuiltinStateDep = Annotated[Callable[[], BuiltinState] | None, Depends(_builtin_state)]
 
 
 def _invites(request: Request) -> Issuer | None:
@@ -1747,7 +1766,9 @@ def _runtime(api: FastAPI) -> None:
         response_model=RuntimeInfo,
         responses=_problems(401, 503, instead={503: _NO_RUNTIME_INFO_DESCRIPTION}),
     )
-    async def read_runtime_info(identity: IdentityDep, response: Response) -> RuntimeInfo:
+    async def read_runtime_info(
+        identity: IdentityDep, builtin: BuiltinStateDep, response: Response
+    ) -> RuntimeInfo:
         """Which deployment this is: the build that is running, and the
         URL a board is onboarded at.
 
@@ -1778,14 +1799,25 @@ def _runtime(api: FastAPI) -> None:
         status read: an invented version is not an empty listing.
         """
         # The docstring is this endpoint's description in the committed
-        # document, so what belongs to the handler is said here. Nothing
-        # is composed: the composition root resolved the whole answer at
-        # startup, because every fact in it is a fact of the process or
-        # of the server section, and neither moves while this runs.
+        # document, so what belongs to the handler is said here. Composed
+        # at startup but for one field: every other fact in it is a fact
+        # of the process or of the server section, and neither moves
+        # while this runs. Whether the built-in agent is served is a fact
+        # of the installed world, which an apply replaces, so it is read
+        # now (#612), through `builtin_status` as the world decided it.
         if identity is None:
             raise NoRuntimeError(_NO_RUNTIME_INFO)
         response.headers["cache-control"] = NO_STORE
-        return identity
+        if builtin is None:
+            return identity
+        state = builtin()
+        return identity.model_copy(
+            update={
+                "builtin_agent": BuiltinAgentStatus(
+                    status=state.status.value, stages=list(state.stages)
+                )
+            }
+        )
 
     @api.post(
         "/runtime/invites",

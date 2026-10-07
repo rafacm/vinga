@@ -744,6 +744,10 @@ async def _build_composition(
         # a live conversation's prompt at its next leg. One replica
         # (#316) is what makes one process's store the whole of it.
         memory_erased=memory.erased,
+        # And whether the world installed right now serves the built-in
+        # agent (#612), the one live field of the runtime info: read off
+        # the current generation per request, since an apply replaces it.
+        builtin_state=lambda: generations.current().config.builtin_state,
         # And what issues an invite link (#613): the links above, the server
         # section that says whether onboarding is on and which origin a
         # link may name, and whether a store stands behind this world,

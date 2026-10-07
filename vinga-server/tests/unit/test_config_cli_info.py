@@ -37,7 +37,7 @@ from tests.support.leaks import chain
 from vinga_server.config.cli import acts, deployment, reach
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.models import ServerConfig
-from vinga_server.config.responses import RuntimeInfo
+from vinga_server.config.responses import BuiltinAgentStatus, RuntimeInfo
 from vinga_server.onboarding.invites import Invites, Issuer
 from vinga_server.onboarding.origin import onboarding_url
 
@@ -784,3 +784,56 @@ def test_the_address_line_never_shows_a_credential_in_the_query(
     assert code == 0, printed.err
     assert f"configuration API: http://127.0.0.1:{port}/api" in printed.out
     assert QUERY_TOKEN not in printed.out + printed.err
+
+
+# Whether the built-in agent is served (#612)
+
+
+@pytest.mark.parametrize(
+    ("status", "stages", "said"),
+    [
+        ("displaced", [], f"`{reach.PROGRAM} agent rename vinga <new>`"),
+        ("unprovided", ["asr", "vad"], "no provider is named for asr, vad"),
+    ],
+    ids=["displaced", "unprovided"],
+)
+def test_info_says_why_the_built_in_agent_is_not_served(
+    run,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    status: str,
+    stages: list[str],
+    said: str,
+) -> None:
+    """The server states the state; the client names the remedy in its
+    own grammar."""
+    run.runtime["identity"] = identity(
+        monkeypatch, builtin_agent=BuiltinAgentStatus(status=status, stages=stages)
+    )
+    capsys.readouterr()
+
+    assert run("info") == 0
+
+    printed = capsys.readouterr().out
+    assert f"{deployment.BUILTIN_LABEL}: vinga is not served" in printed
+    assert said in printed
+    assert f"`{reach.PROGRAM} apply`" in printed
+
+
+@pytest.mark.parametrize(
+    "answered",
+    [BuiltinAgentStatus(status="served", stages=[]), None],
+    ids=["served", "an-older-server-that-says-nothing"],
+)
+def test_info_says_nothing_of_a_built_in_agent_that_is_served(
+    run,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    answered: BuiltinAgentStatus | None,
+) -> None:
+    run.runtime["identity"] = identity(monkeypatch, builtin_agent=answered)
+    capsys.readouterr()
+
+    assert run("info") == 0
+
+    assert deployment.BUILTIN_LABEL not in capsys.readouterr().out
