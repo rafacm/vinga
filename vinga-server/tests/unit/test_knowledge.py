@@ -14,7 +14,7 @@ import textwrap
 
 import pytest
 
-from tests.census.test_packaged_pages import sources
+from tests.support.packaged_pages import sources
 from vinga_server import knowledge
 from vinga_server.knowledge.library import sections_of
 

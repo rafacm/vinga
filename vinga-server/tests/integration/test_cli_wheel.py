@@ -103,11 +103,11 @@ from pathlib import Path
 import pytest
 import yaml
 
-from tests.census.test_packaged_pages import sources
 from tests.integration.conftest import mock_voice
 from tests.support.commands import BUILD_SECONDS, ran
 from tests.support.config_cli import registered
 from tests.support.deployment import Live, check_in, serving
+from tests.support.packaged_pages import sources
 from tests.support.tiers import (
     LANGFUSE_MODULES,
     OTEL_MODULES,

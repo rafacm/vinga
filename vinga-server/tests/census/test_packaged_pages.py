@@ -38,71 +38,26 @@ What a wheel and an image carry is what is on disk under the package,
 tracked or not, so the copy is compared as the build would see it; and
 the regenerator writes from what is on disk, so its check has to read
 the same thing.
+
+Which pages the copy carries, and where it lives, are in
+`tests/support/packaged_pages.py`, because the command-spellings pin,
+the unit cases and the wheel lane need the same answer and a test
+module may not import another.
 """
 
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
-# The checkout, found from this file rather than from the working
-# directory, for the reason the other two censuses give.
-REPO_ROOT = Path(__file__).resolve().parents[3]
-
-DOCS = REPO_ROOT / "docs"
-
-# Where the copy lives, inside the package the wheel carries.
-COPY = REPO_ROOT / "vinga-server" / "src" / "vinga_server" / "knowledge" / "pages"
-
-REGENERATE = "uv run python -m tests.census.test_packaged_pages"
-
-# The two Use pages that are not device guides, by name. Every device
-# page joins by existing, so a new guide needs no entry here.
-_TOP_LEVEL = ("concepts.md", "glossary.md")
-
-_DEVICES = "devices"
-
-
-def sources() -> dict[str, Path]:
-    """Every page the copy carries, keyed by its path inside the copy.
-
-    `docs/concepts.md` is `concepts.md`, and `docs/devices/<page>.md`
-    is `devices/<page>.md`, so the copy keeps the shape a reader knows.
-    """
-    found = {name: DOCS / name for name in _TOP_LEVEL}
-    for page in sorted((DOCS / _DEVICES).glob("*.md")):
-        found[f"{_DEVICES}/{page.name}"] = page
-    return found
-
-
-def copied() -> dict[str, bytes]:
-    """Every file under the copy, whatever it is, keyed the same way.
-
-    Every file and not only the Markdown ones, because whatever is in
-    the directory ships in the wheel.
-    """
-    if not COPY.is_dir():
-        return {}
-    return {
-        path.relative_to(COPY).as_posix(): path.read_bytes()
-        for path in sorted(COPY.rglob("*"))
-        if path.is_file()
-    }
-
-
-def regenerate() -> list[str]:
-    """Write the copy from the pages, and remove what no page backs.
-
-    Returns the copy's paths, for the command to report.
-    """
-    wanted = sources()
-    for stale in set(copied()) - set(wanted):
-        (COPY / stale).unlink()
-    for name, source in wanted.items():
-        target = COPY / name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(source.read_bytes())
-    return sorted(wanted)
+from tests.support.packaged_pages import (
+    COPY,
+    DEVICES,
+    REGENERATE,
+    TOP_LEVEL,
+    copied,
+    regenerate,
+    sources,
+)
 
 
 def test_the_packaged_pages_are_the_tree() -> None:
@@ -137,9 +92,9 @@ def test_the_copy_carries_the_whole_use_door() -> None:
     """
     found = sources()
 
-    assert all(found[name].is_file() for name in _TOP_LEVEL)
-    assert f"{_DEVICES}/README.md" in found
-    assert len([name for name in found if name.startswith(f"{_DEVICES}/")]) > 1
+    assert all(found[name].is_file() for name in TOP_LEVEL)
+    assert f"{DEVICES}/README.md" in found
+    assert len([name for name in found if name.startswith(f"{DEVICES}/")]) > 1
 
 
 if __name__ == "__main__":  # pragma: no cover - the regeneration entry point
