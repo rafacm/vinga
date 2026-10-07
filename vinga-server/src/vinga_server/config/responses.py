@@ -1233,9 +1233,10 @@ class RefusalReason(StrEnum):
     `provider-missing` and `mcp-server-missing` are a stored secret
     written to a holder that is not there, and they are two states
     rather than one because the remedy names the holder's own noun.
-    `no-default-agent` is an invite naming no agent, asked of a
-    deployment with no default agent, which a browser opening it could
-    not be bound to.
+    `default-agent-not-served` is an invite naming no agent, asked of
+    a deployment whose default agent, vinga when none is set, the
+    world installed now does not serve, so a browser opening it would
+    be bound to an agent that does not answer.
 
     How to read one: map a token you know to a sentence of your own
     grammar, and quote `detail` for one you do not. A token this
@@ -1252,7 +1253,7 @@ class RefusalReason(StrEnum):
     DEVICE_ALREADY_BOUND = "device-already-bound"
     PROVIDER_MISSING = "provider-missing"
     MCP_SERVER_MISSING = "mcp-server-missing"
-    NO_DEFAULT_AGENT = "no-default-agent"
+    DEFAULT_AGENT_NOT_SERVED = "default-agent-not-served"
 
 
 class Problem(BaseModel):

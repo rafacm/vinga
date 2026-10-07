@@ -9,7 +9,8 @@ is to be bound to; naming none means the default agent. It refuses,
 with nothing minted, in each state where opening the link could not do
 what it promises: onboarding off, no store behind the served world, a
 named agent this deployment does not have or this server is not
-serving, no default agent to bind to when none is named, and a store
+serving, a default agent this server is not serving when none is named
+(vinga, the built-in agent, when none is set; #612, D5), and a store
 already holding as many links as it will.
 
 The deployments here are real: a store written through the repository,
@@ -33,7 +34,7 @@ from vinga_server.onboarding.invites import (
     AGENT_NOT_SERVED,
     AGENTS_UNKNOWN,
     CAPACITY_REACHED,
-    NO_DEFAULT_AGENT,
+    DEFAULT_AGENT_NOT_SERVED,
     ONBOARDING_OFF,
     SNAPSHOT_ONLY,
     link_origin,
@@ -81,15 +82,46 @@ def test_each_request_is_a_new_link() -> None:
         assert held(app) == 2
 
 
-def test_with_no_default_agent_nothing_is_issued_and_the_state_is_named() -> None:
+def test_with_the_built_in_default_unserved_nothing_is_issued_and_the_state_is_named() -> (
+    None
+):
+    """D5: no default agent is stored, so the default is vinga, and this
+    world names no provider for it, so a browser bound to it would get
+    no answer. Getting Started's state before its providers exist."""
     with entered_app(booted(), from_store=True) as (app, client):
         answer = client.post(ISSUE, json={}, headers=BEARER)
 
         assert answer.status_code == 409
         assert answer.headers["content-type"].startswith(PROBLEM_MEDIA_TYPE)
         problem = answer.json()
-        assert problem["detail"] == NO_DEFAULT_AGENT
-        assert problem["reason"] == "no-default-agent"
+        assert problem["detail"] == DEFAULT_AGENT_NOT_SERVED
+        assert problem["reason"] == "default-agent-not-served"
+        assert held(app) == 0
+
+
+def test_with_no_default_agent_a_served_built_in_agent_is_the_default() -> None:
+    """The other half of D5: once the defaults provide every stage, vinga
+    is served, and an invite naming no agent is issued with no default
+    agent set at all."""
+    config = booted(agent_defaults=dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"))
+    with entered_app(config, from_store=True) as (app, client):
+        assert client.post(ISSUE, json={}, headers=BEARER).status_code == 200
+        assert held(app) == 1
+
+
+def test_a_default_agent_written_since_the_boot_is_not_served_until_applied() -> None:
+    """The comparison is with the world installed now: a default agent
+    stored since the boot names an agent this server has not installed,
+    and is refused until an apply installs it."""
+    with entered_app(booted(default_agent="assistant"), from_store=True) as (app, client):
+        with store_at() as store:
+            store.set_agent("later", {"prompt": "LATER"})
+            store.set_default_agent("later")
+
+        refused = client.post(ISSUE, json={}, headers=BEARER)
+
+        assert refused.status_code == 409
+        assert refused.json()["reason"] == "default-agent-not-served"
         assert held(app) == 0
 
 
@@ -171,7 +203,7 @@ def test_the_document_states_the_route_and_its_refusals() -> None:
     responses = operation["responses"]
 
     assert set(responses) >= {"200", "401", "409", "422", "503"}
-    assert "no-default-agent" in responses["409"]["description"]
+    assert "default-agent-not-served" in responses["409"]["description"]
     assert "agent-not-serving" in responses["409"]["description"]
     assert "server.onboarding.enabled" in responses["409"]["description"]
     assert "credential" in operation["description"]
@@ -228,7 +260,7 @@ def test_naming_no_agent_is_the_default_agent(body: dict) -> None:
     with entered_app(booted(), from_store=True) as (app, client):
         refused = client.post(ISSUE, json=body, headers=BEARER)
         assert refused.status_code == 409
-        assert refused.json()["reason"] == "no-default-agent"
+        assert refused.json()["reason"] == "default-agent-not-served"
 
     with entered_app(booted(default_agent="assistant"), from_store=True) as (app, client):
         assert client.post(ISSUE, json=body, headers=BEARER).status_code == 200

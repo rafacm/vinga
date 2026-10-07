@@ -31,13 +31,14 @@ import pytest
 
 from tests.support.config_cli import logged, runner
 from tests.support.leaks import renderings
-from vinga_server.config.cli import acts, devices
+from vinga_server.config.cli import acts, devices, reach
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.models import ServerConfig
+from vinga_server.config.responses import RefusalReason
 from vinga_server.onboarding.invites import (
     AGENT_NOT_SERVED,
     AGENTS_UNKNOWN,
-    NO_DEFAULT_AGENT,
+    DEFAULT_AGENT_NOT_SERVED,
     ONBOARDING_OFF,
     Invites,
     Issuer,
@@ -198,9 +199,12 @@ def test_a_target_that_is_not_loopback_with_no_configured_origin_prints_no_link(
 # --- refusals: the command fails, and stdout stays empty ------------------
 
 
-def test_with_no_default_agent_and_none_named_the_refusal_and_its_remedy_are_said(
+def test_with_the_default_unserved_and_none_named_the_refusal_and_its_remedy_are_said(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    """No default agent is stored, so the default is vinga, which this
+    server does not serve (#612, D5): the server's sentence, then this
+    client's remedy for the token."""
     links = deploy(run, default_agent=False)
     capsys.readouterr()
 
@@ -208,8 +212,30 @@ def test_with_no_default_agent_and_none_named_the_refusal_and_its_remedy_are_sai
 
     printed = capsys.readouterr()
     assert printed.out == ""
-    assert NO_DEFAULT_AGENT in printed.err
-    assert "`vinga default-agent set <name>`" in printed.err
+    assert DEFAULT_AGENT_NOT_SERVED in printed.err
+    assert "`vinga info` says why" in printed.err
+    assert links.held == 0
+
+
+def test_an_older_client_quotes_the_server_s_sentence_for_the_new_token(
+    run, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D5's compatibility claim: a client built before the token was
+    renamed cannot name `default-agent-not-served`, and its rule for a
+    token it does not know is to quote the server's sentence. Driven by
+    taking the token out of this client's vocabulary, which is what an
+    older build's vocabulary is."""
+    links = deploy(run, default_agent=False)
+    known = reach._KNOWN_REASONS - {RefusalReason.DEFAULT_AGENT_NOT_SERVED.value}
+    monkeypatch.setattr(reach, "_KNOWN_REASONS", known)
+    capsys.readouterr()
+
+    assert run("device", "invite") == 1
+
+    printed = capsys.readouterr()
+    assert printed.out == ""
+    assert DEFAULT_AGENT_NOT_SERVED in printed.err
+    assert "`vinga info` says why" not in printed.err
     assert links.held == 0
 
 

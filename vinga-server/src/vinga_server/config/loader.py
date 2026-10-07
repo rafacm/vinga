@@ -386,7 +386,8 @@ class InviteRefusedError(ConfigError):
     before its first word. Three states break it, and each is a fact
     about the deployment rather than about the request: onboarding is
     off, so there is no page and no alias for the browser to check in
-    at; no default agent is set, so there is nothing to bind it to; and
+    at; the agent it would bind is not one this server is serving, so
+    the browser would get no answer; and
     the store already holds as many live links as it will, which clears
     as they are opened or expire. Nothing was changed by any of them.
 

@@ -95,6 +95,7 @@ def booted(
     agents: tuple[str, ...] = ("assistant",),
     devices: dict[str, list[str]] | None = None,
     default_agent: str | None = None,
+    agent_defaults: dict[str, str] | None = None,
 ) -> Config:
     """The configuration a server booting on this lane's database would
     hold: the domain half written through the repository, read back, and
@@ -103,12 +104,18 @@ def booted(
     Really writing it is what makes this different from the rest of the
     unit lane, where a `Config` is composed in memory and there is no
     stored half at all.
+
+    `agent_defaults` is the layer every agent inherits through, and
+    writing every stage there is what serves vinga, the built-in agent
+    (#612); left out, vinga is unprovided, as on a fresh deployment.
     """
     if devices is None:
         devices = {BOUND_MAC: [agents[0]]}
     with store_at() as store:
         for stage in STAGES:
             store.set_provider(stage, "mock", {"type": "mock"})
+        if agent_defaults is not None:
+            store.set_agent_defaults(agent_defaults)
         for name in agents:
             store.set_agent(name, dict(AGENT))
         for mac, bound in devices.items():

@@ -940,9 +940,10 @@ REMEDIES: dict[RefusalReason, str] = {
     ),
     RefusalReason.PROVIDER_MISSING: f"Create it first with `{PROGRAM} provider set`.",
     RefusalReason.MCP_SERVER_MISSING: f"Create it first with `{PROGRAM} mcp-server set`.",
-    RefusalReason.NO_DEFAULT_AGENT: (
-        f"Set one with `{PROGRAM} default-agent set <name>`, and a browser opening a "
-        f"link is bound to that agent."
+    RefusalReason.DEFAULT_AGENT_NOT_SERVED: (
+        f"`{PROGRAM} info` says why when the default is vinga, the built-in agent; "
+        f"`{PROGRAM} apply` installs an agent written since; or name the agents the "
+        f"link binds with `{PROGRAM} device invite --agent <name>`."
     ),
 }
 
