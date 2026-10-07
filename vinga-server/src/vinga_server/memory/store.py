@@ -27,7 +27,8 @@ What a caller gets, in the order the sentences are met:
   is assembled from, rendered in one round trip. The agent's block is
   the newest of its facts rather than the whole of them, and a caller
   with no device or no thread behind it says so and gets the scopes it
-  asked for.
+  asked for; so does one whose agent keeps no memory of its own, which
+  is the built-in agent, whose memory is its device's (#612).
 - `add`, `update`, `forget` and `restore`, addressed by the id `add`
   answers with and bounded by the ownership of the row rather than by
   the model's good behavior. One door onto keeping a fact, whichever
@@ -965,7 +966,12 @@ class MemoryStore:
             return NOTHING_PURGED
 
     def read_for_prompt(
-        self, agent: str, device: str | None, conversation: str | None
+        self,
+        agent: str,
+        device: str | None,
+        conversation: str | None,
+        *,
+        agent_scope: bool = True,
     ) -> PromptMemory:
         """Everything a prompt needs to know of memory, in one round
         trip.
@@ -997,10 +1003,18 @@ class MemoryStore:
         and answering "no rows" by accident is not the same as saying
         there is nothing to read. The preview an operator asks for is
         exactly that shape, one scope of the three.
+
+        And an agent that keeps no memory of its own reads none, which
+        `agent_scope=False` says. That is the built-in agent (#612),
+        whose memory is pinned to its device's, so that what is said to
+        it on one device is never read on another; `agent` is still the
+        acting agent, which is whom a lost read is reported for.
         """
         def read(connection: Connection) -> PromptMemory:
-            agent_block, agent_ids = _core(
-                _newest(connection, MemoryScope.AGENT, agent, CORE_LINES)
+            agent_block, agent_ids = (
+                _core(_newest(connection, MemoryScope.AGENT, agent, CORE_LINES))
+                if agent_scope
+                else ("", ())
             )
             device_block, device_ids = (
                 ("", ())
@@ -1019,9 +1033,11 @@ class MemoryStore:
                 device_ids=device_ids,
             )
 
-        return self._read(agent, _reaching(device, conversation), read, NOTHING_READ)
+        return self._read(
+            agent, _reaching(device, conversation, agent_scope), read, NOTHING_READ
+        )
 
-    def recall(self, agent: str, device: str, query: str) -> str:
+    def recall(self, agent: str, device: str, query: str, *, agent_scope: bool = True) -> str:
         """Every active fact this agent can reach whose words contain
         the query, newest first, each with the id it is addressed by.
 
@@ -1044,6 +1060,10 @@ class MemoryStore:
         Bounded, and it says when it was: a match set is unbounded by
         nature, and a tool result that ran past the model's context
         would cost the reply it was meant to serve.
+
+        `agent_scope=False` leaves the agent's own scope out, for the
+        reason `read_for_prompt` gives: the built-in agent's memory is
+        its device's (#612).
         """
         wanted = _one_line(query)
         if not wanted:
@@ -1052,8 +1072,10 @@ class MemoryStore:
             raise ValueError(NOT_STORABLE)
         return self._read(
             agent,
-            (MemoryScope.AGENT, MemoryScope.DEVICE),
-            lambda connection: _bounded(_matching(connection, agent, device, wanted)),
+            (MemoryScope.AGENT, MemoryScope.DEVICE) if agent_scope else (MemoryScope.DEVICE,),
+            lambda connection: _bounded(
+                _matching(connection, agent if agent_scope else None, device, wanted)
+            ),
             "",
         )
 
@@ -1935,7 +1957,7 @@ def _oversized(text: str, scope: MemoryScope) -> bool:
 
 
 def _reaching(
-    device: str | None, conversation: str | None
+    device: str | None, conversation: str | None, agent_scope: bool = True
 ) -> tuple[MemoryScope, ...]:
     """Which scopes one prompt read is actually reading.
 
@@ -1945,7 +1967,7 @@ def _reaching(
     three would tell an operator that two scopes nobody asked about
     could not be read.
     """
-    reached = [MemoryScope.AGENT]
+    reached = [MemoryScope.AGENT] if agent_scope else []
     if conversation is not None:
         reached.insert(0, MemoryScope.CONVERSATION)
     if device is not None:
@@ -2129,10 +2151,11 @@ def _ledger_rendered(held: Sequence[tuple[str, str]]) -> str:
 
 
 def _matching(
-    connection: Connection, agent: str, device: str, wanted: str
+    connection: Connection, agent: str | None, device: str, wanted: str
 ) -> list[tuple[int, str]]:
     """The active facts of this agent and this device whose words
-    contain `wanted`, newest first, each rendered with its id.
+    contain `wanted`, newest first, each rendered with its id. No agent
+    is the device's facts alone.
 
     Newest first because a lookup answers a question asked now, and
     because the bound below cuts from the far end: what is dropped
@@ -2142,9 +2165,15 @@ def _matching(
         select(schema.facts.c.id, schema.facts.c.fact)
         .where(
             or_(
-                and_(
-                    schema.facts.c.scope == MemoryScope.AGENT,
-                    schema.facts.c.owner == agent,
+                *(
+                    ()
+                    if agent is None
+                    else (
+                        and_(
+                            schema.facts.c.scope == MemoryScope.AGENT,
+                            schema.facts.c.owner == agent,
+                        ),
+                    )
                 ),
                 and_(
                     schema.facts.c.scope == MemoryScope.DEVICE,

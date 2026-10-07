@@ -1089,6 +1089,35 @@ async def test_a_prompt_read_with_no_device_and_no_thread_reads_one_scope(
     assert {record.scope for record in events(caplog, "memory_unreadable")} == {"agent"}
 
 
+async def test_a_prompt_read_with_no_agent_scope_reads_the_device_alone(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The built-in agent's read (#612): its memory is its device's, so
+    its own agent scope is not read even where facts are filed under
+    its name, and a lost read reports only the scopes it reached for."""
+    store = memory()
+    await store.add(MemoryScope.AGENT, "vinga", "the user is vegetarian", agent="vinga")
+    kettle = await store.add(MemoryScope.DEVICE, "aa:bb", "the kettle is loud", agent="vinga")
+
+    read = store.read_for_prompt("vinga", "aa:bb", None, agent_scope=False)
+
+    assert (read.agent, read.agent_ids) == ("", ())
+    assert read.device_ids == (kettle,)
+    with caplog.at_level("WARNING"):
+        memory_that_cannot_read().read_for_prompt("vinga", "aa:bb", None, agent_scope=False)
+    assert {record.scope for record in events(caplog, "memory_unreadable")} == {"device"}
+
+
+async def test_a_lookup_with_no_agent_scope_finds_the_device_s_facts_alone() -> None:
+    store = memory()
+    await store.add(MemoryScope.AGENT, "vinga", "the user likes cheese", agent="vinga")
+    drawer = await store.add(MemoryScope.DEVICE, "aa:bb", "the cheese drawer sticks", agent="vinga")
+
+    found = store.recall("vinga", "aa:bb", "cheese", agent_scope=False)
+
+    assert found.splitlines() == [f"- [{drawer}] the cheese drawer sticks"]
+
+
 async def test_the_prompt_read_takes_one_connection() -> None:
     """The property the call exists for. Three reads would be three
     round trips off the loop, and the reply path pays for one per
