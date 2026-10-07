@@ -1129,3 +1129,43 @@ Discoveries in the deferred part:
   this branch's `3005_builtin_agent.py`), a build cached before the
   rebase. `uv cache clean vinga-server` and the tier-closure file passed
   whole (43 passed).
+
+### PR review round
+
+Reviewed 2026-10-07 by openai/gpt-6-sol, thinking high via codex CLI 0.160.1, read-only sandbox, at commit 7ada8461 ([the round](https://github.com/rafacm/vinga/pull/634#issuecomment-6037651736)). The fixes are by anthropic/claude-opus-5-5, thinking high, M3's own implementer.
+
+1. **P1: a live session could resume another device's thread after a
+   legacy `agents.vinga` was deleted.** An offer held from the legacy
+   agent's unscoped search survived the apply that installed the
+   built-in. *Resolution:* selection checks the device when either the
+   agent picking now or the original search is device-scoped, and the
+   pipeline drops outstanding offers when the speaking agent's built-in
+   status changes between legs. A session test runs the whole sequence
+   in one live session (legacy search, apply, pick of another board's
+   thread) and asserts the pick refused, the backlog never read and no
+   word of the thread in any prompt; it failed first, as did the unit
+   test of the selection half. The pipeline's argument to selection
+   survives its mutation because the offers are always dropped first,
+   so no driver reaches it; it is kept as the defense the finding asked
+   for (`750084b7`).
+2. **P2: an invite naming `vinga` was refused as unknown.**
+   *Resolution:* the store's agent names for issuance are the
+   resolvable names, stored agents plus the built-in, the rule
+   `check_references` uses, with the served check after it. Issuance
+   and redemption with `--agent vinga` are tested served and unserved;
+   both failed first with `agents-unknown` (`282a95f8`).
+3. **P2: the documentation promised device-specific answers before
+   M4.** *Resolution:* concepts, glossary, configuration and the
+   changelog fragment say only what vinga's prompt holds today; a grep
+   of the diff finds no device-answer claim. The persona itself was
+   qualified too (`knowledge/persona.md`): until M4 puts the board's
+   facts in the prompt, vinga says it does not know this particular
+   board and points to its guide or the operator, since the gate showed
+   small models inventing device facts when nothing backs them; a test
+   pins the wording and failed first (`dbde7f1e`, `da1f6def`).
+
+Verification after the round: the unit lane (`-n auto --dist loadfile`)
+`8592 passed, 19 skipped in 1049.74s`; the integration lane `363
+passed`; the drift checks current; ruff, link, Run and Use page and
+fragment checks clean; the knowledge tests `16 passed` after the persona
+commit.
