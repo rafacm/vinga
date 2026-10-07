@@ -10,6 +10,7 @@ from vinga_server.config.loader import ConfigError, compose_config, load_file_co
 from vinga_server.config.models import (
     AgentConfig,
     AgentDefaults,
+    BuiltinAgentConfig,
     Config,
     FileConfig,
     McpGrant,
@@ -25,6 +26,7 @@ from vinga_server.config.models import (
 __all__ = [
     "AgentConfig",
     "AgentDefaults",
+    "BuiltinAgentConfig",
     "Config",
     "ConfigError",
     "FileConfig",
