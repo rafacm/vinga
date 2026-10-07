@@ -1169,6 +1169,18 @@ Reviewed 2026-10-07 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.1
 
    Plan should say: retain build-time derivation from the authoritative docs, including a wheel and image build path that carries the pages, or first obtain an issue-level decision changing this requirement.
 
+   *Resolution:* rejected, with the reason recorded on #612 for Rafael. The
+   issue's settled point is the property it names, "what vinga says
+   always matches the server it runs in"; copying at image build time
+   was its proposed mechanism. Step 0 found the premise under that
+   mechanism moved (premise 12: the image's build context is
+   `vinga-server/` and cannot see `docs/`, and the wheel the browser
+   lane installs has no image build at all), which is the case the
+   pipeline lets a plan amend, and Decision 5 marks the amendment and
+   its reason. The committed copy keeps the property in every artifact
+   (wheel, image, git install), and the census lane fails in both
+   workflows the moment it drifts from `docs/`.
+
 2. **P1: M1 temporarily creates an enrollment path that violates invite-only browsers.**
 
    Evidence: Q4 (`docs/plans/2026-10-06-vinga-built-in-agent.md:373`) removes both `try_identity` refusals and makes it always mint, while decision 13 (`docs/plans/2026-10-06-vinga-built-in-agent.md:190`) says only `vinga device invite` may issue browser admission. M1b, which replaces try links with invites, comes later. Today those refusals are the branches in browser/router.py (`vinga-server/src/vinga_server/browser/router.py:201`).
