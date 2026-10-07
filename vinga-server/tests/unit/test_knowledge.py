@@ -213,3 +213,18 @@ def test_the_persona_opens_with_who_vinga_is_and_how_it_speaks() -> None:
     ):
         assert promise in opening
     assert "look" not in opening.casefold()
+
+
+def test_the_persona_claims_nothing_about_the_board_it_is_not_told() -> None:
+    """Until the board's facts are in the prompt (M4), vinga is told
+    nothing about the particular board it speaks through, and the gate
+    measured small models inventing what a prompt does not hold. So the
+    persona advertises no description of a device's buttons or screen:
+    it says vinga does not know this board yet and points to the device
+    guide or the person running the server."""
+    opening = " ".join(knowledge.persona().split("## The model in one paragraph")[0].split())
+
+    assert "what its buttons and screen do" not in opening
+    assert "what the device in front of the person does" not in opening
+    assert "you do not know this particular board yet" in opening
+    assert "device guide" in opening
