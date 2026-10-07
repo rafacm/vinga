@@ -26,6 +26,7 @@ from tests.support.leaks import chain, renderings
 from tests.support.registry import booted, store_at
 from vinga_server.app import create_app
 from vinga_server.browser import IDENTITY_UNAVAILABLE, REDEEM_PATH, REDEEM_REFUSED
+from vinga_server.events.catalog import GENERATION_CHANNEL
 from vinga_server.onboarding import onboarding_key, onboarding_path
 from vinga_server.onboarding.invites import SPENT_UNENROLLED, Invites, redeem
 
@@ -60,7 +61,15 @@ def browsers() -> list[str]:
 
 
 def warnings_of(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
-    return [record for record in caplog.records if record.levelno == logging.WARNING]
+    """The warnings the mint's failure produced, which leaves out the one
+    the server's boot says about the world it installed (#612): this
+    world does not serve the built-in agent, and that is about the world
+    rather than about the mint."""
+    return [
+        record
+        for record in caplog.records
+        if record.levelno == logging.WARNING and record.name != GENERATION_CHANNEL
+    ]
 
 
 def answered(response: httpx.Response) -> str:

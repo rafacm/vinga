@@ -42,7 +42,7 @@ from tests.support.registry import booted, store_at
 from vinga_server.app import create_app
 from vinga_server.browser import REDEEM_PATH, REDEEM_REFUSED
 from vinga_server.config.loader import StorageError
-from vinga_server.config.models import DatabaseConfig
+from vinga_server.config.models import BUILTIN_AGENT, DatabaseConfig
 from vinga_server.config.store import ConfigStore, read_live_attachment
 from vinga_server.db import read_engine
 from vinga_server.memory.store import PromptMemory
@@ -394,10 +394,11 @@ def test_a_long_body_is_not_read_to_its_end() -> None:
     assert len(pulled) <= 2
 
 
-def test_a_default_agent_cleared_since_issuance_binds_nothing() -> None:
-    """The one race issuance cannot rule out (D5a): the link was issued
-    against a default agent that is gone by the time it is opened. The
-    same refusal, the link spent, and nothing written."""
+def test_a_default_agent_cleared_since_issuance_binds_the_built_in_agent() -> None:
+    """What used to be the one race issuance could not rule out (D5a):
+    the default agent cleared between the link and its opening. Since
+    #612 an unset default is vinga, the built-in agent, read at the
+    redemption, so the browser is bound to it rather than refused."""
     with deployment() as (app, client):
         token = token_of(client)
         with store_at() as store:
@@ -405,9 +406,8 @@ def test_a_default_agent_cleared_since_issuance_binds_nothing() -> None:
 
         answer = redeemed(client, token)
 
-        assert answer.status_code == 403
-        assert answer.json() == {"error": REDEEM_REFUSED}
-        assert browsers() == {}
+        assert answer.status_code == 200, answer.text
+        assert list(browsers().values()) == [[BUILTIN_AGENT]]
         assert app.state.composition.invites.held == 0
 
 
@@ -549,9 +549,10 @@ def test_a_redeemed_browser_is_not_introduced_by_its_mac() -> None:
 
 
 def test_a_refusal_that_is_not_a_collision_is_not_drawn_again() -> None:
-    """Only a taken MAC is worth another draw: a default agent cleared
-    since the link was issued refuses every MAC alike, so the first
-    refusal is the answer."""
+    """Only a taken MAC is worth another draw: an agent the link names
+    that is gone by its opening refuses every MAC alike, so the first
+    refusal is the answer. (A cleared default agent was this case's
+    refusal until #612 made the unset default vinga.)"""
     booted()
     drawn: list[int] = []
 
@@ -561,7 +562,7 @@ def test_a_refusal_that_is_not_a_collision_is_not_drawn_again() -> None:
 
     with store_at() as store:
         links = Invites()
-        assert asyncio.run(redeem(links, links.issue(), store, counted)) is None
+        assert asyncio.run(redeem(links, links.issue(("gone",)), store, counted)) is None
 
     assert drawn == [6]
 
