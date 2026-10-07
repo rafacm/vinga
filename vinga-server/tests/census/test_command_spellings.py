@@ -59,6 +59,7 @@ from pathlib import Path
 import pytest
 
 from tests.support.config_cli import registered
+from tests.support.packaged_pages import COPY, sources
 from vinga_server.config.cli import grammar, reach
 
 # The checkout, found from this file rather than from the working
@@ -1010,8 +1011,6 @@ def test_a_fragment_is_a_record_the_way_the_changelog_is() -> None:
 
 
 def test_vinga_s_knowledge_is_held_to_the_live_grammar() -> None:
-    from tests.census.test_packaged_pages import COPY, sources
-
     found = sources()
     paths = [
         *(source.relative_to(REPO_ROOT).as_posix() for source in found.values()),
