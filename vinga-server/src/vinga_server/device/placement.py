@@ -166,9 +166,9 @@ class DevicePlacements:
             written = await asyncio.to_thread(self._store.relocate_device_by_id, device, location)
         except UnknownEntityError:
             # The record is gone, which is what a conversation whose
-            # device an operator deleted meets, and what a board a
-            # default agent merely covers would meet if the tool had not
-            # already refused it for having no record to attach to.
+            # device an operator deleted meets, and what a conversation
+            # with no record to attach to would meet if the tool had not
+            # already refused it for that.
             refusal = builtin.NO_DEVICE_RECORD
         except DeviceLocationBlankError:
             # A place that holds nothing once folded. The rule is the

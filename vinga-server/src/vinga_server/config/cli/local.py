@@ -34,9 +34,9 @@ OTA_URL_GUIDANCE = (
     "Type this into the device's captive portal, under its advanced settings, as the "
     "server address. If the board then shows a six-digit activation code, it has no "
     "agent yet: bind "
-    f"it with {PROGRAM} device pending claim <code> <agent>. A deployment with "
-    "default_agent set covers every board already, so its boards show no code and start "
-    "talking as soon as they connect."
+    f"it with {PROGRAM} device pending claim <code> <agent>, or leave the agent out "
+    "to bind it to default_agent. Every board with no binding of its own pairs this "
+    "way, whether or not default_agent is set; one already bound shows no code."
 )
 
 # What this command does about onboarding being off. The sentence it

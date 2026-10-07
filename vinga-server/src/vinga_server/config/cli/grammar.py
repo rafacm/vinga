@@ -1954,7 +1954,7 @@ GROUPS: dict[tuple[str, ...], str] = {
     ("mcp-server", "secret"): "credentials stored on mcp_servers.<name>",
     ("device",): "read and write devices.<mac>: a board's name, place and agents",
     ("device", "pending"): "the boards waiting to be claimed, and claiming one",
-    ("default-agent",): "the agent an unbound device reaches",
+    ("default-agent",): "the agent a newly claimed device starts with",
     # A noun with verbs rather than two flat words, because it has a
     # subject: the simulated board, which persists across invocations as
     # its MAC and which more than one verb asks about. `simulate` and
@@ -2283,13 +2283,13 @@ COMMANDS: tuple[Command, ...] = (
         words=("default-agent", "set"),
         does=SET_DEFAULT_AGENT,
         declare=_named,
-        help="the agent an unbound device reaches",
+        help="the agent a claim naming no agent binds a device to",
     ),
     Command(
         words=("default-agent", "clear"),
         does=CLEAR_DEFAULT_AGENT,
         declare=_plain,
-        help="unset it, leaving the devices map as the allowlist",
+        help="unset it, after which a claim has to name its agents",
         destroys=True,
     ),
     # The flat verbs: their subject is the whole deployment, or nothing

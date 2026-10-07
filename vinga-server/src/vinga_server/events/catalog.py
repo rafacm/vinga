@@ -1024,13 +1024,13 @@ class RejectedAgentNotLoaded(Variant):
 
 @dataclass(frozen=True)
 class RejectedNoAgent(Variant):
-    """A device bound to nothing, with no default to fall back on."""
+    """A device bound to nothing. No default agent falls back for it
+    since #612: an unbound device only pairs."""
 
     CHANNEL: ClassVar[str] = SESSION_CHANNEL
     LEVEL: ClassVar[int] = logging.WARNING
     TEMPLATE: ClassVar[str] = (
-        "session %s rejected: device %s has no agent: bind it under devices "
-        "or set default_agent"
+        "session %s rejected: device %s has no agent: bind it under devices"
     )
     ARGS: ClassVar[tuple[str, ...]] = ("session", "mac")
 
@@ -2996,13 +2996,13 @@ class OtaCheckAgentNotLoaded(Variant):
 
 @dataclass(frozen=True)
 class OtaCheckNoAgent(Variant):
-    """A device bound to nothing, with no default to fall back on."""
+    """A device bound to nothing. No default agent falls back for it
+    since #612: an unbound device only pairs."""
 
     CHANNEL: ClassVar[str] = OTA_CHANNEL
     LEVEL: ClassVar[int] = logging.WARNING
     TEMPLATE: ClassVar[str] = (
-        "device %s (%s, firmware %s) has no agent: bind it under devices "
-        "or set default_agent"
+        "device %s (%s, firmware %s) has no agent: bind it under devices"
     )
     ARGS: ClassVar[tuple[str, ...]] = ("said_device", "board", "firmware")
 

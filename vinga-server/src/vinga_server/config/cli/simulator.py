@@ -130,8 +130,8 @@ NO_TOKEN_ISSUED = (
 MAY_NOT_SPEAK = (
     f"It was issued no token and offered no activation code, which is what five "
     f"readings look like from here: onboarding is turned off on that deployment and "
-    f"nothing resolves this MAC; or this MAC, or that deployment's default_agent, names "
-    f"an agent it is not serving yet, which `{PROGRAM} apply` installs; or the table of "
+    f"nothing is bound to this MAC; or this MAC is bound to an agent it is not serving "
+    f"yet, which `{PROGRAM} apply` installs; or the table of "
     f"boards waiting to be claimed would not take another one; or that deployment could "
     f"not read its own record of what is bound, so it offered no code rather than one "
     f"for a board somebody has already claimed; or it issues no device tokens at all and "

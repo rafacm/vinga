@@ -802,7 +802,7 @@ Commands:
   agent-defaults   read and write agent_defaults
   device           read and write devices.<mac>: a board's name, place and
                    agents
-  default-agent    the agent an unbound device reaches
+  default-agent    the agent a newly claimed device starts with
   info             what deployment this is: the API this CLI reached, the
                    running server's version and revision, the URL to type into a
                    device's captive portal, a new try link a browser opens to
@@ -2157,14 +2157,14 @@ Options:
 ```
 Usage: vinga default-agent [OPTIONS] COMMAND [ARGS]...
 
-  the agent an unbound device reaches
+  the agent a newly claimed device starts with
 
 Options:
   -h, --help  Show this message and exit.
 
 Commands:
-  set    the agent an unbound device reaches
-  clear  unset it, leaving the devices map as the allowlist
+  set    the agent a claim naming no agent binds a device to
+  clear  unset it, after which a claim has to name its agents
 ```
 
 ### `vinga default-agent set`
@@ -2172,7 +2172,7 @@ Commands:
 ```
 Usage: vinga default-agent set [OPTIONS] {NAME}
 
-  the agent an unbound device reaches
+  the agent a claim naming no agent binds a device to
 
 Arguments:
   NAME  [required]
@@ -2195,7 +2195,7 @@ Options:
 ```
 Usage: vinga default-agent clear [OPTIONS]
 
-  unset it, leaving the devices map as the allowlist
+  unset it, after which a claim has to name its agents
 
 Options:
   --config PATH  path to the YAML config file naming server.port and

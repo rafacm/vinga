@@ -671,13 +671,13 @@ SERVING_THE_STORE = "nothing is pending: this server is serving what the store h
 # Why two of the kinds are never in a group above, said on every
 # comparison because it is a question about every comparison rather than
 # about this one's state. It is `LiveKind`'s docstring out loud: what is
-# stored for a binding or for the default agent is served by the entity
-# reads and is in effect by that device's next check-in, so nothing
-# about them can be pending against an apply. The two names in it are
+# stored for a binding is in effect by that device's next check-in, and
+# the default agent by the next claim, so nothing about them can be
+# pending against an apply. The two names in it are
 # the `LiveKind` sections of the comparison, which a pin holds it to.
 READ_AS_ASKED = (
-    "devices and default_agent are read as a device asks for them, so nothing about "
-    "them waits for an apply."
+    "devices are read as a device asks for them and default_agent as a claim does, "
+    "so nothing about them waits for an apply."
 )
 
 

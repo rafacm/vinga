@@ -30,7 +30,8 @@ Providers and MCP servers are named engines and named tool sources. An
 agent is a prompt that references them, one provider per pipeline stage,
 falling back to the agent defaults for every stage it does not name. A
 device is bound to one or more agents by its MAC address, and a device
-with no binding reaches the default agent.
+with no binding reaches no agent: it pairs by an activation code, and a
+claim that names no agent binds it to the default agent.
 
 That order is also the order things have to be written in: a write whose
 references do not resolve is refused, so providers and MCP servers come
@@ -70,10 +71,10 @@ immutable snapshot validated whole, and applying a change installs the
 next one rather than editing the one in place.
 
 Device bindings are the first way a change reaches it. A running
-server re-reads the `devices` map and `default_agent` as a device asks
-for them, so binding a device, unbinding it, or changing the default
-agent applies at that device's next OTA check or connection, with
-nothing asked of the server at all. The exception ends where the agent
+server re-reads the `devices` map as a device asks for it, so binding
+a device or unbinding it applies at that device's next OTA check or
+connection, with nothing asked of the server at all, and the next
+claim reads `default_agent` the same way. The exception ends where the agent
 does: a binding naming an agent this server is not serving resolves to
 nothing until the apply that installs it.
 
@@ -575,8 +576,11 @@ in one room is normal.
 
 `default_agent`
 
-The agent an unknown device reaches. Leaving it unset makes the devices map an
-allowlist: a device with no binding is then turned away.
+The agent a newly bound device starts with: a claim by activation code that
+names no agent binds the device to it. It admits nothing by itself: a device
+with no binding of its own reaches no agent and is offered a code, set or not,
+so the devices map is always the allowlist. Leaving it unset means a claim has
+to name its agents.
 
 ```bash
 vinga default-agent set <name>
@@ -605,4 +609,4 @@ been asked to apply it.
 | `agent_defaults` | `AgentDefaults` | `{}` | What every agent uses unless it names something else. One entry for the whole deployment, and deliberately without a prompt: a prompt is what makes an agent that agent, so inheriting one silently would make two agents the same one. |
 | `agents` | `dict[str, AgentConfig]` | `{}` | The agents this deployment serves, keyed by name. An agent is a prompt plus whichever stages it overrides, and every stage must resolve to a provider, here or in agent_defaults, for the server to start. |
 | `devices` | `dict[str, DeviceRecord]` | `{}` | The devices this deployment serves, keyed by MAC address as the Device-Id header sends it. Each entry is a record: a server-minted id that stays the same as the rest of the record changes, the name the agent says out loud, where the device stands, and the agents it may talk to. A bare list of agent names is accepted as shorthand for a record naming only those agents. |
-| `default_agent` | `str \| null` | `null` | The agent an unknown device reaches. Leaving it unset makes the devices map an allowlist: a device with no binding is then turned away. |
+| `default_agent` | `str \| null` | `null` | The agent a newly bound device starts with: a claim by activation code that names no agent binds the device to it. It admits nothing by itself: a device with no binding of its own reaches no agent and is offered a code, set or not, so the devices map is always the allowlist. Leaving it unset means a claim has to name its agents. |
