@@ -117,7 +117,7 @@ def open_link(
         path, _, token = server.api("POST", "/runtime/invites", {})["page"].partition("#")
         redact.register(token)
     else:
-        path, token = "/try/", ""
+        path, token = "/talk/", ""
     context = browser.new_context(permissions=["microphone"])
     context.add_init_script(path=str(INSTRUMENT))
     if init:
@@ -437,7 +437,7 @@ def test_an_unbound_browser_pairs_with_a_code(visits: Callable[..., Visit], serv
     page.locator("#onboarding").fill(urlsplit(onboarding).path)
     page.locator("#join").click()
     visit.wait_for("the refusal", lambda: "another address" in visit.status())
-    assert not any("try-identity" in url for url in visit.requests), visit.requests
+    assert not any("browser-identity" in url for url in visit.requests), visit.requests
 
     page.locator("#onboarding").fill(onboarding)
     page.locator("#join").click()

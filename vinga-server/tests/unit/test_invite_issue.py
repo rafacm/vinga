@@ -2,7 +2,7 @@
 #612, Q11).
 
 `POST /api/runtime/invites` mints a token behind the operator's bearer
-token and answers it inside the page's path, `/try/#<token>`, with the
+token and answers it inside the page's path, `/talk/#<token>`, with the
 origin the link should name when this server's configuration states one
 that opens a secure context. Its body may name the agents the browser
 is to be bound to; naming none means the default agent. It refuses,
@@ -43,7 +43,7 @@ PATH = "/runtime/invites"
 ISSUE = f"/api{PATH}"
 BEARER = {"Authorization": f"Bearer {TEST_API_SECRET}"}
 
-PAGE = re.compile(r"^/try/#([A-Za-z0-9_-]{43})$")
+PAGE = re.compile(r"^/talk/#([A-Za-z0-9_-]{43})$")
 
 
 def held(app) -> int:

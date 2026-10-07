@@ -180,11 +180,11 @@ API_MOUNT_PATH = "/api"
 # collide with the onboarding router.
 ONBOARDING_MOUNT_PATH = "/x"
 
-# Where the browser client's page and modules are served (#613): /try/
+# Where the browser client's page and modules are served (#613): /talk/
 # and everything under it, mounted with the onboarding route. Here for
 # the same reason as the two above: an OTA path under it would be
 # registered first and answer the page's own requests.
-BROWSER_MOUNT_PATH = "/try"
+BROWSER_MOUNT_PATH = "/talk"
 
 # The two health probes, and where they are served. Here for the reason
 # the two paths above are here: `ota_path`'s validator has to reserve

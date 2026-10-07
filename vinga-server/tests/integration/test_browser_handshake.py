@@ -107,7 +107,7 @@ async def test_a_browser_and_a_board_each_reach_a_session(
             async with httpx.AsyncClient(
                 base_url=f"http://127.0.0.1:{port}", timeout=30
             ) as client:
-                page = await client.get("/try/")
+                page = await client.get("/talk/")
                 browser_token = await _check_in(client, alias, BROWSER_MAC, BROWSER_CLIENT)
                 board_token = await _check_in(client, alias, BOARD_MAC, BOARD_CLIENT)
 

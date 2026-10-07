@@ -1,10 +1,10 @@
 """Redeeming an invite link from the page (#613, D5, D5b, D5d, D5e).
 
-The link is `<origin>/try/#<token>`. A fragment never reaches a server,
-so `GET /try/` is the same inert page for everybody and spends nothing:
+The link is `<origin>/talk/#<token>`. A fragment never reaches a server,
+so `GET /talk/` is the same inert page for everybody and spends nothing:
 a link preview, a prefetch or a scanner fetching it learns nothing and
 uses nothing up. The page's script reads the fragment, clears it, and
-redeems the token with a same-origin `POST /try/redeem`, which spends
+redeems the token with a same-origin `POST /talk/redeem`, which spends
 it, mints an identity, writes the device bound to the default agent and
 named in one transaction, and answers the identity and the onboarding
 path the browser checks in at.
@@ -69,8 +69,8 @@ def token_of(client: TestClient, agents: list[str] | None = None) -> str:
     issued = client.post(ISSUE, json={} if agents is None else {"agents": agents}, headers=BEARER)
     assert issued.status_code == 200, issued.text
     page = issued.json()["page"]
-    assert page.startswith("/try/#")
-    return page.removeprefix("/try/#")
+    assert page.startswith("/talk/#")
+    return page.removeprefix("/talk/#")
 
 
 def redeemed(client: TestClient, token: object, headers: dict[str, str] = SAME_ORIGIN):
@@ -239,7 +239,7 @@ def test_fetching_the_page_spends_nothing() -> None:
     The token is still there for the person who opens it."""
     with deployment() as (app, client):
         token = token_of(client)
-        for path in ("/try/", "/try"):
+        for path in ("/talk/", "/talk"):
             page = client.get(path, headers={"Purpose": "prefetch"})
             assert page.status_code == 200
             assert token not in page.text
@@ -614,7 +614,7 @@ def test_of_concurrent_redemptions_exactly_one_binds() -> None:
     app = create_app(booted(default_agent="assistant"), from_store=True)
     with served(app) as live:
         issued = httpx.post(f"{live.origin}{ISSUE}", json={}, headers=BEARER)
-        token = issued.json()["page"].removeprefix("/try/#")
+        token = issued.json()["page"].removeprefix("/talk/#")
 
         statuses = asyncio.run(_contend(live.origin, token))
 

@@ -4,7 +4,7 @@
 // A deployment may be published under a path (`server.public_url` of
 // `https://example.org/vinga`), so nothing here is root-relative: the
 // deployment's root is read off this module's own address, which is
-// `<root>try/static/<version>/urls.js` however the page itself was
+// `<root>talk/static/<version>/urls.js` however the page itself was
 // spelled, and every request is resolved against it. The other modules
 // ask here and never build a URL of their own.
 
@@ -53,14 +53,14 @@ export function pasted(value) {
 }
 
 // A request under the onboarding path: the check-in itself, `activate`
-// and `try-identity`.
+// and `browser-identity`.
 export function onboarding(path, segment = "") {
   return new URL(`${path}${segment}`, ROOT);
 }
 
 // The redemption of an invite link, beside the page.
 export function redeem() {
-  return new URL("try/redeem", ROOT);
+  return new URL("talk/redeem", ROOT);
 }
 
 // The device socket: the path the server named in the page it served,

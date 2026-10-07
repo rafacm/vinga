@@ -1,6 +1,6 @@
 """`vinga info`'s invite link line (#613, D5, D5a, D5c, D6b, D7a).
 
-`info` issues an invite link and prints it, `<origin>/try/#<token>`, on a
+`info` issues an invite link and prints it, `<origin>/talk/#<token>`, on a
 line of its own under a label saying what it does. Which origin is
 split between the two ends: the server names its configured public
 origin when that opens a secure context in a browser, and otherwise
@@ -37,7 +37,7 @@ from vinga_server.onboarding.invites import (
     Issuer,
 )
 
-LINK = re.compile(r"^(?P<origin>\S+)/try/#(?P<token>[A-Za-z0-9_-]{43})$")
+LINK = re.compile(r"^(?P<origin>\S+)/talk/#(?P<token>[A-Za-z0-9_-]{43})$")
 
 PUBLIC = "https://vinga.test.invalid"
 
@@ -140,7 +140,7 @@ def test_a_target_that_is_not_loopback_with_no_configured_origin_prints_no_link(
 
     printed = capsys.readouterr()
     assert link_lines(printed.out) == []
-    assert "/try/#" not in printed.out + printed.err
+    assert "/talk/#" not in printed.out + printed.err
     assert f"{deployment.INVITE_LABEL}: {deployment.NO_LINK_ORIGIN}" in printed.out.splitlines()
 
 
@@ -281,4 +281,4 @@ def test_a_configured_origin_with_a_path_prefix_keeps_it(
     assert run("info") == 0
 
     (link,) = link_lines(capsys.readouterr().out)
-    assert link.startswith(f"{PUBLIC}/vinga/try/#")
+    assert link.startswith(f"{PUBLIC}/vinga/talk/#")
