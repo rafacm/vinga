@@ -805,8 +805,8 @@ Commands:
   default-agent    the agent a newly claimed device starts with
   info             what deployment this is: the API this CLI reached, the
                    running server's version and revision, the URL to type into a
-                   device's captive portal, a new invite link a browser opens to
-                   join as a device, and how much of each kind is configured
+                   device's captive portal, and how much of each kind is
+                   configured
   import           write a whole document to the store in one transaction,
                    refused whole if anything in it will not resolve; additive,
                    never deleting, and waiting for the answer however long the
@@ -1913,6 +1913,8 @@ Commands:
                   remembered about the new MAC
   relocate        say where one board stands, free-form and not unique
   clear-location  unset where one board stands, leaving it nowhere in particular
+  invite          print a single-use link that joins the browser opening it as a
+                  device, bound to the agents named or else to the default agent
   pending         the boards waiting to be claimed, and claiming one
 ```
 
@@ -2090,6 +2092,29 @@ Options:
   -h, --help     Show this message and exit.
 ```
 
+### `vinga device invite`
+
+```
+Usage: vinga device invite [OPTIONS]
+
+  print a single-use link that joins the browser opening it as a device, bound
+  to the agents named or else to the default agent
+
+Options:
+  --agent NAME   an agent the browser that opens the link is bound to, repeated
+                 for several (default: the default agent)
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
+  -h, --help     Show this message and exit.
+```
+
 ### `vinga device pending`
 
 ```
@@ -2217,9 +2242,8 @@ Options:
 Usage: vinga info [OPTIONS]
 
   what deployment this is: the API this CLI reached, the running server's
-  version and revision, the URL to type into a device's captive portal, a new
-  invite link a browser opens to join as a device, and how much of each kind is
-  configured
+  version and revision, the URL to type into a device's captive portal, and how
+  much of each kind is configured
 
 Options:
   --config PATH  path to the YAML config file naming server.port and

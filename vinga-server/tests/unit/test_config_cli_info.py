@@ -526,18 +526,19 @@ def test_two_runs_against_one_state_are_the_same_bytes(
 ) -> None:
     """What is filtered off the line is a function of the stored state,
     so filtering is not a determinism violation: two runs against one
-    state answer the same bytes, but for the one line that is new on
-    purpose. Since #613 each run issues an invite link, and a link is a
-    fresh single-use token every time, so that line differs and is the
-    only one that does.
+    state answer the same bytes. Between #613 and #612 each run issued a
+    link, a fresh token every time, so one line differed; `info` reports
+    and issues nothing now (#612, Q11), so none does, and a server able
+    to issue one holds none afterwards.
 
     Both streams, because the claim is about the invocation rather than
     about the artifact, and stderr's half of it is that `info` writes
     nothing there at all: none of what this command answers is about the
     run.
     """
+    links = Invites()
     run.runtime["identity"] = identity(monkeypatch)
-    run.runtime["invites"] = Issuer(Invites(), ServerConfig(), False)
+    run.runtime["invites"] = Issuer(links, ServerConfig(), False)
     configured(run)
     capsys.readouterr()
 
@@ -546,14 +547,11 @@ def test_two_runs_against_one_state_are_the_same_bytes(
     assert run("info") == 0
     second = capsys.readouterr()
 
-    differing = [
-        (one, other)
-        for one, other in zip(first.out.splitlines(), second.out.splitlines(), strict=True)
-        if one != other
-    ]
-    assert len(differing) == 1
-    assert all("/talk/#" in line for line in differing[0])
+    assert first.out == second.out
+    assert "/talk/#" not in first.out
+    assert "invite" not in first.out
     assert first.err == second.err == ""
+    assert links.held == 0
 
 
 # What the URL must not reach
@@ -761,9 +759,9 @@ def test_both_acts_are_answered_by_the_address_the_banner_named(
 
     printed = capsys.readouterr().out
     assert len(reads) == 1, reads
-    # All three requests (the identity, the invite link, the counts), and
-    # the line that named where they would go.
-    assert len(run.reached) == 3, run.reached
+    # Both requests (the identity and the counts), and the line that
+    # named where they would go. Nothing issues an invite here (#612).
+    assert len(run.reached) == 2, run.reached
     assert set(run.reached) == {run.reached[0]}
     assert f"configuration API: {run.reached[0]}" in printed
 

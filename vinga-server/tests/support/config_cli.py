@@ -120,6 +120,12 @@ def runner(monkeypatch: pytest.MonkeyPatch, database: str | None = None):
         # it has nothing a browser could redeem a link against, and the
         # action refuses.
         "invites": None,
+        # And which agents the server around this application serves,
+        # which an invite naming its agents is checked against (#612).
+        # None is what an application built without a server answers,
+        # which is no agent at all; a test that issues an invite naming
+        # one puts the served set here.
+        "loaded_agents": None,
     }
     # Every client the entry point built, kept so a test can read the
     # timeouts a command chose after it has run.
@@ -168,6 +174,7 @@ def runner(monkeypatch: pytest.MonkeyPatch, database: str | None = None):
             identity=runtime["identity"],
             snapshot_only=bool(runtime["snapshot_only"]),
             invites=runtime["invites"],
+            loaded_agents=runtime["loaded_agents"],
         )
         # A base URL with a path prefix is the deployed shape, where the
         # sub-application is mounted on the server's own port, so the
