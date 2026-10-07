@@ -32,10 +32,12 @@ hands over an identity and writes nothing.
 """
 
 import json
+import logging
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
+from vinga_server.class_names import failure_name
 from vinga_server.composition import Composition
 from vinga_server.config.api import store_dependency
 from vinga_server.config.models import BROWSER_MOUNT_PATH, ONBOARDING_MOUNT_PATH
@@ -69,10 +71,25 @@ REDEEM_REFUSED = (
     "for a new one."
 )
 
+# What the identity route answers when no identity could be minted:
+# the operating system's generator, or whatever lies under it, failed.
+# Fixed, so nothing the failure said reaches the page, and it names the
+# one thing the person can do, which is ask again.
+IDENTITY_UNAVAILABLE = (
+    "This server could not make an identity for this browser just now. Press Join to "
+    "try again."
+)
+
+# And what the operator is told of it, the one argument being the
+# failure's class through `failure_name`, never its message.
+MINT_FAILED = "a browser asked for an identity and none could be minted (%s)"
+
 # How much of a redemption's body is read before it is refused. A token
 # is forty-three characters, and its JSON object a few more; anything
 # near this is not one.
 REDEEM_BODY_LIMIT = 1024
+
+logger = logging.getLogger(__name__)
 
 # An identity is the browser's own from the moment it is handed over:
 # nothing between here and the page keeps a copy.
@@ -161,8 +178,26 @@ def build_router(key: str | None, assets: Assets | None = None) -> APIRouter:
 async def browser_identity(request: Request) -> Response:
     """A fresh identity for a browser that holds none. Unconditional: what
     admits it is a claim of the code its check-in is then shown, never
-    the mint (#612)."""
-    identity = mint()
+    the mint (#612).
+
+    A mint that fails is contained: the draw is the operating system's
+    generator, and this application has no sanitized boundary behind
+    it, so an escaping failure would be a traceback carrying whatever
+    its message said. The browser is told `IDENTITY_UNAVAILABLE`, and
+    the operator one WARNING naming the failure's class and nothing
+    else of it, written after the handler so no record carries the
+    exception."""
+    identity = None
+    failed: str | None = None
+    try:
+        identity = mint()
+    except Exception as exc:
+        failed = failure_name(exc)
+    if identity is None:
+        logger.warning(MINT_FAILED, failed)
+        return JSONResponse(
+            {"error": IDENTITY_UNAVAILABLE}, status_code=503, headers=_REDEEM_HEADERS
+        )
     return JSONResponse({"mac": identity.mac, "client_id": identity.client_id}, headers=_NO_STORE)
 
 

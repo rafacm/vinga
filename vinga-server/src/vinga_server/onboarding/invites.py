@@ -375,9 +375,12 @@ async def redeem(
     if invitation is None:
         return None
     for _ in range(onboarding.INVITE_MINTS):
-        identity = mint(randomness)
         failed: str | None = None
         try:
+            # Inside the arm, like the write: the draw is the operating
+            # system's generator, and what it raises is not this
+            # module's to vouch for either.
+            identity = mint(randomness)
             await asyncio.to_thread(
                 store.enroll_device,
                 identity.mac,
@@ -387,9 +390,9 @@ async def redeem(
         except DeviceAlreadyBoundError:
             continue
         except Exception as exc:
-            # Every other failure, the store's own refusals and anything
-            # a layer under it raised alike, is the one answer: nothing
-            # bound. Contained rather than raised, because this frame
+            # Every other failure, the mint's, the store's own refusals
+            # and anything a layer under it raised alike, is the one
+            # answer: nothing bound. Contained rather than raised, because this frame
             # holds the token and what a lower layer says is not this
             # module's to vouch for, so nothing of it may escape; the
             # same belt `ota.reply` wears on its unauthenticated path.
