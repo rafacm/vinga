@@ -131,10 +131,12 @@ def test_every_driver_names_a_path_of_its_own() -> None:
     hundred and seven since each turn's clips go to their own turn after
     the recording (#496), and a clip that did not says so. And a hundred
     and eight since a tool call's arguments and result go to its own
-    tool span, counted on the same ledger as a second kind (#533)."""
+    tool span, counted on the same ledger as a second kind (#533). And a
+    hundred and ten since an installed world that does not serve the
+    built-in agent says why, displaced or unprovided (#612)."""
     claimed = [driver.identity for driver in DRIVERS]
 
-    assert len(set(claimed)) == len(claimed) == 108
+    assert len(set(claimed)) == len(claimed) == 110
 
 
 def test_every_driven_path_produces_the_event_it_emits(
@@ -1124,6 +1126,12 @@ CARRIED: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     ),
     "vinga_server.providers.openai_asr:OpenAiAsr._retry_without_prompt #5": (
         ("EchoRecovered", ("duration_s", "event", "host", "outcome", "retry_ms")),
+    ),
+    "vinga_server.generation:said_what_it_serves #1": (
+        ("BuiltinAgentDisplaced", ("event", "reason")),
+    ),
+    "vinga_server.generation:said_what_it_serves #2": (
+        ("BuiltinAgentUnprovided", ("event", "reason", "stages")),
     ),
     "vinga_server.providers.world:_loopback_inside_a_container #1": (
         ("ProviderReachesLoopback", ("event", "host", "provider", "stage", "type")),

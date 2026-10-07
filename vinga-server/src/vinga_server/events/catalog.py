@@ -65,6 +65,8 @@ from vinga_server.events.values import (
     AttemptedUpload,
     AuthRejection,
     BoardName,
+    BuiltinNotServed,
+    BuiltinStatus,
     CaptureDeclined,
     CaptureUploadFailure,
     CaptureWrite,
@@ -118,6 +120,7 @@ from vinga_server.events.values import (
     PromptSources,
     ProviderEntries,
     ProviderOutcome,
+    ProviderStages,
     QuotedProvider,
     QuotedToolName,
     ReachingHost,
@@ -161,6 +164,7 @@ CONFIG_API_CHANNEL = "vinga_server.config.api"
 CONVERSATIONS_CHANNEL = "vinga_server.conversations.store"
 BINDINGS_CHANNEL = "vinga_server.device.bindings"
 FILLER_CHANNEL = "vinga_server.filler"
+GENERATION_CHANNEL = "vinga_server.generation"
 LLM_INPUT_EXPORT_CHANNEL = "vinga_server.llm_input_export"
 MEMORY_CHANNEL = "vinga_server.memory.store"
 ONBOARDING_CHANNEL = "vinga_server.onboarding"
@@ -180,6 +184,7 @@ SERVER_CHANNELS: tuple[str, ...] = (
     CONVERSATIONS_CHANNEL,
     BINDINGS_CHANNEL,
     FILLER_CHANNEL,
+    GENERATION_CHANNEL,
     LLM_INPUT_EXPORT_CHANNEL,
     MEMORY_CHANNEL,
     ONBOARDING_CHANNEL,
@@ -3493,6 +3498,60 @@ class ProviderReachesLoopback(Variant):
     )
 
 
+# --- generation.py: what an installed world serves --------------------
+#
+# No session and no device: said once per world a server installs, at
+# the boot and at every apply, which is when what it serves can change.
+
+
+@dataclass(frozen=True)
+class BuiltinAgentDisplaced(Variant):
+    """The built-in agent is not served, because a stored agent named
+    vinga is served in its place (#612)."""
+
+    CHANNEL: ClassVar[str] = GENERATION_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "vinga, the built-in agent, is not served: an agent stored under its name "
+        "is served in its place; rename that agent with: vinga-server config agent "
+        "rename vinga <new>, and then: vinga-server config apply"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ()
+    NOTE: ClassVar[str] = (
+        "The stored agent keeps being served as it was, its memory and threads "
+        "with it, and the rename moves all of those to the new name in one "
+        "transaction. The sentence names the constant vinga and nothing an "
+        "operator wrote."
+    )
+
+    reason: BuiltinNotServed = value(fixed=BuiltinStatus.DISPLACED)
+
+
+@dataclass(frozen=True)
+class BuiltinAgentUnprovided(Variant):
+    """The built-in agent is not served, because a provider stage
+    resolves through neither its overrides nor `agent_defaults` (#612)."""
+
+    CHANNEL: ClassVar[str] = GENERATION_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "vinga, the built-in agent, is not served: a provider stage resolves through "
+        "neither builtin_agent nor agent_defaults; name a provider for the stages "
+        "this event lists in either, and then: vinga-server config apply"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ()
+    NOTE: ClassVar[str] = (
+        "Not a refusal: a deployment boots empty and is configured afterwards, "
+        "and a device bound to vinga waits as one bound to any agent the server "
+        "is not serving waits."
+    )
+
+    reason: BuiltinNotServed = value(fixed=BuiltinStatus.UNPROVIDED)
+    stages: ProviderStages = value(
+        note="The provider stages that resolve nowhere, in pipeline order."
+    )
+
+
 # --- tools/mcp/: the MCP lifecycle ------------------------------------
 #
 # No session or device: one entry serves every conversation.
@@ -4523,6 +4582,18 @@ MCP_RELOAD = declare(
     variants=(McpReloadRefused, McpReloadApplied),
 )
 
+BUILTIN_AGENT_NOT_SERVED = declare(
+    "builtin_agent_not_served",
+    note=(
+        "The world a server installs does not serve vinga, the built-in agent, "
+        "and says why from a closed set: displaced by a stored agent of that "
+        "name, or unprovided for want of a provider. At WARNING and once per "
+        "installed world, at the boot and at every apply, so the state is said "
+        "whenever it can have changed. `vinga info` reports the same status live."
+    ),
+    variants=(BuiltinAgentDisplaced, BuiltinAgentUnprovided),
+)
+
 PROVIDER_REACHES_LOOPBACK = declare(
     "provider_reaches_loopback",
     note=(
@@ -4928,6 +4999,10 @@ __all__ = [
     "PROMPT_ASSEMBLED",
     "PROVIDER_FAILED",
     "PROVIDER_REACHES_LOOPBACK",
+    "BUILTIN_AGENT_NOT_SERVED",
+    "BuiltinAgentDisplaced",
+    "BuiltinAgentUnprovided",
+    "GENERATION_CHANNEL",
     "PROVIDERS_CHANNEL",
     "PromptAssembled",
     "ProviderFailed",
