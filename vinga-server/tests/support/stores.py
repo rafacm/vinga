@@ -345,10 +345,14 @@ class StoredThreads:
         self.held = held or {}
         self.failure = failure
         self.asked: list[tuple[str, str]] = []
+        # The device each search was held to, beside `asked` in the same
+        # order, None for a search held to none (#612).
+        self.held_to: list[str | None] = []
         self.read: list[str] = []
 
-    def candidates(self, agent: str, description: str) -> Any:
+    def candidates(self, agent: str, description: str, device: str | None = None) -> Any:
         self.asked.append((agent, description))
+        self.held_to.append(device)
         if self.failure is not None:
             return self.failure
         return self.found.get(agent, threads.Candidates(matched=False))
@@ -384,6 +388,7 @@ def a_backlog(
     milestone: Any = None,
     first_id: int = 1,
     calls: Mapping[int, Sequence[StoredCall]] | None = None,
+    device: str | None = None,
 ) -> Any:
     """One thread as the store hands it back.
 
@@ -399,6 +404,7 @@ def a_backlog(
     return threads.Backlog(
         conversation=conversation,
         agent=agent,
+        device=device,
         incomplete=incomplete,
         milestone=milestone,
         turns=tuple(
