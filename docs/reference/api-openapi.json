@@ -1091,7 +1091,7 @@
       },
       "put": {
         "summary": "Write Agent",
-        "description": "Create or replace one agent. Every provider and MCP server it\nnames has to exist already, which is what the natural creation\norder is about.",
+        "description": "Create or replace one agent. Every provider and MCP server it\nnames has to exist already, which is what the natural creation\norder is about. No agent may be created under vinga, the\nbuilt-in agent's name; one stored under it before the built-in\nexisted may still be replaced.",
         "operationId": "write_agent_agents__name__put",
         "parameters": [
           {
@@ -1303,6 +1303,122 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/AgentDefaults"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acknowledgement"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/builtin-agent": {
+      "get": {
+        "summary": "Read Builtin Agent",
+        "description": "What vinga, the built-in agent, uses in place of what every\nagent inherits. One entry for the whole deployment, and never\nmissing: an unwritten one reads as the empty entry.",
+        "operationId": "read_builtin_agent_builtin_agent_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The server's log names the class of what failed, and nothing else of it.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Write Builtin Agent",
+        "description": "Replace what vinga, the built-in agent, uses in place of what\nevery agent inherits. One entry for the whole deployment, so\nthis is a replace and there is nothing to delete. It carries no\nprompt and no MCP grants: neither is a field it has.",
+        "operationId": "write_builtin_agent_builtin_agent_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuiltinAgentConfig"
               }
             }
           },
@@ -2240,7 +2356,7 @@
     "/agents/{name}/rename": {
       "post": {
         "summary": "Rename Agent",
-        "description": "Give one agent another name, moving every live reference to it\nin the same transaction: its device bindings, the default agent\nif it was one, what it remembered, and the conversation threads\nit owns.\n\nThe act the delete-and-create workaround cannot make. A binding\nand the default agent each refuse the delete half while they\nname the agent, so the workaround is six writes with the memory\nlost in the middle, and this is one transaction that leaves\nnothing dangling or writes nothing at all.\n\nWhat it does not rewrite is the record of what happened. A turn\nspoken last month was spoken by an agent whose name at the time\nwas the old one, and the row saying so is evidence rather than a\nreference, so the sessions, the turns and the events keep the\nnames they were written with.\n\nA POST because it is not idempotent: run twice, the second run\nfinds no agent under the old name and answers 404. The new name\nis a body rather than a second path segment because it is what\nthe request carries rather than part of what it addresses, and\nit is handed to the repository unread.\n\nRefused 409 when the destination is occupied, by an agent, by\nremembered facts or by recorded threads, since a rename may\nnever merge two pasts into one; 422 when the new name is not a\nname this deployment can address, or is the one the agent\nalready has. No refusal quotes either name.",
+        "description": "Give one agent another name, moving every live reference to it\nin the same transaction: its device bindings, the default agent\nif it was one, what it remembered, and the conversation threads\nit owns.\n\nThe act the delete-and-create workaround cannot make. A binding\nand the default agent each refuse the delete half while they\nname the agent, so the workaround is six writes with the memory\nlost in the middle, and this is one transaction that leaves\nnothing dangling or writes nothing at all.\n\nWhat it does not rewrite is the record of what happened. A turn\nspoken last month was spoken by an agent whose name at the time\nwas the old one, and the row saying so is evidence rather than a\nreference, so the sessions, the turns and the events keep the\nnames they were written with.\n\nA POST because it is not idempotent: run twice, the second run\nfinds no agent under the old name and answers 404. The new name\nis a body rather than a second path segment because it is what\nthe request carries rather than part of what it addresses, and\nit is handed to the repository unread.\n\nRefused 409 when the destination is occupied, by an agent, by\nremembered facts or by recorded threads, since a rename may\nnever merge two pasts into one; 422 when the new name is not a\nname this deployment can address, is the one the agent already\nhas, or is vinga, the built-in agent's. No refusal quotes either\nname.",
         "operationId": "rename_agent_agents__name__rename_post",
         "parameters": [
           {
@@ -3058,7 +3174,7 @@
     "/runtime/config/reload": {
       "post": {
         "summary": "Reload Config",
-        "description": "Apply the stored configuration to this running server.\n\nThe one action in this namespace that applies configuration,\nand the one way a stored change reaches a running server. What it applies is the whole\ndomain half: the provider entries and the MCP entries with the\nsecrets stored on them, the\nagents' effective `mcp` grant lists, the shared prompt\nfragments, the agents themselves and the `agent_defaults` layer\nunder them, which carries the stage every agent that names none\nof its own inherits. An agent this installs is one a device can\nbe bound to and reach at its next check-in; one it removes is\none no session can be opened as from the moment this answers,\nwhile a conversation already talking as it finishes on the world\nit was built from.\nWhat is not here is the server section, which is this process's\nown file and is never re-read: the port, the directories, the\nlimits. Nothing this API writes is in it.\n\nNothing is swapped, stopped or started until the whole new world\nhas been composed, validated and built, so a refusal (422) has\nchanged nothing at all. A server that merely will not connect is\nnot a refusal: it applies, and says `down` with its reason under\n`mcp.servers`, and is reconnected in the background when a\nsession that would use it opens.\n\nLive conversations are not dropped, and when one meets the\nresult depends on which half moved. The tools an agent may reach\nare snapshotted per reply, so a session picks those up on its\nnext utterance; a call in flight on a server this stopped fails\ninto the same error result a server dropping mid-call produces.\nPrompt text is assembled at an activation and cached for it, so\nan agent's own prompt, a fragment it includes and an entry's\n`instructions` alike reach a conversation at its\nnext activation, which is a new session or an agent switch, and\nnever a reply of one already running. Such an entry is reported `unchanged`\nunder `mcp`, which is a statement about its connection: the\nconnection is what did not change.\n\nThe engines are the third half and the one that costs\nsomething. An entry whose definition and stored credential have\nnot moved is carried into the new world as the object it already\nwas, and is reported under `providers.reused`; one that was\nrewritten is built while the old one is still serving, reported\nunder `providers.built`, and spoken through by the conversations\nthat open after this answered. An engine a conversation is still\nspeaking through is released when that conversation ends, so an\napply that changes a local model briefly holds two of it.\n\nThe world arrives in two steps, which is what makes the sentence\nabove per half rather than per apply: what a new activation\nassembles from is put in place first, and the MCP managers are\nstopped, started and swapped after it, so a session activating\nbetween the two sees the new prompts with the old tool world for\nat most one utterance. Nothing else can interleave, because one\napply runs at a time.\n\nOne apply runs at a time: a concurrent one is refused with 409\nand has changed nothing, like a write that could not take the\ndatabase's lock. A server serving a configuration that no store\ndescribes refuses with 409 as well, and says that starting from\na store is what changes it.",
+        "description": "Apply the stored configuration to this running server.\n\nThe one action in this namespace that applies configuration,\nand the one way a stored change reaches a running server. What it applies is the whole\ndomain half: the provider entries and the MCP entries with the\nsecrets stored on them, the\nagents' effective `mcp` grant lists, the shared prompt\nfragments, the agents themselves and the `agent_defaults` layer\nunder them, which carries the stage every agent that names none\nof its own inherits, and the built-in agent's `builtin_agent`\noverrides. An agent this installs is one a device can\nbe bound to and reach at its next check-in; one it removes is\none no session can be opened as from the moment this answers,\nwhile a conversation already talking as it finishes on the world\nit was built from.\nWhat is not here is the server section, which is this process's\nown file and is never re-read: the port, the directories, the\nlimits. Nothing this API writes is in it.\n\nNothing is swapped, stopped or started until the whole new world\nhas been composed, validated and built, so a refusal (422) has\nchanged nothing at all. A server that merely will not connect is\nnot a refusal: it applies, and says `down` with its reason under\n`mcp.servers`, and is reconnected in the background when a\nsession that would use it opens.\n\nLive conversations are not dropped, and when one meets the\nresult depends on which half moved. The tools an agent may reach\nare snapshotted per reply, so a session picks those up on its\nnext utterance; a call in flight on a server this stopped fails\ninto the same error result a server dropping mid-call produces.\nPrompt text is assembled at an activation and cached for it, so\nan agent's own prompt, a fragment it includes and an entry's\n`instructions` alike reach a conversation at its\nnext activation, which is a new session or an agent switch, and\nnever a reply of one already running. Such an entry is reported `unchanged`\nunder `mcp`, which is a statement about its connection: the\nconnection is what did not change.\n\nThe engines are the third half and the one that costs\nsomething. An entry whose definition and stored credential have\nnot moved is carried into the new world as the object it already\nwas, and is reported under `providers.reused`; one that was\nrewritten is built while the old one is still serving, reported\nunder `providers.built`, and spoken through by the conversations\nthat open after this answered. An engine a conversation is still\nspeaking through is released when that conversation ends, so an\napply that changes a local model briefly holds two of it.\n\nThe world arrives in two steps, which is what makes the sentence\nabove per half rather than per apply: what a new activation\nassembles from is put in place first, and the MCP managers are\nstopped, started and swapped after it, so a session activating\nbetween the two sees the new prompts with the old tool world for\nat most one utterance. Nothing else can interleave, because one\napply runs at a time.\n\nOne apply runs at a time: a concurrent one is refused with 409\nand has changed nothing, like a write that could not take the\ndatabase's lock. A server serving a configuration that no store\ndescribes refuses with 409 as well, and says that starting from\na store is what changes it.",
         "operationId": "reload_config_runtime_config_reload_post",
         "responses": {
           "200": {
@@ -5454,7 +5570,7 @@
           "notice": {
             "type": "string",
             "title": "Notice",
-            "description": "When the change takes effect, as one of a handful of sentences, for a reader rather than for a program: `applies` beside it is the same fact in tokens, and it is the half to branch on. A device binding and the default agent are read by the running server as a device asks for them, so they apply at that device's next OTA check or connection with nothing asked of the server. Every other kind this API writes, which is the whole of the rest of the domain half (the provider entries, the MCP entries, the secret slots on either, the prompt fragments, the agents and `agent_defaults`), is stored and waits for the stored configuration to be installed on the running server, which no restart is needed for. A binding naming an agent this server is not serving yet carries a sentence of its own, because both halves are true at once: the row is live, and the agent arrives with the install that adds it. So does a rename that moved a device binding or the default agent with the agent it renamed, for the same pair of reasons and about the references rather than about one binding; a rename that moved the agents row alone waits at the install like any other write of that kind. A server serving a configuration no store describes says that the write is stored and takes effect when a server boots from that store. Nothing this API writes waits for a server start."
+            "description": "When the change takes effect, as one of a handful of sentences, for a reader rather than for a program: `applies` beside it is the same fact in tokens, and it is the half to branch on. A device binding and the default agent are read by the running server as a device asks for them, so they apply at that device's next OTA check or connection with nothing asked of the server. Every other kind this API writes, which is the whole of the rest of the domain half (the provider entries, the MCP entries, the secret slots on either, the prompt fragments, the agents, `agent_defaults` and `builtin_agent`), is stored and waits for the stored configuration to be installed on the running server, which no restart is needed for. A binding naming an agent this server is not serving yet carries a sentence of its own, because both halves are true at once: the row is live, and the agent arrives with the install that adds it. So does a rename that moved a device binding or the default agent with the agent it renamed, for the same pair of reasons and about the references rather than about one binding; a rename that moved the agents row alone waits at the install like any other write of that kind. A server serving a configuration no store describes says that the write is stored and takes effect when a server boots from that store. Nothing this API writes waits for a server start."
           },
           "applies": {
             "items": {
@@ -5560,6 +5676,12 @@
             "type": "boolean",
             "title": "Defaults Changed",
             "description": "Whether `agent_defaults` moved, which is a boolean because there is one of it for the whole deployment and nothing to name. What it changes reaches every agent that inherits the field that moved."
+          },
+          "builtin_changed": {
+            "type": "boolean",
+            "title": "Builtin Changed",
+            "description": "Whether `builtin_agent`, the built-in agent's overrides, moved: a boolean for the reason `defaults_changed` is one. What it changes reaches the built-in agent alone, at its next activation. False from a server older than the built-in agent, which has no such entry to move.",
+            "default": false
           }
         },
         "additionalProperties": false,
@@ -5600,17 +5722,18 @@
               "mcp_servers",
               "prompt_fragments",
               "agent_defaults",
+              "builtin_agent",
               "agents",
               "devices",
               "default_agent"
             ],
             "title": "Section",
-            "description": "Which section of the domain configuration the entry is in: one of `providers`, `mcp_servers`, `prompt_fragments`, `agent_defaults`, `agents`, `devices`, `default_agent`. The entries are listed in that order, which is the order the configuration documents as its write, read and creation order."
+            "description": "Which section of the domain configuration the entry is in: one of `providers`, `mcp_servers`, `prompt_fragments`, `agent_defaults`, `builtin_agent`, `agents`, `devices`, `default_agent`. The entries are listed in that order, which is the order the configuration documents as its write, read and creation order."
           },
           "identity": {
             "type": "string",
             "title": "Identity",
-            "description": "The entry's identity under that section, as the row holds it rather than as the document spelled it: `<stage>.<name>` for a provider, the canonical form of the MAC for a device, the name for everything else. Empty for `agent_defaults` and `default_agent`, which hold one thing rather than entries."
+            "description": "The entry's identity under that section, as the row holds it rather than as the document spelled it: `<stage>.<name>` for a provider, the canonical form of the MAC for a device, the name for everything else. Empty for `agent_defaults`, `builtin_agent` and `default_agent`, which hold one thing rather than entries."
           },
           "outcome": {
             "type": "string",
@@ -5704,6 +5827,9 @@
           "agent_defaults": {
             "$ref": "#/components/schemas/SingletonDiff"
           },
+          "builtin_agent": {
+            "$ref": "#/components/schemas/SingletonDiff"
+          },
           "agents": {
             "$ref": "#/components/schemas/AgentsDiff"
           },
@@ -5721,6 +5847,7 @@
           "mcp_servers",
           "prompt_fragments",
           "agent_defaults",
+          "builtin_agent",
           "agents",
           "devices",
           "default_agent"
@@ -5734,7 +5861,7 @@
             "additionalProperties": true,
             "type": "object",
             "title": "Config",
-            "description": "The domain half of the configuration (providers, MCP servers, agent defaults, agents, devices, the default agent) in the shape `docs/reference/domain-config.md` documents, with every secret-bearing value masked."
+            "description": "The domain half of the configuration (providers, MCP servers, prompt fragments, agent defaults, the built-in agent's overrides, agents, devices, the default agent) in the shape `docs/reference/domain-config.md` documents, with every secret-bearing value masked."
           },
           "secrets": {
             "items": {
@@ -9087,6 +9214,123 @@
         "title": "AgentDefaults",
         "type": "object"
       },
+      "BuiltinAgentConfig": {
+        "additionalProperties": false,
+        "description": "The built-in agent's overrides: whichever stages, sections and\nshared fragments it uses in place of what every agent inherits.\n\nAn agent layer without a prompt and without MCP grants, and the two\nare absent rather than refused: the persona is the build's, and a\ngrant on an agent every bound device may reach would be a grant to\nevery device.",
+        "properties": {
+          "llm": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The language model vinga replies with, by the name it is defined under in providers.llm. Unset inherits the agent_defaults entry.",
+            "title": "Llm"
+          },
+          "asr": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The speech recognizer vinga hears with, by the name it is defined under in providers.asr. Unset inherits the agent_defaults entry.",
+            "title": "Asr"
+          },
+          "tts": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The voice vinga speaks with, by the name it is defined under in providers.tts. Unset inherits the agent_defaults entry.",
+            "title": "Tts"
+          },
+          "vad": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The voice activity detector for vinga's conversations, by the name it is defined under in providers.vad. Unset inherits the agent_defaults entry.",
+            "title": "Vad"
+          },
+          "filler": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FillerConfig"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Latency masking with a pre-synthesized filled pause. Unset inherits the agent_defaults section; naming one replaces it wholly."
+          },
+          "fallback": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FallbackConfig"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "What a failed reply of vinga's says out loud and on the display. Unset inherits the agent_defaults section, and the declared default phrase under neither; naming one replaces it wholly."
+          },
+          "memory": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MemoryPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Whether vinga may remember anything. What it remembers is its device's: it writes and reads the device's memory and never an agent memory of its own. Unset inherits the agent_defaults section; naming one replaces it wholly."
+          },
+          "prompt_includes": {
+            "anyOf": [
+              {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The shared prompt fragments vinga's prompt carries after its built-in persona, each by the name it is defined under in prompt_fragments, in the order listed. This is how its reply language is set: a fragment such as \"Always reply in Swedish.\" included here. Unset inherits the agent_defaults list; an empty list opts vinga out of the fragments its siblings share.",
+            "title": "Prompt Includes"
+          }
+        },
+        "title": "BuiltinAgentConfig",
+        "type": "object"
+      },
       "DeviceBinding": {
         "additionalProperties": false,
         "description": "What a device write carries: the agents the device may reach.",
@@ -9412,11 +9656,15 @@
             "$ref": "#/components/schemas/AgentDefaults",
             "description": "What every agent uses unless it names something else. One entry for the whole deployment, and deliberately without a prompt: a prompt is what makes an agent that agent, so inheriting one silently would make two agents the same one."
           },
+          "builtin_agent": {
+            "$ref": "#/components/schemas/BuiltinAgentConfig",
+            "description": "The built-in agent's overrides: what vinga uses in place of what every agent inherits from agent_defaults. vinga is composed by the server from the build it ships in, so this entry holds no prompt and no MCP grants: only its providers, its voice, its filler, fallback and memory sections, and the shared fragments its prompt carries, which is how its reply language is set. vinga is served whenever every stage resolves, here or in agent_defaults, and no stored agent is named vinga."
+          },
           "agents": {
             "additionalProperties": {
               "$ref": "#/components/schemas/AgentConfig"
             },
-            "description": "The agents this deployment serves, keyed by name. An agent is a prompt plus whichever stages it overrides, and every stage must resolve to a provider, here or in agent_defaults, for the server to start.",
+            "description": "The agents this deployment serves, keyed by name. An agent is a prompt plus whichever stages it overrides, and every stage must resolve to a provider, here or in agent_defaults, for the server to start. The name vinga is the built-in agent's: no agent of that name can be created, and one stored before the built-in agent existed is served in its place until it is renamed.",
             "propertyNames": {
               "minLength": 1
             },

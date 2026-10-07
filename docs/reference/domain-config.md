@@ -84,7 +84,8 @@ the stored configuration and install the whole domain half: the
 `providers` entries and the `mcp_servers` entries with the
 secrets stored on them, the
 agents' effective `mcp` grant lists, the prompt fragments, the agents
-themselves and the `agent_defaults` layer under them. Entries are
+themselves, the `agent_defaults` layer under them and the built-in
+agent's `builtin_agent` overrides. Entries are
 started,
 restarted, stopped or left alone, and no conversation is dropped. When
 one meets the result depends on which half moved: the tools an agent
@@ -429,6 +430,53 @@ Examples:
 
 - [`agent-defaults.yaml`](../../vinga-server/examples/agent-defaults.yaml)
 
+### Built-in agent
+
+`builtin_agent`
+
+What vinga, the built-in agent, uses in place of what every agent inherits
+from agent_defaults. The server composes it from the build it ships in, so
+this entry holds no prompt and no MCP grants: only its providers, its voice,
+its filler, fallback and memory sections, and the shared fragments its prompt
+carries, which is how its reply language is set.
+
+```bash
+vinga builtin-agent set -f fragment.yaml
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `llm` | `str \| null` | `null` | The language model vinga replies with, by the name it is defined under in providers.llm. Unset inherits the agent_defaults entry. |
+| `asr` | `str \| null` | `null` | The speech recognizer vinga hears with, by the name it is defined under in providers.asr. Unset inherits the agent_defaults entry. |
+| `tts` | `str \| null` | `null` | The voice vinga speaks with, by the name it is defined under in providers.tts. Unset inherits the agent_defaults entry. |
+| `vad` | `str \| null` | `null` | The voice activity detector for vinga's conversations, by the name it is defined under in providers.vad. Unset inherits the agent_defaults entry. |
+| `filler` | `FillerConfig \| null` | `null` | Latency masking with a pre-synthesized filled pause. Unset inherits the agent_defaults section; naming one replaces it wholly. |
+| `fallback` | `FallbackConfig \| null` | `null` | What a failed reply of vinga's says out loud and on the display. Unset inherits the agent_defaults section, and the declared default phrase under neither; naming one replaces it wholly. |
+| `memory` | `MemoryPolicy \| null` | `null` | Whether vinga may remember anything. What it remembers is its device's: it writes and reads the device's memory and never an agent memory of its own. Unset inherits the agent_defaults section; naming one replaces it wholly. |
+| `prompt_includes` | `list[str] \| null` | `null` | The shared prompt fragments vinga's prompt carries after its built-in persona, each by the name it is defined under in prompt_fragments, in the order listed. This is how its reply language is set: a fragment such as "Always reply in Swedish." included here. Unset inherits the agent_defaults list; an empty list opts vinga out of the fragments its siblings share. |
+
+This entry is a singleton, like agent_defaults: there is one of it, writing it
+replaces it whole, and it is not keyed by anything.
+
+vinga is served whenever every provider stage resolves, through this entry or
+through agent_defaults, and no stored agent is named vinga. A stage that
+resolves nowhere leaves it unserved rather than refusing the boot, and the
+server says which stages are missing.
+
+An agent named vinga that was stored before the built-in agent existed is the
+operator's own agent and is served in its place. Renaming that agent and
+applying brings the built-in back, and keeps what the renamed agent remembered
+and the threads it can resume. No new agent may be created under the name
+vinga, or renamed to it.
+
+What vinga remembers and the conversations it can resume are its device's: it
+writes and reads that device's memory, and searches only the threads held on
+that device.
+
+Examples:
+
+- [`builtin-agent.yaml`](../../vinga-server/examples/builtin-agent.yaml)
+
 ### MCP grant
 
 `agent_defaults.mcp[], agents.<name>.mcp[]`
@@ -457,7 +505,7 @@ published list, so the mismatch is answerable in one read.
 
 ### Filler
 
-`agent_defaults.filler, agents.<name>.filler`
+`agent_defaults.filler, builtin_agent.filler, agents.<name>.filler`
 
 Masking reply latency with a pre-synthesized filled pause. Nested inside an
 agent or the agent defaults rather than written on its own, and off unless it
@@ -474,7 +522,7 @@ provider is the thing being slow.
 
 ### Fallback
 
-`agent_defaults.fallback, agents.<name>.fallback`
+`agent_defaults.fallback, builtin_agent.fallback, agents.<name>.fallback`
 
 What a failed reply says out loud and on the display. Nested inside an agent
 or the agent defaults rather than written on its own, and on unless it says
@@ -501,7 +549,7 @@ per agent by `vinga apply`.
 
 ### Memory
 
-`agent_defaults.memory, agents.<name>.memory`
+`agent_defaults.memory, builtin_agent.memory, agents.<name>.memory`
 
 Whether an agent remembers anything at all. Nested inside an agent or the
 agent defaults rather than written on its own, and on unless it says
@@ -607,6 +655,7 @@ been asked to apply it.
 | `mcp_servers` | `dict[str, McpServerConfig]` | `{}` | The MCP servers agents may be given tools from, keyed by entry name. The name becomes the prefix its tools are offered to the model under (home__turn_on_light), so it must match [A-Za-z0-9_-]+ and must not be one of the names the merged tool list already uses. What a tool answers with reaches the model as speakable text, since the reply is spoken; content of any other kind is named as a placeholder rather than dropped. Carrying structured content to a device is work for the display protocol, once the display path can render more than speech, rather than for the tool loop. |
 | `prompt_fragments` | `dict[str, PromptFragmentConfig]` | `{}` | The shared blocks of prompt text agents include by name, keyed by fragment name. A fragment is written once and injected verbatim into the system prompt of every agent whose prompt_includes names it, which is how household facts or a house style stay in one place instead of being copied into every persona prompt and drifting apart. The name appears in the provenance the assembled prompt is reported under (fragment:<name>), so it must match [A-Za-z0-9_-]+. |
 | `agent_defaults` | `AgentDefaults` | `{}` | What every agent uses unless it names something else. One entry for the whole deployment, and deliberately without a prompt: a prompt is what makes an agent that agent, so inheriting one silently would make two agents the same one. |
-| `agents` | `dict[str, AgentConfig]` | `{}` | The agents this deployment serves, keyed by name. An agent is a prompt plus whichever stages it overrides, and every stage must resolve to a provider, here or in agent_defaults, for the server to start. |
+| `builtin_agent` | `BuiltinAgentConfig` | `{}` | The built-in agent's overrides: what vinga uses in place of what every agent inherits from agent_defaults. vinga is composed by the server from the build it ships in, so this entry holds no prompt and no MCP grants: only its providers, its voice, its filler, fallback and memory sections, and the shared fragments its prompt carries, which is how its reply language is set. vinga is served whenever every stage resolves, here or in agent_defaults, and no stored agent is named vinga. |
+| `agents` | `dict[str, AgentConfig]` | `{}` | The agents this deployment serves, keyed by name. An agent is a prompt plus whichever stages it overrides, and every stage must resolve to a provider, here or in agent_defaults, for the server to start. The name vinga is the built-in agent's: no agent of that name can be created, and one stored before the built-in agent existed is served in its place until it is renamed. |
 | `devices` | `dict[str, DeviceRecord]` | `{}` | The devices this deployment serves, keyed by MAC address as the Device-Id header sends it. Each entry is a record: a server-minted id that stays the same as the rest of the record changes, the name the agent says out loud, where the device stands, and the agents it may talk to. A bare list of agent names is accepted as shorthand for a record naming only those agents. |
 | `default_agent` | `str \| null` | `null` | The agent a newly bound device starts with: a claim by activation code that names no agent binds the device to it. It admits nothing by itself: a device with no binding of its own reaches no agent and is offered a code, set or not, so the devices map is always the allowlist. Leaving it unset means a claim has to name its agents. |

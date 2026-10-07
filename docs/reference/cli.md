@@ -739,6 +739,17 @@ What every agent uses unless it names something else.
 vinga agent-defaults set -f examples/agent-defaults.yaml
 ```
 
+### Built-in agent
+
+`builtin_agent`
+
+What vinga, the built-in agent, uses in place of what every agent inherits
+from agent_defaults.
+
+```bash
+vinga builtin-agent set -f examples/builtin-agent.yaml
+```
+
 ### Devices and the default agent
 
 `devices, default_agent`
@@ -800,6 +811,7 @@ Commands:
   prompt-fragment  read and write prompt_fragments.<name>
   agent            read and write agents.<name>
   agent-defaults   read and write agent_defaults
+  builtin-agent    read and write builtin_agent
   device           read and write devices.<mac>: a board's name, place and
                    agents
   default-agent    the agent a newly claimed device starts with
@@ -1874,6 +1886,135 @@ Options:
 Usage: vinga agent-defaults export [OPTIONS]
 
   export agent_defaults
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
+  -h, --help     Show this message and exit.
+```
+
+### `vinga builtin-agent`
+
+```
+Usage: vinga builtin-agent [OPTIONS] COMMAND [ARGS]...
+
+  read and write builtin_agent
+
+Options:
+  -h, --help  Show this message and exit.
+
+Commands:
+  set     create or replace builtin_agent
+  show    print builtin_agent
+  export  export builtin_agent
+```
+
+### `vinga builtin-agent set`
+
+```
+Usage: vinga builtin-agent set [OPTIONS] [KEY=VALUE]
+
+  create or replace builtin_agent
+
+Arguments:
+  KEY=VALUE  the entity written inline, one key=value per field; a dotted key
+             nests (filler.enabled=true) and a value reads as one YAML scalar.
+             The alternative to -f, and never both
+
+Options:
+  -f, --file PATH  YAML fragment for this entity, or - to read it from stdin;
+                   the alternative to key=value arguments, and never both
+                   (default: none, and one of the two forms must be given)
+  --config PATH    path to the YAML config file naming server.port and
+                   server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL    base URL of the configuration API (default: $VINGA_API_URL,
+                   then http://127.0.0.1:<server.port>/api)
+  --force          answer the confirmation a destructive command asks at a
+                   terminal, so it does not ask (default: it asks)
+  --no-input       never prompt: a destructive command refuses rather than
+                   asking, and a secret is read from stdin or --from-env
+                   (default: prompt at a terminal)
+  -h, --help       Show this message and exit.
+
+A credential is never a key=value argument: arguments land in shell history
+and in the process list. Store one with `vinga <kind> secret set`, which reads
+it from stdin or from the variable --from-env names, and never echoes it.
+
+fragment fields for built-in agent (builtin_agent):
+
+  llm: str | null  (default: null)
+    The language model vinga replies with, by the name it is defined under in
+    providers.llm.
+  asr: str | null  (default: null)
+    The speech recognizer vinga hears with, by the name it is defined under in
+    providers.asr.
+  tts: str | null  (default: null)
+    The voice vinga speaks with, by the name it is defined under in
+    providers.tts.
+  vad: str | null  (default: null)
+    The voice activity detector for vinga's conversations, by the name it is
+    defined under in providers.vad.
+  filler: FillerConfig | null  (default: null)
+    Latency masking with a pre-synthesized filled pause.
+  fallback: FallbackConfig | null  (default: null)
+    What a failed reply of vinga's says out loud and on the display.
+  memory: MemoryPolicy | null  (default: null)
+    Whether vinga may remember anything.
+  prompt_includes: list[str] | null  (default: null)
+    The shared prompt fragments vinga's prompt carries after its built-in
+    persona, each by the name it is defined under in prompt_fragments, in the
+    order listed.
+  filler.enabled: bool  (default: false)
+    Whether a filled pause is played while a slow reply is prepared.
+  filler.delay_ms: float  (default: 1800.0)
+    How long the user hears silence before the filler starts, in milliseconds,
+    counted from the transcription of their utterance.
+  filler.phrases: list[str]  (default: [])
+    The phrases to play, written in the agent's own language; the player
+    rotates through them rather than always playing the same one.
+  fallback.enabled: bool  (default: true)
+    Whether a failed reply says so out loud and on the display.
+  fallback.phrase: str  (default: "I ran into a problem and could not answer. The server log has the details.")
+    What a failed reply says, written in the agent's own language.
+  memory.enabled: bool  (default: true)
+    Whether this agent may remember anything.
+
+Full descriptions: vinga schema builtin-agent
+```
+
+### `vinga builtin-agent show`
+
+```
+Usage: vinga builtin-agent show [OPTIONS]
+
+  print builtin_agent
+
+Options:
+  --config PATH  path to the YAML config file naming server.port and
+                 server.api.secret_env (default: $VINGA_CONFIG)
+  --api-url URL  base URL of the configuration API (default: $VINGA_API_URL,
+                 then http://127.0.0.1:<server.port>/api)
+  --force        answer the confirmation a destructive command asks at a
+                 terminal, so it does not ask (default: it asks)
+  --no-input     never prompt: a destructive command refuses rather than asking,
+                 and a secret is read from stdin or --from-env (default: prompt
+                 at a terminal)
+  -h, --help     Show this message and exit.
+```
+
+### `vinga builtin-agent export`
+
+```
+Usage: vinga builtin-agent export [OPTIONS]
+
+  export builtin_agent
 
 Options:
   --config PATH  path to the YAML config file naming server.port and
@@ -3158,8 +3299,8 @@ Usage: vinga schema [OPTIONS] [ENTITY] [STAGE] [TYPE]
   the JSON Schema of one entity, or of the whole domain half
 
 Arguments:
-  ENTITY  provider, mcp-server, prompt-fragment, agent, agent-defaults, mcp-
-          grant, filler, fallback, memory, domain (default: domain)
+  ENTITY  provider, mcp-server, prompt-fragment, agent, agent-defaults, builtin-
+          agent, mcp-grant, filler, fallback, memory, domain (default: domain)
   STAGE   with TYPE, the options of one provider type: llm, asr, tts or vad
   TYPE    with STAGE, the provider type whose options to print
 
