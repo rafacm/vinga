@@ -189,10 +189,12 @@ historical  set-secret
 historical  vinga agent export assistant
 historical  vinga agent preview
 historical  vinga agent rename
+historical  vinga agent rename vinga
 historical  vinga agent set
 historical  vinga agent set assistant
 historical  vinga agent set kids
 historical  vinga agent show kids
+historical  vinga agent-defaults
 historical  vinga agent-defaults set
 historical  vinga apply
 historical  vinga check
@@ -203,10 +205,12 @@ historical  vinga conversation delete
 historical  vinga conversation list
 historical  vinga conversation show
 historical  vinga default-agent
+historical  vinga default-agent clear
 historical  vinga default-agent set
 historical  vinga default-agent set assistant
 historical  vinga device
 historical  vinga device bind
+historical  vinga device invite
 historical  vinga device pending
 historical  vinga device pending claim
 historical  vinga device pending frobnicate
@@ -277,6 +281,7 @@ historical  vinga session delete
 historical  vinga session list
 historical  vinga session purge
 historical  vinga session show
+historical  vinga session that a runner
 historical  vinga set
 historical  vinga show
 historical  vinga show provider llm claude
