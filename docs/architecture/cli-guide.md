@@ -393,7 +393,8 @@ alias behind it.
 ### Naming a new noun, naming a new verb
 
 - **A noun is the configuration's own word for the thing.** `provider`,
-  `mcp-server`, `prompt-fragment`, `agent`, `agent-defaults`, `device`.
+  `mcp-server`, `prompt-fragment`, `agent`, `agent-defaults`,
+  `builtin-agent`, `device`.
   Where the store calls a section `prompt_fragments`, the command word
   is `prompt-fragment`, and the help says which section it is
   (`create or replace prompt_fragments.<name>`) so the two are visibly
