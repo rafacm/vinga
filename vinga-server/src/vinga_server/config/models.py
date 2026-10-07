@@ -19,6 +19,7 @@ import re
 import uuid
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from contextvars import ContextVar
+from enum import StrEnum
 from pathlib import Path
 from types import UnionType
 from typing import Annotated, Literal, NamedTuple, Protocol, Union, get_args, get_origin
@@ -29,6 +30,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    PrivateAttr,
     StringConstraints,
     ValidationError,
     field_validator,
@@ -51,6 +53,10 @@ from pydantic_settings import (
 # reach an entry declares are the same three values, and two enums
 # would be two structures required to agree. It is a leaf import, over
 # a module that weighs an enum and a dict (#493).
+# And the built-in agent's knowledge, for the persona `prompt_for_agent`
+# answers it with (#612): a package of the standard library alone, so
+# the configuration client's import weight does not move.
+from vinga_server import knowledge
 from vinga_server.boundary import Reach
 from vinga_server.runtime.prompt import Fragment
 from vinga_server.tools import names
@@ -3508,23 +3514,31 @@ class AgentDefaults(BaseModel):
     @field_validator("prompt_includes")
     @classmethod
     def _check_prompt_includes(cls, value: list[str] | None) -> list[str] | None:
-        """One entry per fragment. Naming a fragment twice would inject
-        it twice, which is a thing to say once if it is meant at all.
+        return check_prompt_includes(value)
 
-        The refusal points at positions and never at what is in them, the
-        rule the grant's own refusals follow: a rejected name may be a
-        pasted credential, and this sentence leaves the boundary as a
-        printed CLI line, an HTTP 422 body and a boot log.
-        """
-        if value is None:
-            return value
-        repeated = _repeated_positions(value)
-        if repeated:
-            raise ValueError(
-                f"prompt_includes names one fragment at more than one position "
-                f"({repeated}); list each fragment once"
-            )
+
+def check_prompt_includes(value: list[str] | None) -> list[str] | None:
+    """One entry per fragment. Naming a fragment twice would inject it
+    twice, which is a thing to say once if it is meant at all.
+
+    The refusal points at positions and never at what is in them, the
+    rule the grant's own refusals follow: a rejected name may be a
+    pasted credential, and this sentence leaves the boundary as a
+    printed CLI line, an HTTP 422 body and a boot log.
+
+    A function rather than the validator's own body because two layers
+    carry the field, the agent layers and the built-in agent's overrides
+    (`BuiltinAgentConfig`), and one rule is one statement.
+    """
+    if value is None:
         return value
+    repeated = _repeated_positions(value)
+    if repeated:
+        raise ValueError(
+            f"prompt_includes names one fragment at more than one position "
+            f"({repeated}); list each fragment once"
+        )
+    return value
 
 
 class AgentConfig(AgentDefaults):
@@ -3563,6 +3577,102 @@ class AgentConfig(AgentDefaults):
             "otherwise picks one by its training bias."
         ),
     )
+
+
+# The built-in agent's name (#612). One constant, read by everything
+# that has to know the name is the built-in's: the synthesis into the
+# served configuration below, the reference rule that lets a binding or
+# a default name it whether or not it is served, and the store's
+# refusal to create a stored agent under it.
+BUILTIN_AGENT = "vinga"
+
+
+class BuiltinAgentConfig(BaseModel):
+    """The built-in agent's overrides: whichever stages, sections and
+    shared fragments it uses in place of what every agent inherits.
+
+    An agent layer without a prompt and without MCP grants, and the two
+    are absent rather than refused: the persona is the build's, and a
+    grant on an agent every bound device may reach would be a grant to
+    every device.
+    """
+
+    # Held to `AgentConfig`'s fields minus `prompt` and `mcp` by a test,
+    # since the synthesis builds an `AgentConfig` out of what is written
+    # here. Re-declared rather than inherited because `AgentDefaults`
+    # carries `mcp`, and a subclass cannot take a field away; the
+    # descriptions say what each field means for this one agent.
+    model_config = ConfigDict(extra="forbid")
+
+    llm: NonBlankStr | None = Field(
+        default=None,
+        description=(
+            "The language model vinga replies with, by the name it is defined under "
+            "in providers.llm. Unset inherits the agent_defaults entry."
+        ),
+    )
+    asr: NonBlankStr | None = Field(
+        default=None,
+        description=(
+            "The speech recognizer vinga hears with, by the name it is defined under "
+            "in providers.asr. Unset inherits the agent_defaults entry."
+        ),
+    )
+    tts: NonBlankStr | None = Field(
+        default=None,
+        description=(
+            "The voice vinga speaks with, by the name it is defined under in "
+            "providers.tts. Unset inherits the agent_defaults entry."
+        ),
+    )
+    vad: NonBlankStr | None = Field(
+        default=None,
+        description=(
+            "The voice activity detector for vinga's conversations, by the name it "
+            "is defined under in providers.vad. Unset inherits the agent_defaults "
+            "entry."
+        ),
+    )
+    filler: FillerConfig | None = Field(
+        default=None,
+        description=(
+            "Latency masking with a pre-synthesized filled pause. Unset inherits the "
+            "agent_defaults section; naming one replaces it wholly."
+        ),
+    )
+    fallback: FallbackConfig | None = Field(
+        default=None,
+        description=(
+            "What a failed reply of vinga's says out loud and on the display. Unset "
+            "inherits the agent_defaults section, and the declared default phrase "
+            "under neither; naming one replaces it wholly."
+        ),
+    )
+    memory: MemoryPolicy | None = Field(
+        default=None,
+        description=(
+            "Whether vinga may remember anything. What it remembers is its device's: "
+            "it writes and reads the device's memory and never an agent memory of "
+            "its own. Unset inherits the agent_defaults section; naming one replaces "
+            "it wholly."
+        ),
+    )
+    prompt_includes: list[NonBlankStr] | None = Field(
+        default=None,
+        description=(
+            "The shared prompt fragments vinga's prompt carries after its built-in "
+            "persona, each by the name it is defined under in prompt_fragments, in "
+            "the order listed. This is how its reply language is set: a fragment "
+            "such as \"Always reply in Swedish.\" included here. Unset inherits the "
+            "agent_defaults list; an empty list opts vinga out of the fragments its "
+            "siblings share."
+        ),
+    )
+
+    @field_validator("prompt_includes")
+    @classmethod
+    def _check_prompt_includes(cls, value: list[str] | None) -> list[str] | None:
+        return check_prompt_includes(value)
 
 
 # What something that is not a MAC is told: the rule, and never the
@@ -4207,10 +4317,22 @@ DOMAIN_DESCRIPTIONS: dict[str, str] = {
         "makes an agent that agent, so inheriting one silently would make two "
         "agents the same one."
     ),
+    "builtin_agent": (
+        "The built-in agent's overrides: what vinga uses in place of what every "
+        "agent inherits from agent_defaults. vinga is composed by the server from "
+        "the build it ships in, so this entry holds no prompt and no MCP grants: "
+        "only its providers, its voice, its filler, fallback and memory sections, "
+        "and the shared fragments its prompt carries, which is how its reply "
+        "language is set. vinga is served whenever every stage resolves, here or "
+        "in agent_defaults, and no stored agent is named vinga."
+    ),
     "agents": (
         "The agents this deployment serves, keyed by name. An agent is a "
         "prompt plus whichever stages it overrides, and every stage must resolve to "
-        "a provider, here or in agent_defaults, for the server to start."
+        "a provider, here or in agent_defaults, for the server to start. The name "
+        "vinga is the built-in agent's: no agent of that name can be created, and "
+        "one stored before the built-in agent existed is served in its place until "
+        "it is renamed."
     ),
     "devices": (
         "The devices this deployment serves, keyed by MAC address as the Device-Id "
@@ -4241,7 +4363,7 @@ DOMAIN_KEYS: tuple[str, ...] = tuple(DOMAIN_DESCRIPTIONS)
 # which adds the file half and the boot-time whole-snapshot validator.
 # The repository validates a write against this class and never against
 # that one, which is why the two are related by inheritance rather than
-# by a second copy of these seven fields. There used to be a rule about a
+# by a second copy of these eight fields. There used to be a rule about a
 # runnable server here too, a default agent required when agents existed
 # and no device was bound; it went at #612, since a default agent reaches
 # no device and a deployment with agents and no devices is one awaiting
@@ -4261,8 +4383,8 @@ DOMAIN_KEYS: tuple[str, ...] = tuple(DOMAIN_DESCRIPTIONS)
 #
 # Nothing here may become an after-validator, now or later.
 # `store._read_domain` assembles the keyed sections through this model
-# and then assigns `agent_defaults` and `default_agent` onto the
-# instance it got back, so a model validator would run before those two
+# and then assigns the two singletons and `default_agent` onto the
+# instance it got back, so a model validator would run before those
 # rows are in place and judge a half-read snapshot that never existed.
 # The rule about a whole domain half is `check_references` below, run by
 # the store at write time and by `Config` at boot.
@@ -4292,6 +4414,13 @@ class DomainConfig(BaseModel):
     )
     agent_defaults: AgentDefaults = Field(
         default_factory=AgentDefaults, description=DOMAIN_DESCRIPTIONS["agent_defaults"]
+    )
+    # The built-in agent's overrides, a singleton like the defaults
+    # above: an unwritten one is the empty entry, and vinga then inherits
+    # everything (#612).
+    builtin_agent: BuiltinAgentConfig = Field(
+        default_factory=BuiltinAgentConfig,
+        description=DOMAIN_DESCRIPTIONS["builtin_agent"],
     )
     agents: dict[NonBlankStr, AgentConfig] = Field(
         default_factory=dict, description=DOMAIN_DESCRIPTIONS["agents"]
@@ -4335,7 +4464,7 @@ class DomainSnapshot(Protocol):
     a set of sections and their references. The store passes a
     `DomainConfig`, boot passes the `Config` that subclasses it, and the
     suites that exercise the rules themselves pass a stand-in holding
-    the same seven sections, which is the interface this states. Neither
+    the same eight sections, which is the interface this states. Neither
     check needs the server half, which is why a snapshot is enough.
     """
 
@@ -4343,6 +4472,7 @@ class DomainSnapshot(Protocol):
     mcp_servers: dict[str, McpServerConfig]
     prompt_fragments: dict[str, PromptFragmentConfig]
     agent_defaults: AgentDefaults
+    builtin_agent: BuiltinAgentConfig
     agents: dict[str, AgentConfig]
     devices: dict[str, DeviceRecord]
     default_agent: str | None
@@ -4398,11 +4528,19 @@ def check_references(snapshot: DomainSnapshot) -> list[str]:
     vocabulary however it was reached.
     """
     problems: list[str] = []
+    # The names a binding or the default may resolve to: every stored
+    # agent, and the built-in's name always (#612). Always, rather than
+    # when the built-in is served, because whether it is served is a
+    # question about providers, and a binding to an agent that is not
+    # served yet is a state the store already allows between a write
+    # and an apply: the device waits, as one bound to any unserved agent
+    # waits.
+    agents = resolvable_agents(snapshot)
 
-    if snapshot.default_agent is not None and snapshot.default_agent not in snapshot.agents:
+    if snapshot.default_agent is not None and snapshot.default_agent not in agents:
         problems.append(
             "default_agent: names no agent that exists, and the name is not quoted "
-            "back" + defined("agents", snapshot.agents)
+            "back" + defined("agents", agents)
         )
 
     # The MAC is the path here and is quoted: it is not a name somebody
@@ -4411,10 +4549,10 @@ def check_references(snapshot: DomainSnapshot) -> list[str]:
     # What the entry holds is a name, so it is named by its position.
     for mac, record in snapshot.devices.items():
         for position, agent in enumerate(record.agents, start=1):
-            if agent not in snapshot.agents:
+            if agent not in agents:
                 problems.append(
                     f"devices.{mac}: entry {position} names no agent that exists, and "
-                    f"the name is not quoted back" + defined("agents", snapshot.agents)
+                    f"the name is not quoted back" + defined("agents", agents)
                 )
 
     # Each layer's own references are checked where they are written,
@@ -4425,7 +4563,15 @@ def check_references(snapshot: DomainSnapshot) -> list[str]:
     # vocabulary and stays (#382); what a name written before the
     # addressability rule can carry does not, so it leaves through the
     # one door a spoken identity leaves through (#381, #414).
-    sources: list[tuple[str, AgentDefaults]] = [("agent_defaults", snapshot.agent_defaults)]
+    #
+    # The built-in's overrides are a layer like the other two, checked
+    # under their own key whether or not the built-in is served: an
+    # override whose other stages resolve nowhere still names a provider,
+    # and a misspelled one is the same broken reference either way.
+    sources: list[tuple[str, AgentDefaults | BuiltinAgentConfig]] = [
+        ("agent_defaults", snapshot.agent_defaults),
+        ("builtin_agent", snapshot.builtin_agent),
+    ]
     sources += [
         (f"agents.{spoken_identity(name)}", agent) for name, agent in snapshot.agents.items()
     ]
@@ -4444,7 +4590,10 @@ def check_references(snapshot: DomainSnapshot) -> list[str]:
         # Both entry forms name a server, so both are checked here: an
         # allow list on a server that does not exist is the same broken
         # reference as a bare name that does not.
-        for position, entry in enumerate(layer.mcp or [], start=1):
+        # The built-in's layer has no grants at all, so it has none to
+        # check.
+        grants = layer.mcp if isinstance(layer, AgentDefaults) else None
+        for position, entry in enumerate(grants or [], start=1):
             server = as_mcp_grant(entry).server
             if server not in snapshot.mcp_servers:
                 problems.append(
@@ -4466,8 +4615,81 @@ def check_references(snapshot: DomainSnapshot) -> list[str]:
     return problems
 
 
+def resolvable_agents(snapshot: DomainSnapshot) -> frozenset[str]:
+    """Every name a binding or the default agent may name: the stored
+    agents and the built-in's (#612)."""
+    return frozenset(snapshot.agents) | {BUILTIN_AGENT}
+
+
+class BuiltinStatus(StrEnum):
+    """Whether the built-in agent is served, and if not, why not.
+
+    A closed set of three, each decided in `builtin_status` and nowhere
+    else. `displaced` is a stored agent named vinga, which is served in
+    the built-in's place; `unprovided` is a provider stage that resolves
+    through neither the override nor `agent_defaults`.
+    """
+
+    SERVED = "served"
+    DISPLACED = "displaced"
+    UNPROVIDED = "unprovided"
+
+
+class BuiltinState(NamedTuple):
+    """`builtin_status`'s answer: the status, and for `unprovided` the
+    provider stages that resolve nowhere, in pipeline order. Empty for
+    the other two, which have no stage to name."""
+
+    status: BuiltinStatus
+    stages: tuple[str, ...] = ()
+
+
+def builtin_status(snapshot: DomainSnapshot) -> BuiltinState:
+    """Whether the built-in agent is served by this domain half, and the
+    one decision site of each answer.
+
+    Asked of the stored half, where `agents` holds only what an operator
+    wrote. `Config` asks it once, before it adds the built-in to its own
+    agents, and keeps the answer (`Config.builtin_state`), since after
+    that its `agents` holds the synthesized entry too.
+
+    Displacement is decided first: a stored agent named vinga is an
+    operator's agent from before the built-in existed, whatever it
+    holds, a blank entry included, and it is served exactly as before.
+    """
+    if BUILTIN_AGENT in snapshot.agents:
+        return BuiltinState(BuiltinStatus.DISPLACED)
+    unresolved = tuple(
+        stage
+        for stage in PROVIDER_STAGES
+        if getattr(snapshot.builtin_agent, stage) is None
+        and getattr(snapshot.agent_defaults, stage) is None
+    )
+    if unresolved:
+        return BuiltinState(BuiltinStatus.UNPROVIDED, unresolved)
+    return BuiltinState(BuiltinStatus.SERVED)
+
+
+def builtin_entry(overrides: BuiltinAgentConfig) -> AgentConfig:
+    """The agent entry the built-in is served as: its overrides, with
+    the prompt empty and the grants pinned to none.
+
+    The prompt is empty because the persona is not configuration:
+    `Config.prompt_for_agent` answers the build's for this entry. The
+    grants are an empty list rather than unset, which is the pin: unset
+    would inherit `agent_defaults.mcp`, and the built-in is appended to
+    devices that an agent bound to them opted out of those grants on.
+
+    The fields are handed over as the objects they are, and only the
+    ones the override set, so the entry's `model_fields_set` says what
+    an operator wrote and nothing it did not.
+    """
+    written = {name: getattr(overrides, name) for name in overrides.model_fields_set}
+    return AgentConfig(**written, prompt="", mcp=[])
+
+
 def domain_fields(snapshot: DomainSnapshot) -> dict[str, object]:
-    """The six domain sections of a snapshot, by name.
+    """The domain sections of a snapshot, by name.
 
     What composition passes to `Config`: the models themselves rather
     than a dump of them, because a round trip through a dump would set
@@ -4551,7 +4773,7 @@ class Config(DomainConfig):
     of it.
 
     A subclass rather than a second declaration of the domain half: the
-    seven sections and their three field validators are `DomainConfig`'s,
+    eight sections and their three field validators are `DomainConfig`'s,
     and what a whole configuration adds is `server`, the accessors, and
     the model validator that judges the snapshot at boot.
     A subclass declares its own fields after the ones it inherits, so the
@@ -4561,6 +4783,15 @@ class Config(DomainConfig):
     """
 
     server: ServerConfig = Field(default_factory=ServerConfig)
+
+    # What `builtin_status` answered about the stored half, decided by
+    # the validator below before it adds the built-in to `agents`, and
+    # read by `is_builtin` and `builtin_state` afterwards. Private, and
+    # set only there, so no caller can make an operator's agent the
+    # built-in by writing to it.
+    _builtin: BuiltinState = PrivateAttr(
+        default=BuiltinState(BuiltinStatus.UNPROVIDED, PROVIDER_STAGES)
+    )
 
     @model_validator(mode="after")
     def _check_domain(self) -> "Config":
@@ -4573,6 +4804,44 @@ class Config(DomainConfig):
         if problems:
             raise ValueError("\n".join(problems))
         return self
+
+    @model_validator(mode="after")
+    def _synthesize_builtin(self) -> "Config":
+        """Serve the built-in agent, when `builtin_status` says it is
+        served, as one more entry of `agents` (#612).
+
+        Into the served whole and never into the stored half: every
+        reader of the served agents reads `agents`, so the built-in is
+        built, bound, previewed and compared like any agent with no
+        call site of its own, while the store, export and apply go on
+        meaning the rows an operator wrote.
+
+        After the reference check rather than before it, so the check
+        judges the stored half alone: run over the synthesized entry, a
+        misspelled override would be reported twice, once under
+        `builtin_agent` and once under the entry built from it. A new
+        mapping rather than an insertion, so the mapping this model was
+        validated from is left as its caller handed it over.
+        """
+        state = builtin_status(self)
+        self._builtin = state
+        if state.status is BuiltinStatus.SERVED:
+            self.agents = {**self.agents, BUILTIN_AGENT: builtin_entry(self.builtin_agent)}
+        return self
+
+    @property
+    def builtin_state(self) -> BuiltinState:
+        """Whether this configuration serves the built-in agent, and if
+        not why not, as `builtin_status` answered it about the stored
+        half this configuration was composed from."""
+        return self._builtin
+
+    def is_builtin(self, agent: str) -> bool:
+        """Whether this agent is the built-in, which is true of the
+        synthesized entry alone: an operator's stored agent named vinga
+        displaces the built-in and is answered False, so it keeps its
+        own persona, its grants and its own memory."""
+        return agent == BUILTIN_AGENT and self._builtin.status is BuiltinStatus.SERVED
 
     def provider_for_agent(self, agent: str, stage: str) -> tuple[str | None, str]:
         """The provider an agent uses for one stage, and the configuration
@@ -4603,7 +4872,15 @@ class Config(DomainConfig):
         deliberately no inheritance here, unlike the provider stages: a
         prompt is what makes an agent that agent, which is why
         `agent_defaults` refuses to carry one.
+
+        The built-in agent's persona is the build's rather than
+        configuration (#612): the hand-written text and the concept
+        summary its knowledge package composes, read here so the
+        pipeline and the preview get it from the one place they get
+        every other persona.
         """
+        if self.is_builtin(agent):
+            return knowledge.persona()
         return self.agents[agent].prompt
 
     def fragments_for_agent(self, agent: str) -> list[Fragment]:
