@@ -659,7 +659,7 @@ There are no implicit steps, and the corollary is that there is no
 implicit *timing* either. A stored write and a running server are two
 different clocks, and a command that changed the first says which.
 
-**Example.** Seven sentences in `config/entities.py`, one per answer,
+**Example.** Eight sentences in `config/entities.py`, one per answer,
 each a fact of what was written rather than of the command that wrote
 it. `APPLY_NOTICE` says the write is stored and not yet serving, and
 the boundary it is waiting at travels beside it as `applies`, a token
@@ -667,11 +667,15 @@ of the same closed set the comparison read publishes.
 `BINDING_UNSERVED_NOTICE` exists because a binding whose agent this
 server is not serving yet is true two ways at once, and neither of the
 other sentences would have been honest, which is why the token is a set
-rather than a word. `DEFAULT_AGENT_UNSERVED_NOTICE` is the same pair of
-boundaries about the other live row, and it exists because the binding's
-sentence was printed over a document that bound nothing (#424): a
-sentence has to be true of the row that was written, not only of the
-boundary it waits at. `import` says the whole of it in one line, because
+rather than a word. `DEFAULT_AGENT_UNSERVED_NOTICE` is about the other
+live row, and it exists because the binding's sentence was printed over
+a document that bound nothing (#424): a sentence has to be true of the
+row that was written, not only of the boundary it waits at. It carried
+the binding's pair of boundaries until #612 made a default agent the
+agent a newly claimed device starts with, which reaches no device's
+check-in; it waits at the install alone now, and
+`DEFAULT_AGENT_NOTICE` answers the served case, whose sentence the
+binding's could no longer be. `import` says the whole of it in one line, because
 a document that wrote nine entities is waiting on one apply, not nine.
 
 **The sentence states and the client speaks** (#386, #426). None of the
