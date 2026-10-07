@@ -67,7 +67,8 @@ curl -sS -K ~/.vinga-api.curl http://127.0.0.1:8003/api/config
 **One noun per entity kind**, addressed the way the entity is keyed (a
 provider by its stage and its name, a device by its MAC): providers and
 MCP servers, each with its secret slots; prompt fragments; agents,
-which can also be renamed; the agent defaults; devices, which can also
+which can also be renamed; the agent defaults; the built-in agent's
+overrides (`/builtin-agent`); devices, which can also
 be renamed, replaced by another board and given a location, beside the
 boards waiting with an activation code; and the default agent. `GET
 /api/config` reads the whole of it at once, and `POST /api/apply`
