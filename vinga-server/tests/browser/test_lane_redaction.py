@@ -11,7 +11,8 @@ the lane ever saw them, are gone; ordinary identifiers stay readable.
 
 import secrets
 
-from lane import REDACTED, Redactor
+import pytest
+from lane import NOT_LOADED, REDACTED, Redactor, opened
 
 # What an invite token is: 32 random bytes, urlsafe base64, unpadded.
 INVITE_TOKEN = secrets.token_urlsafe(32)
@@ -55,3 +56,43 @@ def test_ordinary_identifiers_stay_readable() -> None:
     )
 
     assert redact(text) == text
+
+
+class Unloadable(Exception):
+    """A stand-in for Playwright's error, which quotes the address it
+    could not open, fragment included."""
+
+
+def links(failure: BaseException | None) -> list[BaseException]:
+    """Every exception a chain walker reaches from `failure`."""
+    seen: list[BaseException] = []
+    while failure is not None and failure not in seen:
+        seen.append(failure)
+        failure = failure.__cause__ or failure.__context__
+    return seen
+
+
+def test_a_page_that_will_not_load_leaves_no_token_in_the_chain() -> None:
+    """The lane's own failure path for a link that would not open: the
+    fixed error it raises carries the token nowhere, its cause and its
+    context included, since it is raised after the handler was left."""
+    address = f"http://127.0.0.1:8003/talk/#{INVITE_TOKEN}"
+
+    def goto(url: str) -> None:
+        raise Unloadable(f"net::ERR_CONNECTION_REFUSED at {url}")
+
+    with pytest.raises(RuntimeError) as raised:
+        opened(goto, address, Unloadable)
+
+    assert str(raised.value) == NOT_LOADED
+    chained = links(raised.value)
+    assert chained == [raised.value]
+    assert all(INVITE_TOKEN not in f"{one!r} {one}" for one in chained)
+
+
+def test_a_page_that_loads_raises_nothing() -> None:
+    visited: list[str] = []
+
+    opened(visited.append, "http://127.0.0.1:8003/talk/", Unloadable)
+
+    assert visited == ["http://127.0.0.1:8003/talk/"]
