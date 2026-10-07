@@ -2331,7 +2331,8 @@ Options:
 
 Commands:
   set    the agent a claim naming no agent binds a device to
-  clear  unset it, after which a claim has to name its agents
+  clear  unset it, after which a claim naming no agent binds vinga, the built-in
+         agent
 ```
 
 ### `vinga default-agent set`
@@ -2362,7 +2363,7 @@ Options:
 ```
 Usage: vinga default-agent clear [OPTIONS]
 
-  unset it, after which a claim has to name its agents
+  unset it, after which a claim naming no agent binds vinga, the built-in agent
 
 Options:
   --config PATH  path to the YAML config file naming server.port and

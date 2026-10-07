@@ -627,8 +627,8 @@ in one room is normal.
 The agent a newly bound device starts with: a claim by activation code that
 names no agent binds the device to it. It admits nothing by itself: a device
 with no binding of its own reaches no agent and is offered a code, set or not,
-so the devices map is always the allowlist. Leaving it unset means a claim has
-to name its agents.
+so the devices map is always the allowlist. Leaving it unset means vinga, the
+built-in agent: unset and vinga are the same setting.
 
 ```bash
 vinga default-agent set <name>
@@ -640,8 +640,9 @@ to it. It admits no device by itself: a device with no binding of its own
 reaches no agent and is offered a code, whether or not this is set, so the
 devices map is always the allowlist.
 
-`vinga default-agent clear` unsets it, after which a claim has to name its
-agents. Nothing requires it to be set.
+Unset, it is vinga, the built-in agent: `vinga default-agent clear` and `vinga
+default-agent set vinga` mean the same thing, so nothing requires it to be
+set.
 
 ## The whole domain configuration
 
@@ -658,4 +659,4 @@ been asked to apply it.
 | `builtin_agent` | `BuiltinAgentConfig` | `{}` | The built-in agent's overrides: what vinga uses in place of what every agent inherits from agent_defaults. vinga is composed by the server from the build it ships in, so this entry holds no prompt and no MCP grants: only its providers, its voice, its filler, fallback and memory sections, and the shared fragments its prompt carries, which is how its reply language is set. vinga is served whenever every stage resolves, here or in agent_defaults, and no stored agent is named vinga. |
 | `agents` | `dict[str, AgentConfig]` | `{}` | The agents this deployment serves, keyed by name. An agent is a prompt plus whichever stages it overrides, and every stage must resolve to a provider, here or in agent_defaults, for the server to start. The name vinga is the built-in agent's: no agent of that name can be created, and one stored before the built-in agent existed is served in its place until it is renamed. |
 | `devices` | `dict[str, DeviceRecord]` | `{}` | The devices this deployment serves, keyed by MAC address as the Device-Id header sends it. Each entry is a record: a server-minted id that stays the same as the rest of the record changes, the name the agent says out loud, where the device stands, and the agents it may talk to. A bare list of agent names is accepted as shorthand for a record naming only those agents. |
-| `default_agent` | `str \| null` | `null` | The agent a newly bound device starts with: a claim by activation code that names no agent binds the device to it. It admits nothing by itself: a device with no binding of its own reaches no agent and is offered a code, set or not, so the devices map is always the allowlist. Leaving it unset means a claim has to name its agents. |
+| `default_agent` | `str \| null` | `null` | The agent a newly bound device starts with: a claim by activation code that names no agent binds the device to it. It admits nothing by itself: a device with no binding of its own reaches no agent and is offered a code, set or not, so the devices map is always the allowlist. Leaving it unset means vinga, the built-in agent: unset and vinga are the same setting. |
