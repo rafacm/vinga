@@ -2938,18 +2938,16 @@ def _writes(api: FastAPI) -> None:
         body: RawBody,
         store: StoreDep,
         loaded: LoadedAgentsDep,
-        pending: PendingDep,
         snapshot_only: SnapshotOnlyDep,
     ) -> dict[str, Any]:
-        """Set the agent an unbound device reaches. Read by the running
-        server the way a binding is, so it applies to the next device
-        that asks unless the agent it names was written since boot."""
+        """Set the agent a newly bound device starts with. Read by the
+        next claim that names no agent, inside its own transaction, and
+        by nothing else: it admits no device by itself (#612).
+
+        No housekeeping in the pending table either, which this route
+        used to do: a default agent covers no device now, so every board
+        showing a code is still waiting to be claimed."""
         name = store.set_default_agent(_name(body))
-        # A default agent covers every device that has no binding of its
-        # own, which is every device in the pending table, so none of
-        # them is waiting to be claimed any more. Housekeeping, for the
-        # reason the device write above says.
-        pending.retire_all()
         return _acknowledge(
             f"default agent {spoken_identity(name)}",
             _binding_notice(
@@ -2967,10 +2965,10 @@ def _writes(api: FastAPI) -> None:
     def remove_default_agent(
         store: StoreDep, snapshot_only: SnapshotOnlyDep
     ) -> dict[str, Any]:
-        """Unset it, leaving the devices map as the allowlist.
+        """Unset it, after which a claim has to name its agents.
         Idempotent, like the CLI: there is no such thing as a default
         agent that was already not set. Live, like the delete above:
-        the next unbound device to ask is turned away."""
+        the next claim naming no agent is refused."""
         store.clear_default_agent()
         return _acknowledge(
             _CLEARED_DEFAULT_AGENT, _binding_notice(snapshot_only=snapshot_only)
@@ -3025,18 +3023,16 @@ def _writes(api: FastAPI) -> None:
         # nothing here can be true of a document that was refused.
         #
         # A device this document bound is configured now, so it is not
-        # one an operator may still claim by the code it was showing,
-        # and a default agent covers every device that has no binding of
-        # its own, which is every device in the pending table. Both are
-        # the housekeeping the two settings routes do for the same acts,
-        # and both are done for an unchanged row as well as a changed
-        # one: what retires a code is the world the document describes,
-        # not whether this request was the one that wrote it.
+        # one an operator may still claim by the code it was showing.
+        # The housekeeping the device route does for the same act, done
+        # for an unchanged row as well as a changed one: what retires a
+        # code is the world the document describes, not whether this
+        # request was the one that wrote it. A default agent retires
+        # nothing (#612): it covers no device, so a board showing a code
+        # is still waiting.
         for entry in applied:
             if entry.section == "devices":
                 pending.retire(entry.identity)
-        if any(entry.section == "default_agent" and entry.agents for entry in applied):
-            pending.retire_all()
         return {
             "entries": [_applied(entry, loaded, snapshot_only) for entry in applied]
         }

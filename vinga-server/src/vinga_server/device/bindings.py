@@ -10,10 +10,11 @@ the server to reload for every board. That is what this reads from the
 database on every lookup; everything else about a world is asked for
 (#191).
 
-So the live view is exactly the two inputs of `Config.agents_for_device`:
-the `devices` rows and `default_agent` in `domain_settings`. It resolves
-by the same rule, the bound list else the default agent else nothing,
-and it stops there.
+So the live view is exactly the input of `Config.bound_to`: the
+`devices` rows. It resolves by the same rule, the bound list and
+nothing else, and it stops there. `default_agent` is not part of it: an
+unbound device only pairs (#612), and the default agent is read where a
+device is bound, by the claim, rather than where one is served.
 
 It answers one more question off the same rows, added by #449 and kept
 here rather than given a view of its own: what the device behind a MAC
@@ -186,8 +187,9 @@ class Attachment:
     record read from the next can describe two different devices.
 
     `record` is None where the board has no record to attach to, which
-    is a MAC with no row that a default agent stands behind, and where
-    the world being served has never named the device. A conversation
+    is where the world being served answered for a device it has never
+    named. (A MAC with no row at all is bound to nothing since #612, so
+    it never gets as far as a conversation.) A conversation
     that attached to nothing says nothing about its device, for its
     whole life: what an operator binds or names while it is talking
     reaches the next conversation rather than this one, which is the
@@ -324,24 +326,20 @@ class DeviceBindings:
         answered.
 
         Here rather than inline because two methods reach it now:
-        `names_for`, which reads two rows, and `attachment_for`, which
-        reads those two and the record in one snapshot. The rule is the
-        bound list else the default agent else nothing, and two copies
-        of it would be a device answered one way by the check-in and
-        another by the connect.
+        `names_for`, which reads the binding, and `attachment_for`, which
+        reads it and the record in one snapshot. The rule is the bound
+        list and nothing else (#612), and the snapshot's half of it is
+        `Config.bound_to`, so a fallback answers by the one rule the
+        configuration states rather than by a copy of it here.
         """
         if stored is None:
-            config = self._generations.current().config
             # The record's binding and not the record: what this answers
             # is which agents a board reaches, and the rest of what #449
             # put on a device record is `attachment_for`'s business.
-            record = config.devices.get(mac)
-            bound = () if record is None else tuple(record.agents)
-            default = config.default_agent
+            names = self._generations.current().config.bound_to(mac)
         else:
-            bound, default = stored.agents, stored.default_agent
-        names = tuple(bound) if bound else ((default,) if default is not None else ())
-        return BoundNames(names, authoritative)
+            names = stored.agents
+        return BoundNames(tuple(names), authoritative)
 
     async def attach(self, mac: str) -> Attachment:
         """`attachment_for`, awaited off the event loop.
