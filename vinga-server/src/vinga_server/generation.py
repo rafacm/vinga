@@ -46,9 +46,15 @@ from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from vinga_server.config import Config
+from vinga_server.config.models import BuiltinStatus
 from vinga_server.config.secrets import SecretStore
+from vinga_server.events import ServerEvents
+from vinga_server.events.catalog import BuiltinAgentDisplaced, BuiltinAgentUnprovided
+from vinga_server.events.values import ProviderStages
 from vinga_server.filler import FallbackClip, FillerClips
 from vinga_server.providers import Provider, ProviderWorld, disposed
+
+events = ServerEvents(__name__)
 
 
 @dataclass(frozen=True, eq=False)
@@ -124,6 +130,24 @@ class Generation:
 type Install = Callable[[Generation], None]
 
 
+def said_what_it_serves(generation: Generation) -> None:
+    """Say whether a world being installed serves the built-in agent,
+    and why not when it does not (#612).
+
+    Once per installed world, from the two places a world is installed,
+    which are the only moments the answer can change. Nothing is said of
+    a world that serves it, the ordinary case. What is said is the
+    closed set `builtin_status` decided and, for a world wanting a
+    provider, the stages it wants: tokens this server owns and nothing
+    an operator wrote.
+    """
+    state = generation.config.builtin_state
+    if state.status is BuiltinStatus.DISPLACED:
+        events.emit(BuiltinAgentDisplaced)
+    elif state.status is BuiltinStatus.UNPROVIDED:
+        events.emit(lambda: BuiltinAgentUnprovided(stages=ProviderStages(state.stages)))
+
+
 class Generations:
     """The generation new work binds, and the mark that says whether it
     is holding still.
@@ -141,6 +165,7 @@ class Generations:
 
     def __init__(self, first: Generation) -> None:
         self._current = first
+        said_what_it_serves(first)
         # Every agent rename this process has published, oldest first,
         # and where each world this server still has joined that list.
         #
@@ -331,6 +356,7 @@ class Generations:
             self._known[generation] = len(self._renames) if known is None else known
         self._retired.append(self._current)
         self._current = generation
+        said_what_it_serves(generation)
 
     async def dispose(self, held: Collection[Generation] = ()) -> None:
         """Let go of every retired world that nobody is using any more.

@@ -9,7 +9,7 @@ The structured events are this server's observability surface
 ([ADR](../adr/2026-08-04-json-logs-are-the-observability-surface.md)), and
 they carry metadata and nothing else
 ([ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)).
-This document is that surface written down: 80 events in 110 variants. What
+This document is that surface written down: 81 events in 112 variants. What
 was said in a conversation is in the conversation store instead, keyed by the
 same `session` ([its reference](conversations-schema.md)).
 
@@ -68,7 +68,7 @@ keeps validation a cost paid per decision rather than per frame.
 ## The channels
 
 The channel is the scope. One session channel, `vinga_server.session`, carries
-everything a conversation says about itself; the 17 server channels are each a
+everything a conversation says about itself; the 18 server channels are each a
 subsystem's own module name. An event declared on one channel and emitted from
 another is a violation even when its fields are lawful.
 
@@ -80,6 +80,7 @@ another is a violation even when its fields are lawful.
 - `vinga_server.conversations.store`
 - `vinga_server.device.bindings`
 - `vinga_server.filler`
+- `vinga_server.generation`
 - `vinga_server.llm_input_export`
 - `vinga_server.memory.store`
 - `vinga_server.onboarding`
@@ -266,6 +267,7 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 | `mcp_call_dropped` | `vinga_server.tools.mcp` | WARNING | 1 |
 | `mcp_tool_shadowed` | `vinga_server.tools.mcp` | WARNING | 1 |
 | `mcp_reload` | `vinga_server.tools.mcp` | INFO, WARNING | 2 |
+| `builtin_agent_not_served` | `vinga_server.generation` | WARNING | 2 |
 | `provider_reaches_loopback` | `vinga_server.providers.world` | WARNING | 1 |
 | `memory_unreadable` | `vinga_server.memory.store` | WARNING | 1 |
 | `memory_unwritable` | `vinga_server.memory.store` | WARNING | 1 |
@@ -2268,6 +2270,49 @@ mcp servers reloaded: %d started, %d restarted, %d stopped, %d unchanged
 | `stopped` | `COUNT` | yes | no |  |  |
 | `unchanged` | `COUNT` | yes | no |  |  |
 | `duration_ms` | `INT` | yes | no |  | Measured from when the request was accepted, so it covers the re-read as well as the apply. |
+
+### `builtin_agent_not_served`
+
+The world a server installs does not serve vinga, the built-in agent, and says
+why from a closed set: displaced by a stored agent of that name, or unprovided
+for want of a provider. At WARNING and once per installed world, at the boot
+and at every apply, so the state is said whenever it can have changed. `vinga
+info` reports the same status live.
+
+#### Variant 1: `vinga_server.generation` at WARNING
+
+The stored agent keeps being served as it was, its memory and threads with it,
+and the rename moves all of those to the new name in one transaction. The
+sentence names the constant vinga and nothing an operator wrote.
+
+```text
+vinga, the built-in agent, is not served: an agent stored under its name is served in its place; rename that agent with: vinga-server config agent rename vinga <new>, and then: vinga-server config apply
+```
+
+No arguments: the sentence is fixed.
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `displaced` |  |
+
+#### Variant 2: `vinga_server.generation` at WARNING
+
+Not a refusal: a deployment boots empty and is configured afterwards, and a
+device bound to vinga waits as one bound to any agent the server is not
+serving waits.
+
+```text
+vinga, the built-in agent, is not served: a provider stage resolves through neither builtin_agent nor agent_defaults; name a provider for the stages this event lists in either, and then: vinga-server config apply
+```
+
+No arguments: the sentence is fixed.
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `unprovided` |  |
+| `stages` | `IDENTIFIER_LIST` | yes | no |  | The provider stages that resolve nowhere, in pipeline order. |
 
 ### `provider_reaches_loopback`
 

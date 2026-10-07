@@ -53,6 +53,7 @@ from vinga_server.config.models import (
     DEVICE_NAME_LIMIT,
     FIRMWARE_LIMIT,
     PROVIDER_STAGES,
+    BuiltinStatus,
 )
 from vinga_server.memory.scopes import MemoryScope
 from vinga_server.tools.names import BUILTIN_TOOL_NAMES, is_valid_entry_name
@@ -1107,6 +1108,32 @@ class AgentNames(EventValue):
 
 
 @dataclass(frozen=True)
+class ProviderStages(EventValue):
+    """Provider stages, by the server's own word for each, in pipeline
+    order: what the built-in agent is missing when it is not served for
+    want of a provider (#612).
+
+    A list on the record like `AgentNames`, and narrower than it: every
+    element is one of `PROVIDER_STAGES`, the closed set the pipeline is
+    built from, so nothing an operator wrote can ride this field.
+    """
+
+    KIND: ClassVar[Kind] = Kind.IDENTIFIER_LIST
+
+    value: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.value, tuple) or not self.value:
+            raise EventValueError("ProviderStages is a non-empty tuple of stages")
+        for one in self.value:
+            if one not in PROVIDER_STAGES:
+                raise EventValueError("a ProviderStages element is a pipeline stage")
+
+    def carried(self) -> list[str]:
+        return list(self.value)
+
+
+@dataclass(frozen=True)
 class Descriptor(TextValue):
     """A string retained deliberately whose SHAPE nothing here chose,
     bounded and sanitized at its decision site and bounded again here.
@@ -1701,6 +1728,13 @@ class NotOffered(StrEnum):
     )
 
 
+# Why the built-in agent is not served, which is `builtin_status`'s two
+# answers other than `served` (#612). The closed set is the
+# configuration's, decided in that one function, and imported rather
+# than spelled again here, for the reason `MemoryScope` below is.
+BuiltinNotServed = Literal[BuiltinStatus.DISPLACED, BuiltinStatus.UNPROVIDED]
+
+
 # The two bounds the pending table refuses a code at, and only those.
 # The view's own failure says so in a sentence of its own, so the
 # variant that reports a bound cannot say it.
@@ -2156,6 +2190,9 @@ class DeviceOrUnidentified(Fragment):
 __all__ = [
     "ABSENT",
     "Absent",
+    "BuiltinNotServed",
+    "BuiltinStatus",
+    "ProviderStages",
     "ActivationCode",
     "ActivationRefusal",
     "AgentList",

@@ -2234,12 +2234,33 @@ async def drive_provider_reaches_loopback(_: Path) -> None:
         await build_entry("llm", "local", entry)
 
 
+def drive_builtin_agent_displaced(_: Path) -> None:
+    """A world whose stored agents include one named vinga, installed
+    as a server's first generation (#612)."""
+    world(
+        base_config(
+            agents={
+                "poet": {"prompt": "POET", "tts": "tenor"},
+                "tutor": {"prompt": "TUTOR", "tts": "alto"},
+                "vinga": {},
+            }
+        )
+    )
+
+
+def drive_builtin_agent_unprovided(_: Path) -> None:
+    """The lane's two-agent world, whose defaults name no voice, so the
+    built-in agent wants one."""
+    world(base_config())
+
+
 APP = "vinga_server.app"
 CAPTURE = "vinga_server.capture"
 CAPTURE_UPLOAD = "vinga_server.capture_upload"
 CONFIG_API = "vinga_server.config.api"
 BINDINGS = "vinga_server.device.bindings"
 FILLER_BUILD = "vinga_server.filler"
+GENERATION = "vinga_server.generation"
 KEYS = "vinga_server.onboarding.keys"
 ORIGIN = "vinga_server.onboarding.origin"
 POLL = "vinga_server.ota.poll"
@@ -2331,6 +2352,16 @@ SERVER_DRIVERS: tuple[Driver, ...] = (
         (FILLER_BUILD, "build_agent_fillers", 2),
         drive_fallback_degraded,
         "fallback_degraded",
+    ),
+    Driver(
+        (GENERATION, "said_what_it_serves", 1),
+        drive_builtin_agent_displaced,
+        "builtin_agent_not_served",
+    ),
+    Driver(
+        (GENERATION, "said_what_it_serves", 2),
+        drive_builtin_agent_unprovided,
+        "builtin_agent_not_served",
     ),
     Driver((KEYS, "_log_mismatch", 1), drive_onboarding_key_mismatch, "onboarding_key_mismatch"),
     Driver((KEYS, "_log_mismatch", 2), drive_onboarding_key_unshaped, "onboarding_key_unshaped"),
