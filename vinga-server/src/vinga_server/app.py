@@ -1189,7 +1189,15 @@ def _prompt_preview(
         # starting now would be sent, framing included and read at the
         # start (#536), even where nothing is saved. A read that did not
         # answer is shown as a reply over it is sent: no section.
-        scopes = await asyncio.to_thread(memory.read_for_prompt, agent, None, None)
+        # The built-in agent keeps no memory of its own (#612), so with
+        # no device behind the preview it is shown no scope at all.
+        scopes = await asyncio.to_thread(
+            memory.read_for_prompt,
+            agent,
+            None,
+            None,
+            agent_scope=not config.is_builtin(agent),
+        )
         return prompt.with_scopes(half, scopes, remembering=scopes.complete)
 
     return assemble

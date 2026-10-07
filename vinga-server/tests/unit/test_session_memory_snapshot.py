@@ -78,10 +78,14 @@ def counted(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     real = MemoryStore.read_for_prompt
 
     def read(
-        self: MemoryStore, agent: str, device: str | None, conversation: str | None
+        self: MemoryStore,
+        agent: str,
+        device: str | None,
+        conversation: str | None,
+        **options: bool,
     ) -> PromptMemory:
         reads.append(agent)
-        return real(self, agent, device, conversation)
+        return real(self, agent, device, conversation, **options)
 
     monkeypatch.setattr(MemoryStore, "read_for_prompt", read)
     return reads
@@ -625,12 +629,16 @@ async def test_an_erasure_during_the_reads_leaves_the_key_behind(
     real = MemoryStore.read_for_prompt
 
     def read(
-        self: MemoryStore, agent: str, device: str | None, conversation: str | None
+        self: MemoryStore,
+        agent: str,
+        device: str | None,
+        conversation: str | None,
+        **options: bool,
     ) -> PromptMemory:
         if not reads:
             self.erased()
         reads.append(agent)
-        return real(self, agent, device, conversation)
+        return real(self, agent, device, conversation, **options)
 
     monkeypatch.setattr(MemoryStore, "read_for_prompt", read)
     session = session_with_store(ScriptedLlm(["One.", "Two.", "Three."]), store)
@@ -659,11 +667,15 @@ async def test_a_failed_memory_read_is_not_kept_and_the_recovery_is(
     real = MemoryStore.read_for_prompt
 
     def read(
-        self: MemoryStore, agent: str, device: str | None, conversation: str | None
+        self: MemoryStore,
+        agent: str,
+        device: str | None,
+        conversation: str | None,
+        **options: bool,
     ) -> PromptMemory:
         reads.append(bool(reads))
         target = self if len(reads) > 1 else unreadable
-        return real(target, agent, device, conversation)
+        return real(target, agent, device, conversation, **options)
 
     monkeypatch.setattr(MemoryStore, "read_for_prompt", read)
     script = ScriptedLlm(["One.", "Two.", "Three."])

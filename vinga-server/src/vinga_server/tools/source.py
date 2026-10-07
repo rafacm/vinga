@@ -104,7 +104,9 @@ class ThreadSearch(Protocol):
     in.
     """
 
-    async def described(self, agent: str, description: str) -> str: ...
+    async def described(
+        self, agent: str, description: str, on_device: bool = False
+    ) -> str: ...
 
 
 def no_such_tool(name: str | None) -> tuple[str, bool]:
@@ -194,6 +196,15 @@ class BuiltinTools:
     what every source has to answer, and where a session's memory lives
     is not one of those questions.
 
+    `is_builtin` says whether the agent speaking is the built-in one
+    (#612), whose memory and threads are its device's: it is offered a
+    `remember` with no scope to choose, its memory tools reach the
+    device's facts alone, and its search finds only the threads held on
+    this device. A callable answering for the reply's world, exactly as
+    `remembers` is and resolved at the same moment, so the tools a reply
+    offers and the memory they reach cannot come from two halves of a
+    reload.
+
     `threads` is the search half of the resumption flow, absent in every
     deployment that has not switched resumption on and compared
     `is not None` for that reason.
@@ -223,6 +234,7 @@ class BuiltinTools:
         timeout_s: float,
         context: Callable[[], Awaitable[builtin.MemoryContext]],
         remembers: Callable[[], bool],
+        is_builtin: Callable[[], bool],
         threads: ThreadSearch | None = None,
         relocations: builtin.DeviceRelocations | None = None,
         record: str | None = None,
@@ -232,6 +244,7 @@ class BuiltinTools:
         self._timeout_s = timeout_s
         self._context = context
         self._remembers = remembers
+        self._builtin = is_builtin
         self._threads = threads
         self._relocations = relocations
         self._record = record
@@ -246,7 +259,7 @@ class BuiltinTools:
         # seven, in the same shape and for the same reason: a tool it
         # may not run is a tool it should not be shown.
         if self._remembers():
-            tools.append(builtin.remember_tool())
+            tools.append(builtin.remember_tool(device_only=self._builtin()))
             tools.append(builtin.update_memory_tool())
             tools.append(builtin.forget_tool())
             tools.append(builtin.restore_memory_tool())
@@ -279,35 +292,55 @@ class BuiltinTools:
         if claim.name == names.REMEMBER:
             return (
                 await builtin.remember(
-                    self._memory, await self._context(), agent, claim.arguments or {}
+                    self._memory,
+                    await self._context(),
+                    agent,
+                    claim.arguments or {},
+                    device_only=self._builtin(),
                 ),
                 False,
             )
         if claim.name == names.UPDATE_MEMORY:
             return (
                 await builtin.update_memory(
-                    self._memory, await self._context(), agent, claim.arguments or {}
+                    self._memory,
+                    await self._context(),
+                    agent,
+                    claim.arguments or {},
+                    device_only=self._builtin(),
                 ),
                 False,
             )
         if claim.name == names.FORGET:
             return (
                 await builtin.forget(
-                    self._memory, await self._context(), agent, claim.arguments or {}
+                    self._memory,
+                    await self._context(),
+                    agent,
+                    claim.arguments or {},
+                    device_only=self._builtin(),
                 ),
                 False,
             )
         if claim.name == names.RESTORE_MEMORY:
             return (
                 await builtin.restore_memory(
-                    self._memory, await self._context(), agent, claim.arguments or {}
+                    self._memory,
+                    await self._context(),
+                    agent,
+                    claim.arguments or {},
+                    device_only=self._builtin(),
                 ),
                 False,
             )
         if claim.name == names.RECALL:
             return (
                 await builtin.recall(
-                    self._memory, await self._context(), agent, claim.arguments or {}
+                    self._memory,
+                    await self._context(),
+                    agent,
+                    claim.arguments or {},
+                    device_only=self._builtin(),
                 ),
                 False,
             )
@@ -351,7 +384,7 @@ class BuiltinTools:
         described = arguments.get("description")
         if not isinstance(described, str) or not described.strip():
             return builtin.RESUME_NEEDS_AN_ARGUMENT
-        return await self._threads.described(agent, described)
+        return await self._threads.described(agent, described, on_device=self._builtin())
 
     def timeout_for(self, claim: "records.ToolInvocation") -> float:
         return self._timeout_s
