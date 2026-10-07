@@ -194,6 +194,23 @@ def test_the_agent_defaults_answer_with_a_boolean() -> None:
     assert diff_of(running, stored).agent_defaults.changed is True
 
 
+def test_a_pending_built_in_override_is_visible_until_the_apply() -> None:
+    """The built-in agent's overrides are a singleton too (#612): a
+    stored edit is pending under their own key, waiting at the apply,
+    and once the stored world is the running one nothing is."""
+    running = config_with(providers=providers(tts={"alto": MOCK}))
+    stored = config_with(providers=providers(tts={"alto": MOCK}), builtin_agent={"tts": "alto"})
+
+    pending = diff_of(running, stored)
+    applied = diff_of(stored, stored)
+
+    assert diff_of(running, running).builtin_agent.changed is False
+    assert pending.builtin_agent.changed is True
+    assert pending.builtin_agent.applies is Applies.RELOAD
+    assert pending.agent_defaults.changed is False
+    assert applied.builtin_agent.changed is False
+
+
 def test_an_agent_that_arrives_or_goes_is_named() -> None:
     running = config_with(agents={"assistant": {"prompt": "A"}, "helper": {"prompt": "H"}})
     stored = config_with(agents={"assistant": {"prompt": "A"}, "poet": {"prompt": "P"}})

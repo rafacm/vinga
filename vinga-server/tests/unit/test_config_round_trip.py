@@ -637,6 +637,9 @@ def _seed(run) -> None:
         f"headers.Authorization={HOME_REFERENCE}",
     ) == 0
     assert run("agent", "set", "sam", "prompt=You are Sam.", "llm=claude", "asr=whisper") == 0
+    # The built-in agent's overrides, so the round trips below carry the
+    # second singleton too (#612).
+    assert run("builtin-agent", "set", "llm=claude") == 0
     assert run("device", "bind", "AA-BB-CC-DD-EE-FF", "sam") == 0
     assert run("default-agent", "set", "sam") == 0
     _enter_secrets(run, _SET_SECRETS)

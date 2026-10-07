@@ -411,7 +411,7 @@ def outcomes(section: type[BaseModel]) -> tuple[str, ...]:
     rather than listed again, so an outcome added to a section is one
     line on that section and this prints it. What the rule leaves out is
     every field that is not a list of names, which today is the MCP
-    status mapping and the agent-defaults flag; each of those is
+    status mapping and the two singletons' flags; each of those is
     rendered where its own shape is understood.
     """
     return tuple(
@@ -501,6 +501,7 @@ APPLY_LABELS: dict[tuple[str, str], str] = {
     ("agents", "added"): "added",
     ("agents", "removed"): "removed",
     ("agents", "defaults_changed"): "agent_defaults changed",
+    ("agents", "builtin_changed"): "builtin_agent changed",
 }
 
 # What an apply that moved nothing says. A sentence rather than no
@@ -917,6 +918,7 @@ def _summary(document: Mapping[str, object]) -> str:
     ] or ["  (none)"]
 
     lines.append("agent_defaults" + _summarized("agent-defaults", read["agent_defaults"]))
+    lines.append("builtin_agent" + _summarized("builtin-agent", read["builtin_agent"]))
 
     lines.append("agents:")
     lines += [
