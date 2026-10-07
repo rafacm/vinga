@@ -103,6 +103,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.census.test_packaged_pages import sources
 from tests.integration.conftest import mock_voice
 from tests.support.commands import BUILD_SECONDS, ran
 from tests.support.config_cli import registered
@@ -1219,6 +1220,35 @@ def test_the_packaged_utterance_is_inside_the_built_wheel(wheel: Path) -> None:
         carried[f"{where}/{utterance.MANIFEST}"], carried[f"{where}/{utterance.ASSET}"]
     )
     assert said.packets == utterance.packaged().packets
+
+
+def test_the_installed_wheel_carries_the_built_in_agent_s_pages(
+    installed: Path, elsewhere: Path, live: Live
+) -> None:
+    """The Use pages the built-in agent answers from, read by the
+    installed package itself.
+
+    They are package data inside `vinga_server/knowledge/`, so they
+    need no `force-include`, and that is exactly the kind of absence
+    nothing would notice. So the installed environment's own reader
+    lists them, outside the checkout, and what it lists is held to the
+    pages under `docs/`: the census holds the committed copy to those
+    pages, and this holds the artifact to the same thing.
+    """
+    finished = _ran(
+        installed,
+        elsewhere,
+        live,
+        "python",
+        "-c",
+        "import json;from vinga_server import knowledge;"
+        "print(json.dumps(dict(knowledge.pages())))",
+    )
+
+    assert finished.returncode == 0, finished.stderr
+    assert json.loads(finished.stdout) == {
+        name: source.read_text(encoding="utf-8") for name, source in sources().items()
+    }
 
 
 def defined_here() -> set[str]:
