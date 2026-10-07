@@ -408,12 +408,14 @@ def test_the_server_discovers_and_calls_the_browsers_device_tools(
 
 
 def test_an_unbound_browser_pairs_with_a_code(visits: Callable[..., Visit], server: Server) -> None:
-    """D4: with no default agent set, a browser holding no identity and
-    no link starts from the onboarding URL, is minted an identity, shows
-    the six-digit code its check-in carries, and is in a conversation
-    once the operator claims the code."""
+    """D4: a browser holding no identity and no link starts from the
+    onboarding URL, is minted an identity, shows the six-digit code its
+    check-in carries, and is in a conversation once the operator claims
+    the code. With the lane's default agent set, which used to refuse the
+    mint (D4a): an unbound device only pairs since #612, so a cleared
+    browser pairs on every deployment, and a claim naming no agent binds
+    it to the default."""
     server.seed(PLAIN_REPLY)
-    server.api("DELETE", "/default-agent")
     # The path `vinga info` prints, at the origin the page is opened on,
     # which is the one a person pastes into a page they opened from it.
     onboarding = server.base + urlsplit(server.api("GET", "/runtime/info")["onboarding_url"]).path
@@ -448,7 +450,10 @@ def test_an_unbound_browser_pairs_with_a_code(visits: Callable[..., Visit], serv
     )
     assert len(code) == 6 and code.isdigit(), code
     assert not server.said("session_open", device=mac)
-    server.api("POST", f"/devices/pending/{code}", {"agents": [LANE_AGENT]})
+    # No agent named: the default agent is what a claim binds to then,
+    # and the record says so.
+    server.api("POST", f"/devices/pending/{code}", {})
+    assert server.api("GET", f"/devices/{mac}")["entity"]["agents"] == [LANE_AGENT]
 
     # Within a couple of the page's three-second polls: a page that
     # ignored the poll's answer would still get there, at its next
