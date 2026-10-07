@@ -236,9 +236,11 @@ carried it through the server's own text are recorded in
 vinga that no operator stored: the server composes it from the build
 it ships in, a persona of its own followed by
 [the paragraph above](#the-model-in-one-paragraph). It answers about
-the device it is speaking through and about vinga itself, naming the
-command that does something rather than running it, and hands over to
-the other agents the device reaches. An operator chooses its
+vinga itself from that summary, naming the command that does something
+rather than running it, and hands over to the other agents the device
+reaches. Its prompt carries its persona and the summary and nothing
+about the particular board it speaks through, so a question about that
+board gets a general answer, said as one. An operator chooses its
 providers, its voice and the shared fragments its prompt carries
 (which is how its reply language is set) in its `builtin_agent` entry,
 and nothing else: it has no prompt to write and no MCP tools, by

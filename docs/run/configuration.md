@@ -204,9 +204,11 @@ Every deployment has an agent named vinga that nobody stored: the
 server composes it from the build it ships in, a persona of its own
 followed by the summary at the top of
 [the concepts page](../concepts.md#the-model-in-one-paragraph). It
-answers about the device it is speaking through and about vinga
-itself, naming the command that does something rather than running
-it, and hands over to the other agents a device reaches. A device
+answers about vinga itself from that summary, naming the command that
+does something rather than running it, and hands over to the other
+agents a device reaches. Its prompt says nothing about the particular
+board it speaks through, so a question about that board gets a general
+answer. A device
 bound to vinga reaches it like any other agent.
 
 It inherits `agent_defaults` like any agent, and it is served whenever
