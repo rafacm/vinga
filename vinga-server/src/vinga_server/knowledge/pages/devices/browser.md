@@ -25,8 +25,8 @@ says so.
 
 ## Getting a browser onto your server
 
-A browser becomes a device in one of two ways, and which one depends
-on how the server is set up. The browser lane joins both ways.
+A browser becomes a device in one of two ways, and either works on
+every server. The browser lane joins both ways.
 
 **With a try link.** Whoever runs the server runs `vinga info`, which
 prints a new try link each time, an address ending in `/try/#`
@@ -62,10 +62,10 @@ So open the page at the address the onboarding URL names, then paste
 it. The page checks in and shows a six-digit
 code with the words "Tell the person who runs this server this code,
 so they can connect this browser"; once they claim it
-(`vinga device pending claim <code> <agent>`), the conversation starts
-by itself. This works only on a server with no default agent. Where
-one is set, every new device would reach it without a code, so the
-server refuses and the page asks for a try link instead.
+(`vinga device pending claim <code>`, which binds this browser to the
+server's default agent, or to the agent the command names), the
+conversation starts by itself. This works on every server: a browser
+with no identity pairs, as every new device does.
 
 Either way the browser remembers that it is a device, and opening the
 page at `/try/` again, without a link, offers Start straight away.
@@ -205,7 +205,7 @@ That stored identity is the device. Clearing the site's data, or
 opening the page in another browser, another browser profile, or a
 private window, is a new browser to the server, with no identity: the
 page asks for a try link or the onboarding URL again, and joins as a
-new device. Opening a fresh try link in a browser that is already a
+new device, which from the onboarding URL means pairing by a code. Opening a fresh try link in a browser that is already a
 device does the same, replacing its identity with a new one. The
 device it was before stays on the server, named and bound as it was,
 until whoever runs the server deletes it; no browser holds its
