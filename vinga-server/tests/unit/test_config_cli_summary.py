@@ -68,6 +68,7 @@ mcp_servers:
 prompt_fragments:
   household (16 characters)
 agent_defaults: llm=brain
+builtin_agent: (none)
 agents:
   sam: llm=brain prompt_includes=[household]
 devices:
@@ -94,6 +95,7 @@ mcp_servers:
 prompt_fragments:
   (none)
 agent_defaults: (none)
+builtin_agent: (none)
 agents:
   (none)
 devices:
@@ -198,6 +200,7 @@ prompt_fragments:
     text: The bins go out.
 agent_defaults:
   llm: brain
+builtin_agent: {}
 agents:
   sam:
     prompt: You are Sam.
@@ -362,6 +365,7 @@ def document(secrets: object = (), **sections: object) -> dict[str, object]:
             "mcp_servers": {"house": {"transport": "stdio"}},
             "prompt_fragments": {"household": {"text": "The bins go out."}},
             "agent_defaults": {"llm": "brain"},
+            "builtin_agent": {},
             "agents": {"sam": {"llm": "brain"}},
             "devices": {
                 "aa:bb:cc:dd:ee:ff": {

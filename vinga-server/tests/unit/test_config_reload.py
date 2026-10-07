@@ -60,7 +60,7 @@ from vinga_server.config.loader import (
     ReloadInProgressError,
     StorageError,
 )
-from vinga_server.config.models import DatabaseConfig
+from vinga_server.config.models import BUILTIN_AGENT, DatabaseConfig
 from vinga_server.config.reload import ConfigReload
 from vinga_server.config.responses import ConfigReloadResult
 from vinga_server.config.secrets import (
@@ -258,7 +258,9 @@ async def test_an_agent_defaults_include_reaches_an_inheriting_agent() -> None:
 
     inherited = generations.current().config.fragments_for_agent("assistant")
     assert [fragment.name for fragment in inherited] == ["house"]
-    assert result.prompts.changed == ["assistant"]
+    # And the built-in agent, which this world serves and which inherits
+    # the layer like any agent naming nothing of its own (#612).
+    assert result.prompts.changed == ["assistant", BUILTIN_AGENT]
     assert result.agents is not None
     assert result.agents.defaults_changed is True
 
@@ -272,7 +274,7 @@ async def test_an_agent_the_store_added_is_served_from_the_swap() -> None:
         served(agents={"assistant": {"prompt": "A"}, "helper": {"prompt": "H"}}),
     )
 
-    assert set(generations.current().config.agents) == {"assistant", "helper"}
+    assert set(generations.current().config.agents) == {"assistant", "helper", BUILTIN_AGENT}
     assert generations.current().providers.agents["helper"].llm is not None
     assert result.agents is not None
     assert (result.agents.added, result.agents.removed) == (["helper"], [])
@@ -292,7 +294,7 @@ async def test_an_agent_the_store_deleted_leaves_the_new_world() -> None:
     )
     generations, result = await applied(running, served(agents={"assistant": {"prompt": "A"}}))
 
-    assert set(generations.current().config.agents) == {"assistant"}
+    assert set(generations.current().config.agents) == {"assistant", BUILTIN_AGENT}
     assert result.agents is not None
     assert (result.agents.added, result.agents.removed) == ([], ["helper"])
 
@@ -635,15 +637,20 @@ async def test_a_synthesis_failure_reaches_the_response_body_and_the_rendering()
         "fallback_reused": [],
         # The same broken voice loses the failure phrase's audio too,
         # under its own outcome: the agent still shows what a failed
-        # reply says, so this is not the mask going off.
-        "fallback_degraded": ["assistant"],
+        # reply says, so this is not the mask going off. The built-in
+        # agent this world serves speaks through the same voice and has
+        # the default phrase, so it loses its audio too (#612).
+        "fallback_degraded": ["assistant", BUILTIN_AGENT],
     }
     # In the words the CLI puts on the two outcomes rather than in the
     # field names above them (#426): what an operator reads off this is
     # that the mask went off and that the failure phrase is shown
     # without being spoken.
     assert "  filled pause off, synthesis failed: assistant" in deployment._apply_listing(body)
-    assert "  failure phrase shown, not spoken: assistant" in deployment._apply_listing(body)
+    assert (
+        f"  failure phrase shown, not spoken: assistant, {BUILTIN_AGENT}"
+        in deployment._apply_listing(body)
+    )
 
 
 async def test_an_agent_defaults_filler_edit_reaches_an_inheriting_agent() -> None:
@@ -662,7 +669,12 @@ async def test_an_agent_defaults_filler_edit_reaches_an_inheriting_agent() -> No
     section = generations.current().config.filler_for_agent("assistant")
     assert section is not None and section.phrases == ["Hmm..."]
     assert result.fillers is not None
-    assert (result.fillers.resynthesized, result.fillers.reused) == (["assistant"], [])
+    # The built-in agent inherits the layer too, so it is synthesized
+    # from it as well (#612).
+    assert (result.fillers.resynthesized, result.fillers.reused) == (
+        ["assistant", BUILTIN_AGENT],
+        [],
+    )
     assert generations.current().fillers["assistant"].phrases == ("Hmm...",)
 
 
@@ -1223,7 +1235,7 @@ async def test_a_fragment_and_the_layer_naming_it_go_together() -> None:
     applied_config = generations.current().config
     assert applied_config.prompt_fragments == {}
     assert applied_config.fragments_for_agent("assistant") == []
-    assert result.prompts.changed == ["assistant"]
+    assert result.prompts.changed == ["assistant", BUILTIN_AGENT]
     assert generations.mark == 1
 
 

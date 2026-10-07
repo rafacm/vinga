@@ -293,6 +293,7 @@ def document(**sections: object) -> dict[str, object]:
             "mcp_servers": {},
             "prompt_fragments": {},
             "agent_defaults": {},
+            "builtin_agent": {},
             "agents": {},
             "devices": {},
             "default_agent": None,

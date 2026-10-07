@@ -69,6 +69,7 @@ IDENTITIES = {
     "prompt-fragment": ("planted",),
     "agent": ("planted",),
     "agent-defaults": (),
+    "builtin-agent": (),
 }
 
 
@@ -155,7 +156,7 @@ def _loaded(
     read the server itself boots on."""
     domain = store.load().domain
     if not descriptor.addressing:
-        return domain.agent_defaults
+        return getattr(domain, descriptor.moved_key)
     section = getattr(domain, descriptor.moved_key)
     for group in identity[:-1]:
         section = getattr(section, group)

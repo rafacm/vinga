@@ -338,6 +338,7 @@ providers:
 mcp_servers: {}
 prompt_fragments: {}
 agent_defaults: {}
+builtin_agent: {}
 agents: {}
 devices: {}
 default_agent: null

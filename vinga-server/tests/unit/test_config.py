@@ -937,6 +937,7 @@ MOVED_SECTIONS: list[tuple[str, str, str]] = [
         "prompt-fragment set",
     ),
     ("agent_defaults", "agent_defaults:\n  llm: claude\n", "agent-defaults set"),
+    ("builtin_agent", "builtin_agent:\n  tts: piper\n", "builtin-agent set"),
     ("agents", "agents:\n  assistant:\n    prompt: hi\n", "agent set"),
     ("devices", 'devices:\n  "aa:bb:cc:dd:ee:ff":\n    - assistant\n', "device bind"),
     ("default_agent", "default_agent: assistant\n", "default-agent set"),

@@ -36,6 +36,7 @@ from vinga_server.config.models import (
     PROVIDER_STAGES,
     AgentConfig,
     AgentDefaults,
+    BuiltinAgentConfig,
     DatabaseConfig,
     McpServerConfig,
     PromptFragmentConfig,
@@ -169,8 +170,12 @@ def _seeded(store: ConfigStore, config: Config) -> Snapshot:
     for name, block in config.prompt_fragments.items():
         store.set_prompt_fragment(name, _fragment(block))
     store.set_agent_defaults(_fragment(config.agent_defaults))
+    store.set_builtin_agent(_fragment(config.builtin_agent))
+    # The stored agents and not the served ones: the built-in agent is
+    # composed into the served configuration and is never a row (#612).
     for name, agent in config.agents.items():
-        store.set_agent(name, _fragment(agent))
+        if not config.is_builtin(name):
+            store.set_agent(name, _fragment(agent))
     # The whole record and not only its binding, through the verbs an
     # operator would use: a device is four things since #449, and a
     # lane that seeded the agents alone would serve a deployment the
@@ -191,7 +196,8 @@ def _fragment(
     | McpServerConfig
     | PromptFragmentConfig
     | AgentConfig
-    | AgentDefaults,
+    | AgentDefaults
+    | BuiltinAgentConfig,
 ) -> dict[str, Any]:
     """One entity as the document that writes it: the fields it set and
     nothing else. Never a full dump, which would name the fields the
