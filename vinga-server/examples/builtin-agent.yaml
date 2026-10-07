@@ -1,0 +1,35 @@
+# What vinga, the built-in agent, uses in place of what every agent
+# inherits from agent_defaults. One entry for the whole deployment:
+#
+#   vinga builtin-agent set -f examples/builtin-agent.yaml
+#
+# vinga is composed by the server from the build it ships in, so there
+# is no prompt here and no MCP grants: its persona is the build's, and
+# a grant on an agent every bound device may reach would be a grant to
+# every device. What an operator chooses is everything else an agent
+# names: its providers, its voice, the filler, fallback and memory
+# sections, and the shared fragments its prompt carries.
+#
+# Every field is optional. Unset, vinga inherits agent_defaults, and it
+# is served once every stage resolves through this entry or that one.
+# Every name below must already exist as a provider or a prompt
+# fragment: the write is refused otherwise.
+
+# A voice of its own, so vinga does not sound like the household's
+# other agents. A voice is a provider entry (see examples/tts-piper.yaml).
+tts: piper
+
+# The shared prompt fragments vinga's prompt carries after its built-in
+# persona, in the order listed. This is how its reply language is set:
+# a fragment reading "Always reply in Swedish." installed under a name
+# of its own and listed here. An empty list opts vinga out of the
+# fragments agent_defaults gives every agent.
+prompt_includes:
+  - household
+
+# Whether vinga remembers anything. What it remembers is its device's:
+# it writes and reads the memory every agent on that device shares,
+# never an agent memory of its own, so what was said on one device is
+# not recalled on another.
+# memory:
+#   enabled: true

@@ -142,7 +142,7 @@ def _device_summary(body: Mapping[str, object]) -> str:
     """One device as the tree shows it: what it is called, where it
     stands when it stands anywhere, and the agents it reaches.
 
-    Beside the five kinds' summaries rather than in `_SUMMARY` with
+    Beside the six kinds' summaries rather than in `_SUMMARY` with
     them, because a device is not an entity and its body is not a
     fragment: `_summarized` is asked by kind, and there is no kind here
     to ask by.
