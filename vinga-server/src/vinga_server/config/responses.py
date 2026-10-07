@@ -1023,7 +1023,7 @@ class RuntimeInfo(BaseModel):
 
 class Invite(BaseModel):
     """An invite link: what a browser opens to join this deployment as a
-    device bound to its default agent.
+    device bound to the agents the invite named, or to the default agent.
 
     It carries a credential, a token that binds whichever browser
     redeems it first. The token sits in the page's fragment, which a
@@ -1168,16 +1168,20 @@ class RefusalReason(StrEnum):
     `code-not-pending` is an activation code no device is waiting under:
     expired, already claimed, or never issued. `agents-unknown` is a
     claim by code naming at least one agent this deployment does not
-    have, refused with nothing changed and the code still claimable.
+    have, refused with nothing changed and the code still claimable, or
+    an invite naming one, refused with nothing issued.
     `agent-not-serving` is a read of an agent this server has not
-    installed, which is a different thing from one that does not exist.
+    installed, which is a different thing from one that does not exist,
+    or an invite naming one, which a browser opening it would be bound
+    to without an answer.
     `device-already-bound` is a conditional bind by code meeting a
     device that has been configured since the code was issued.
     `provider-missing` and `mcp-server-missing` are a stored secret
     written to a holder that is not there, and they are two states
     rather than one because the remedy names the holder's own noun.
-    `no-default-agent` is an invite link asked of a deployment with no
-    default agent, which a browser opening it could not be bound to.
+    `no-default-agent` is an invite naming no agent, asked of a
+    deployment with no default agent, which a browser opening it could
+    not be bound to.
 
     How to read one: map a token you know to a sentence of your own
     grammar, and quote `detail` for one you do not. A token this
@@ -1487,6 +1491,29 @@ class PendingClaim(BaseModel):
             "default agent, the agent a newly bound device starts with, and the claim "
             "is refused with nothing changed when none is set. Every name has to be an "
             "agent that exists, or the claim is refused."
+        ),
+    )
+
+
+class InviteRequest(BaseModel):
+    """What an invite's issuance carries: the agents the browser that
+    opens it is to be bound to, or none, for the default agent (#612).
+
+    Required as a body, with `{}` naming none: a request that lost its
+    body on the way would otherwise bind the browser to the default
+    agent rather than to the agents it named."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    agents: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The agents the browser that opens the invite is bound to, by name, with "
+            "the meaning they have in a device binding. Left out or empty, it is bound "
+            "to the default agent, and the invite is refused with nothing issued when "
+            "none is set. Every name has to be an agent that exists and that this "
+            "server is serving, or the invite is refused with nothing issued; a name "
+            "is never quoted back."
         ),
     )
 

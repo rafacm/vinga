@@ -1,11 +1,13 @@
-"""The invite link's token store (#613, D5, D5d, D6, D6a).
+"""The invite link's token store (#613, D5, D5d, D6, D6a; #612, Q11).
 
 An invite link is a bearer token held in this process's memory: minted for
 the operator, redeemed once by the browser that opens the link, and
 gone after ten minutes whether or not anybody opened it. What the store
-promises is four things, each pinned here by what a caller can see:
+promises is five things, each pinned here by what a caller can see:
 
 - a token is claimed at most once, and the claim is one step;
+- what a claim hands back is the agents the invite was issued for,
+  exactly, so redemption binds what issuance checked (#612, Q11);
 - an unknown, an expired and a spent token are one answer;
 - expired records are removed, not merely refused, and the store never
   holds more than its capacity;
@@ -63,9 +65,33 @@ def test_an_issued_token_is_claimed_exactly_once() -> None:
     links = Invites(clock=Clock())
     token = links.issue()
 
-    assert links.claim(token) is True
-    assert links.claim(token) is False
-    assert links.claim(token) is False
+    assert links.claim(token) is not None
+    assert links.claim(token) is None
+    assert links.claim(token) is None
+
+
+def test_the_claim_hands_back_the_agents_the_invite_was_issued_for() -> None:
+    """The agents ride with the token, in the order they were named, and
+    the claim is where they come back: nothing else in the store says
+    which browser is to be bound to what."""
+    links = Invites(clock=Clock())
+    kids = links.issue(("kids", "guest"))
+    default = links.issue()
+
+    invited = links.claim(kids)
+    by_default = links.claim(default)
+
+    assert invited is not None and invited.agents == ("kids", "guest")
+    assert by_default is not None and by_default.agents == ()
+
+
+def test_two_invites_keep_their_own_agents() -> None:
+    links = Invites(clock=Clock())
+    first = links.issue(("kids",))
+    second = links.issue(("assistant",))
+
+    assert links.claim(second).agents == ("assistant",)  # type: ignore[union-attr]
+    assert links.claim(first).agents == ("kids",)  # type: ignore[union-attr]
 
 
 def test_a_spent_token_is_gone_from_the_store() -> None:
@@ -88,7 +114,7 @@ def test_anything_that_is_not_an_issued_token_is_refused(token: object) -> None:
     links = Invites(clock=Clock())
     links.issue()
 
-    assert links.claim(token) is False
+    assert links.claim(token) is None
     assert links.held == 1
 
 
@@ -98,10 +124,10 @@ def test_a_token_expires_after_ten_minutes() -> None:
     early, late = links.issue(), links.issue()
 
     clock.now += onboarding.INVITE_TTL_S - 0.001
-    assert links.claim(early) is True
+    assert links.claim(early) is not None
 
     clock.now += 0.001
-    assert links.claim(late) is False
+    assert links.claim(late) is None
 
 
 def test_the_lifetime_is_ten_minutes() -> None:
@@ -130,7 +156,7 @@ def test_expired_records_are_removed_by_the_next_claim() -> None:
     links.issue()
     clock.now += onboarding.INVITE_TTL_S
 
-    assert links.claim("never-issued") is False
+    assert links.claim("never-issued") is None
 
     assert links.held == 0
 
@@ -184,7 +210,7 @@ def test_a_new_store_knows_no_token_of_an_old_one() -> None:
 
     after = Invites(clock=Clock())
 
-    assert after.claim(token) is False
+    assert after.claim(token) is None
 
 
 def test_the_default_randomness_is_the_operating_systems(
@@ -211,7 +237,7 @@ def test_the_default_clock_is_monotonic(monkeypatch: pytest.MonkeyPatch) -> None
 
     clock.now += onboarding.INVITE_TTL_S
 
-    assert links.claim(token) is False
+    assert links.claim(token) is None
 
 
 def test_two_default_tokens_differ() -> None:

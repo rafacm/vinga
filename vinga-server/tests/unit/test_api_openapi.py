@@ -183,7 +183,7 @@ def test_the_document_describes_every_route_the_api_serves() -> None:
         "/runtime/info": ["get"],
         # And the one action that answers a credential: an invite link,
         # whose token binds the browser that opens it (#613).
-        "/runtime/try-links": ["post"],
+        "/runtime/invites": ["post"],
         "/runtime/agents/{name}/prompt": ["get"],
         "/runtime/mcp-servers": ["get"],
         # The one route in this document that does not answer and end:
