@@ -435,7 +435,7 @@ session %s rejected: device %s is bound to agent %s, which this server is not se
 #### Variant 3: `vinga_server.session` at WARNING
 
 ```text
-session %s rejected: device %s has no agent: bind it under devices or set default_agent
+session %s rejected: device %s has no agent: bind it under devices
 ```
 
 | # | Argument | Nullable | Constraint | Note |
@@ -1666,7 +1666,7 @@ device %s (%s, firmware %s) is bound to agent %s, which this server is not servi
 #### Variant 3: `vinga_server.ota` at WARNING
 
 ```text
-device %s (%s, firmware %s) has no agent: bind it under devices or set default_agent
+device %s (%s, firmware %s) has no agent: bind it under devices
 ```
 
 | # | Argument | Nullable | Constraint | Note |

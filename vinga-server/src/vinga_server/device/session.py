@@ -859,8 +859,9 @@ class DeviceSession:
         reads the row.
 
         Three states answer None and every reader treats them alike. A
-        board with no record at all, which a default agent's coverage
-        makes ordinary. A record still carrying the `Device <mac>` or
+        board with no record at all, which the served world's fallback
+        can answer for (a default agent's coverage made it ordinary
+        until #612). A record still carrying the `Device <mac>` or
         `Browser <mac>` spelling this server mints and reserves, which
         is a placeholder rather than a name: M2 refuses to say it out
         loud for the same reason, and an analyst has no more use for a MAC repeated in a

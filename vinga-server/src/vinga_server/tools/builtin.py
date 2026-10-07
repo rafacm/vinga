@@ -1101,9 +1101,11 @@ LOCATION_NEEDS_A_PLACE = (
     "the user used for the place"
 )
 
-# There is no record behind this conversation's device to write to: a
-# board a default agent covers and nobody has bound, or one whose record
-# was deleted while this conversation was happening. Creating one is an
+# There is no record behind this conversation's device to write to: one
+# whose record was deleted while this conversation was happening, or one
+# the served world answered for without naming it. (A board nobody has
+# bound reached a default agent with no record until #612; it reaches
+# no agent now.) Creating one is an
 # operator's act, deliberately (#449): a device record is what an
 # operator's configuration says exists, and a room that could mint one
 # by talking could give this server a device nobody installed.

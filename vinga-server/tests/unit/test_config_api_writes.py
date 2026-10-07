@@ -37,6 +37,7 @@ from vinga_server.config.api import APPLY_BODY_LIMIT, _renamed, build_api
 from vinga_server.config.entities import (
     APPLY_NOTICE,
     BINDING_UNSERVED_NOTICE,
+    DEFAULT_AGENT_NOTICE,
     DEFAULT_AGENT_UNSERVED_NOTICE,
     PROGRAM,
     RENAME_UNSERVED_NOTICE,
@@ -191,16 +192,17 @@ def test_a_write_says_what_it_did_and_when_it_applies(
 def _expected_boundaries(method: str, path: str) -> frozenset[str]:
     """Which boundaries a write's notice names, by what it wrote.
 
-    Two for the kinds this API writes: the device bindings and the
-    default agent are what the running server re-reads as a device asks,
-    and every other kind is one apply's business. A binding to an agent
-    this application cannot serve names both, since the row is live and
-    the agent it names is not. A start is on no kind at all, which is
-    the whole of what an earlier milestone did.
+    Two for the kinds this API writes: the device bindings are what the
+    running server re-reads as a device asks, and every other kind is one
+    apply's business. A binding to an agent this application cannot
+    serve names both, since the row is live and the agent it names is
+    not. A default agent naming such an agent names the apply alone,
+    since it reaches no device's check-in (#612). A start is on no kind
+    at all, which is the whole of what an earlier milestone did.
     """
     if method == "delete" and path.startswith(("/devices/", "/default-agent")):
         return frozenset({CHECK_IN})
-    if path.startswith(("/devices/", "/default-agent")):
+    if path.startswith("/devices/"):
         return frozenset({CHECK_IN, RELOAD})
     return frozenset({RELOAD})
 
@@ -247,7 +249,11 @@ def test_a_binding_to_an_agent_the_server_has_not_loaded_names_the_restart(
     assert boundaries(answer.json()) == {CHECK_IN, RELOAD}
 
 
-def test_the_default_agent_follows_the_same_rule(serving_client: TestClient) -> None:
+def test_the_default_agent_waits_only_for_the_install(serving_client: TestClient) -> None:
+    """A default agent reaches no device's check-in since #612, so one
+    the server is not serving waits for the install alone, and one it is
+    serving is read by the next claim, in a sentence of its own rather
+    than the binding's."""
     _pipeline(serving_client)
     serving_client.put("/agents/poet", json={"prompt": "You are a poet."})
 
@@ -255,7 +261,8 @@ def test_the_default_agent_follows_the_same_rule(serving_client: TestClient) -> 
     unserved = serving_client.put("/default-agent", json={"name": "poet"})
 
     assert boundaries(served.json()) == {CHECK_IN}
-    assert boundaries(unserved.json()) == {CHECK_IN, RELOAD}
+    assert served.json()["notice"] == DEFAULT_AGENT_NOTICE.sentence
+    assert boundaries(unserved.json()) == {RELOAD}
 
 
 def test_an_unserved_default_agent_is_not_answered_as_a_binding(
@@ -264,10 +271,10 @@ def test_an_unserved_default_agent_is_not_answered_as_a_binding(
     """The write that produced #424's specimen, from the route that
     makes it.
 
-    The boundaries are the binding's and stay the binding's, because
-    what a default agent is waiting at really is the same pair. The
-    sentence is not: this write bound no device, so a sentence opening
-    on "The binding" describes a row the operator never wrote.
+    The sentence is not the binding's: this write bound no device, so a
+    sentence opening on "The binding" describes a row the operator never
+    wrote. Nor are the boundaries since #612: a default agent changes no
+    device's check-in, so only the install is waited for.
     """
     _pipeline(serving_client)
     serving_client.put("/agents/poet", json={"prompt": "You are a poet."})
@@ -276,7 +283,7 @@ def test_an_unserved_default_agent_is_not_answered_as_a_binding(
 
     body = answer.json()
     assert body["notice"] == DEFAULT_AGENT_UNSERVED_NOTICE.sentence
-    assert boundaries(body) == {CHECK_IN, RELOAD}
+    assert boundaries(body) == {RELOAD}
     assert "The binding" not in body["notice"]
 
 
@@ -291,6 +298,7 @@ def test_removing_a_binding_is_always_live(serving_client: TestClient) -> None:
 
     assert boundaries(unbound.json()) == {CHECK_IN}
     assert boundaries(cleared.json()) == {CHECK_IN}
+    assert cleared.json()["notice"] == DEFAULT_AGENT_NOTICE.sentence
 
 
 def test_the_notice_is_about_the_row_and_not_about_the_request(
@@ -380,47 +388,37 @@ def test_the_unserved_binding_notice_states_two_boundaries_and_no_command() -> N
     assert set(BINDING_UNSERVED_NOTICE.applies) == {RELOAD, CHECK_IN}
 
 
-def test_the_default_agent_notice_says_what_a_default_agent_is() -> None:
-    """The sentence that exists because the binding's will not do
-    (#424): it announces the same two boundaries and it is about the
-    other live row, so what it has to carry is what that row means.
-
-    A default agent covers every device no binding of its own claims,
-    which is why a document that set one and bound nothing is still
-    about devices, and why the word the binding sentence opens with is
-    the one this one may not use.
-    """
-    sentence = DEFAULT_AGENT_UNSERVED_NOTICE.sentence
-
-    assert set(DEFAULT_AGENT_UNSERVED_NOTICE.applies) == {RELOAD, CHECK_IN}
-    assert "\n" not in sentence
-    assert "default agent" in sentence
-    assert "no binding of its own" in sentence
-    assert "The binding" not in sentence
+def test_the_default_agent_notices_say_what_a_default_agent_is() -> None:
+    """The sentences that exist because the binding's will not do
+    (#424): they are about the other live row, so what they carry is
+    what that row means, which since #612 is the agent a newly claimed
+    device starts with. Neither promises "the device" anything at its
+    next check-in, because a default agent reaches none, and the unserved
+    one waits for the install alone."""
+    for notice in (DEFAULT_AGENT_UNSERVED_NOTICE, DEFAULT_AGENT_NOTICE):
+        assert "\n" not in notice.sentence
+        assert "newly claimed device" in notice.sentence
+        assert "The binding" not in notice.sentence
+        assert "covers every device" not in notice.sentence
+    assert set(DEFAULT_AGENT_UNSERVED_NOTICE.applies) == {RELOAD}
+    assert set(DEFAULT_AGENT_NOTICE.applies) == {CHECK_IN}
 
 
-def test_the_rename_notice_is_true_of_both_rows_that_can_have_moved() -> None:
-    """The second sentence that announces two boundaries at once, and
-    the one whose middle arm covers two different live rows.
+def test_the_rename_notice_names_only_the_devices_bound_to_the_agent() -> None:
+    """The second sentence that announces two boundaries at once.
 
-    `_rename_notice` chooses it when a device binding moved OR when the
-    default agent did, and the two are not the same devices: the default
-    agent is what covers the boards that have no binding of their own.
-    So a sentence about a device BOUND to the agent would be false of
-    every device a default-only rename affected, which is the reason it
-    speaks of a device that resolves to the agent and names both ways
-    one can.
-    """
+    `_rename_notice` chooses it when a device binding moved or when the
+    default agent did. It used to speak of a device that resolves to the
+    agent "by its own binding or by the default agent", because a default
+    agent covered the boards with no binding of their own. Since #612 it
+    covers none (#612), so a rename that moved the default alone moves no
+    device's reference, and the sentence is about bound devices alone."""
     sentence = RENAME_UNSERVED_NOTICE.sentence
 
     assert set(RENAME_UNSERVED_NOTICE.applies) == {RELOAD, CHECK_IN}
     assert "\n" not in sentence
-    assert "default agent" in sentence
-    assert "own binding" in sentence
-    # The wording that was true of one arm and false of the other,
-    # refused outright: it is what this sentence carried, and the only
-    # way it comes back is unnoticed.
-    assert "a device bound to it" not in sentence
+    assert "a device bound to it" in sentence
+    assert "default agent" not in sentence
 
 
 def test_no_sentence_this_server_composes_names_a_command_of_a_client() -> None:
@@ -480,7 +478,7 @@ def test_every_notice_this_server_composes_announces_a_known_boundary() -> None:
         value for value in vars(entities).values() if isinstance(value, entities.Notice)
     ]
 
-    assert len(composed) == 7
+    assert len(composed) == 8
     for notice in composed:
         assert notice.applies, notice.sentence
         assert set(notice.applies) <= set(Applies), notice.sentence
@@ -1745,9 +1743,11 @@ def test_every_applied_entry_says_when_it_takes_effect(client: TestClient) -> No
     assert named["agents"] == {RELOAD}
     # This application serves no agent at all, which is the honest answer
     # for one built without a server, so both settings name the reload
-    # that would install the agent beside the check-in the row is live at.
+    # that would install the agent; the binding beside the check-in it is
+    # live at, and the default agent alone, since it reaches no device's
+    # check-in (#612).
     assert named["devices"] == {CHECK_IN, RELOAD}
-    assert named["default_agent"] == {CHECK_IN, RELOAD}
+    assert named["default_agent"] == {RELOAD}
 
 
 def test_an_applied_document_says_which_live_row_each_entry_wrote(
@@ -1758,9 +1758,9 @@ def test_an_applied_document_says_which_live_row_each_entry_wrote(
     fall through to the binding sentence, so a document that set a
     default agent was answered about a binding it did not contain.
 
-    The boundaries are the same pair on both entries, which is why the
-    tokens alone could not have caught this: what tells the two apart is
-    the sentence.
+    The boundaries were the same pair on both entries then, which is why
+    the tokens alone could not have caught it; what tells the two apart
+    is the sentence, and since #612 the boundaries too.
     """
     entries = client.post("/apply", json=DOCUMENT).json()["entries"]
 

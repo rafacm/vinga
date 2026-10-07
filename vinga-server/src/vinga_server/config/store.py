@@ -690,9 +690,9 @@ class ConfigStore:
             return Entity(entry=record, secrets=())
 
     def read_default_agent(self) -> str | None:
-        """The agent an unbound device reaches, or None. Unset is a
-        configuration rather than a missing entity, so there is nothing
-        here to refuse."""
+        """The agent a newly claimed device starts with, or None. Unset
+        is a configuration rather than a missing entity, so there is
+        nothing here to refuse."""
         with self._transaction() as connection:
             return _read_domain(connection).default_agent
 
@@ -1347,8 +1347,9 @@ class ConfigStore:
         return normalized
 
     def set_default_agent(self, name: str) -> str:
-        """Set the agent an unbound device reaches, answering with the
-        name as it was stored."""
+        """Set the agent a claim naming no agent binds a device to,
+        answering with the name as it was stored. It admits no device by
+        itself (#612)."""
         name = _identifier("default_agent", name)
         with self._transaction() as connection:
             domain = _read_domain(connection)
@@ -1358,7 +1359,7 @@ class ConfigStore:
         return name
 
     def clear_default_agent(self) -> None:
-        """Back to the devices map as the allowlist, which is a
+        """Back to claims having to name their agents, which is a
         configuration rather than a degenerate state. The row is deleted
         rather than nulled, so there is one way to say it."""
         with self._transaction() as connection:
@@ -2588,8 +2589,8 @@ _NOT_A_BINDING = (
 )
 
 _NOT_AN_AGENT_NAME = (
-    "default_agent: this holds the name of the agent an unbound device reaches, or "
-    "null to unset it. Nothing sent is quoted back"
+    "default_agent: this holds the name of the agent a newly claimed device starts "
+    "with, or null to unset it. Nothing sent is quoted back"
 )
 
 DUPLICATE_ENTRY = (

@@ -14,9 +14,9 @@ A device the database has nothing to say about is answered with an
 its screen and speaks, which an operator reads off the board and binds
 with one command. The device polls `/activate` every three seconds
 while it waits, so a bind takes effect with no power cycle and no
-button press. A device that is bound, or that a default agent already
-covers, is never asked to activate, which is what keeps every existing
-deployment answering exactly what it answered before.
+button press. A device that is bound is never asked to activate, and
+one that is not always is, a default agent set or not (#612): an
+unbound device only pairs.
 
 This endpoint is the token issuer, so it cannot itself require a token.
 What protects it instead is stinginess and a configurable path: a token

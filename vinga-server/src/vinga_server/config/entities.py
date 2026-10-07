@@ -155,7 +155,7 @@ class Notice:
     sentence: str
 
 
-# When a write takes effect. Seven notices, because there are seven
+# When a write takes effect. Eight notices, because there are eight
 # answers, and each is a fact of what was written rather than of the
 # route or the command that wrote it: the descriptors below name one
 # each, and the three write paths choose between them where the answer
@@ -179,10 +179,9 @@ RESTART_NOTICE = Notice(
     ),
 )
 
-# The first exception: a running server reads device bindings and the
-# default agent as a device asks for them, so binding a board is done
-# with the board in front of you rather than at the next maintenance
-# window.
+# The first exception: a running server reads device bindings as a
+# device asks for them, so binding a board is done with the board in
+# front of you rather than at the next maintenance window.
 BINDING_NOTICE = Notice(
     applies=(Applies.CHECK_IN,),
     sentence=(
@@ -255,7 +254,7 @@ SNAPSHOT_NOTICE = Notice(
 # The fifth, for a rename that moved a device binding or the default
 # agent with the agent it renamed. Two boundaries at once, exactly as
 # the binding above, and for a different pair of reasons: the stored
-# rows are live, so a device meets the moved reference at its next
+# rows are live, so a bound device meets the moved reference at its next
 # check-in, and the agent under its new name arrives at the install that
 # applies the stored configuration.
 #
@@ -265,14 +264,13 @@ SNAPSHOT_NOTICE = Notice(
 # operator just wrote. This one is about what a rename is, which is why
 # it says the references rather than the binding.
 #
-# And it says a device that RESOLVES to the agent rather than one bound
-# to it, which is the difference the two live rows make. The default
-# agent covers the devices that have no binding of their own, so a
-# rename that moved the default alone moved the reference of precisely
-# the devices that are not bound to the agent, and a sentence naming a
-# bound device would be false of every device it was about. One
-# sentence for both arms, because a caller cannot act on the difference:
-# what is waiting is the same install either way.
+# It said "a device that resolves to it, by its own binding or by the
+# default agent" until #612, when a default agent stopped covering the
+# devices with no binding of their own. A rename that moved the default
+# alone moves no device's reference now, only the agent the next claim
+# binds to, so the sentence names the bound device and nothing else. One
+# sentence for both arms still, because a caller cannot act on the
+# difference: what is waiting is the same install either way.
 #
 # And which arm a rename lands on is decided by what its transaction
 # rewrote rather than by what the running server is serving, which is
@@ -288,31 +286,52 @@ RENAME_UNSERVED_NOTICE = Notice(
     sentence=(
         "The stored references moved with the agent, but this server is still serving "
         "it under the old name: the renamed agent arrives with the install that "
-        "applies the stored configuration, and a device that resolves to it, by its "
-        "own binding or by the default agent, reaches it at the check-in after that."
+        "applies the stored configuration, and a device bound to it reaches it at the "
+        "check-in after that."
     ),
 )
 
 # The sixth, for the default agent naming an agent this server is not
-# serving yet. Same two boundaries as the binding above and for the same
-# pair of reasons: the stored row is live, so a device meets it at its
-# next check-in, and the agent it names arrives at the install that adds
-# it.
+# serving yet. One boundary, the install, and no check-in: since #612 a
+# default agent is the agent a newly claimed device starts with and
+# covers no device, so writing it changes no device's check-in. The
+# devices that will reach it are the ones claimed onto it later, and
+# each of those writes says its own boundary when it is made.
 #
-# It cannot borrow `BINDING_UNSERVED_NOTICE` either, and for a reason
-# that reached an operator (#424): "The binding" names a row a
-# `write_device` just wrote, and a document that set a default agent and
-# bound no device contains no binding at all, so the sentence was about
-# something the operator had never written. What this one says instead is
-# what a default agent is, which is the fact the binding sentence has no
-# room for: it covers every device that no binding of its own claims, so
-# the devices it is true of are precisely the ones nobody named.
+# It cannot borrow `BINDING_UNSERVED_NOTICE`, and for a reason that
+# reached an operator (#424): "The binding" names a row a `write_device`
+# just wrote, and a document that set a default agent and bound no
+# device contains no binding at all, so the sentence was about something
+# the operator had never written. What this one says instead is what a
+# default agent is, which is the fact the binding sentence has no room
+# for. Nor is it `APPLY_NOTICE`, whose boundary it shares: that sentence
+# says the write is not yet serving, and this row is read by the next
+# claim the moment it is stored.
 DEFAULT_AGENT_UNSERVED_NOTICE = Notice(
-    applies=(Applies.RELOAD, Applies.CHECK_IN),
+    applies=(Applies.RELOAD,),
     sentence=(
-        "The default agent covers every device that has no binding of its own, and "
-        "this server is not serving the agent it names yet: the agent arrives with "
-        "the install that adds it, and a device reaches it at the check-in after that."
+        "The default agent is the agent a newly claimed device starts with, and "
+        "this server is not serving the agent it names yet: a device claimed onto it "
+        "waits for the install that adds it."
+    ),
+)
+
+# The seventh, for the default agent written or cleared while the agent
+# it names (if any) is being served, added at #612. The row is live, read
+# by the next claim that names no agent, and nothing else waits on it: no
+# device's check-in changes, since a default agent covers none. Its token
+# is the check-in's all the same, the boundary a device asking is, because
+# the devices this write affects are the ones claimed from now on, and
+# each of them meets its binding at its next check-in. Not
+# `BINDING_NOTICE`, whose sentence promises the write reaches "the
+# device" at its next check, which is exactly the false impression a
+# default agent written after a board was bound would leave.
+DEFAULT_AGENT_NOTICE = Notice(
+    applies=(Applies.CHECK_IN,),
+    sentence=(
+        "The next claim that names no agent reads this, so no restart is needed; "
+        "no device already bound changes, since the default agent is only the agent "
+        "a newly claimed device starts with."
     ),
 )
 
@@ -956,6 +975,7 @@ __all__ = [
     "API_OPTIONS_NOTE",
     "BINDING_NOTICE",
     "BINDING_UNSERVED_NOTICE",
+    "DEFAULT_AGENT_NOTICE",
     "DEFAULT_AGENT_UNSERVED_NOTICE",
     "CONFIG_FILE",
     "ENTITIES",

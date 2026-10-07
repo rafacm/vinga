@@ -23,8 +23,9 @@ silently move.
 
 The four, and why they are four rather than two:
 
-- `CHECK_IN`, the device asking. Device bindings and the default agent
-  are read as a device asks for them, so nothing is asked of the server.
+- `CHECK_IN`, the device asking. Device bindings are read as a device
+  asks for them, and the default agent as the next claim does, so
+  nothing is asked of the server.
 - `RELOAD`, an operator asking. The whole rest of the domain half is
   applied by `POST /runtime/config/reload`.
 - `RESTART`, this process starting again. The file half only, which this
@@ -50,10 +51,10 @@ RESTART = Applies.RESTART
 STORE_BOOT = Applies.STORE_BOOT
 
 # Every sentence this server composes, with the boundaries each one
-# announces, read off the pairing rather than restated. The seven are
+# announces, read off the pairing rather than restated. The eight are
 # module constants because the ones that depend on what the server is
 # serving, or on what a transaction moved, are chosen per request from
-# these same seven.
+# these same eight.
 _COMPOSED: tuple[entities.Notice, ...] = (
     entities.RESTART_NOTICE,
     entities.BINDING_NOTICE,
@@ -62,6 +63,7 @@ _COMPOSED: tuple[entities.Notice, ...] = (
     entities.SNAPSHOT_NOTICE,
     entities.RENAME_UNSERVED_NOTICE,
     entities.DEFAULT_AGENT_UNSERVED_NOTICE,
+    entities.DEFAULT_AGENT_NOTICE,
 )
 
 # And what the CLI says INSTEAD of one of those, for the boundary sets

@@ -1058,14 +1058,15 @@ class TryLink(BaseModel):
 
 
 class DefaultAgent(BaseModel):
-    """The agent an unbound device reaches."""
+    """The agent a newly claimed device starts with."""
 
     model_config = ConfigDict(extra="forbid")
 
     name: str | None = Field(
         description=(
-            "The default agent's name, or null when none is set, which leaves the "
-            "devices map as the allowlist."
+            "The default agent's name, or null when none is set, in which case a "
+            "claim by activation code has to name its agents. It admits no device "
+            "either way: the devices map is always the allowlist."
         ),
     )
 

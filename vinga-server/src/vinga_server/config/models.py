@@ -4220,8 +4220,11 @@ DOMAIN_DESCRIPTIONS: dict[str, str] = {
         "agent names is accepted as shorthand for a record naming only those agents."
     ),
     "default_agent": (
-        "The agent an unknown device reaches. Leaving it unset makes the devices "
-        "map an allowlist: a device with no binding is then turned away."
+        "The agent a newly bound device starts with: a claim by activation code "
+        "that names no agent binds the device to it. It admits nothing by itself: "
+        "a device with no binding of its own reaches no agent and is offered a code, "
+        "set or not, so the devices map is always the allowlist. Leaving it unset "
+        "means a claim has to name its agents."
     ),
 }
 
