@@ -54,7 +54,7 @@ from vinga_server.onboarding.invites import (
 )
 from vinga_server.runtime import prompt
 
-ISSUE = "/api/runtime/try-links"
+ISSUE = "/api/runtime/invites"
 BEARER = {"Authorization": f"Bearer {TEST_API_SECRET}"}
 
 # What a browser sends with a fetch from its own page, which is the one
@@ -62,10 +62,11 @@ BEARER = {"Authorization": f"Bearer {TEST_API_SECRET}"}
 SAME_ORIGIN = {"Sec-Fetch-Site": "same-origin"}
 
 
-def token_of(client: TestClient) -> str:
-    """One link, issued the way `vinga info` issues it, and its token
-    read out of the fragment the way the page reads it."""
-    issued = client.post(ISSUE, headers=BEARER)
+def token_of(client: TestClient, agents: list[str] | None = None) -> str:
+    """One link, issued the way `vinga device invite` issues it, naming
+    these agents or none, and its token read out of the fragment the way
+    the page reads it."""
+    issued = client.post(ISSUE, json={} if agents is None else {"agents": agents}, headers=BEARER)
     assert issued.status_code == 200, issued.text
     page = issued.json()["page"]
     assert page.startswith("/try/#")
@@ -89,8 +90,11 @@ def browsers() -> dict[str, list[str]]:
 
 
 @contextmanager
-def deployment(default_agent: str | None = "assistant") -> Iterator[tuple[object, TestClient]]:
-    with entered_app(booted(default_agent=default_agent), from_store=True) as entered:
+def deployment(
+    default_agent: str | None = "assistant", agents: tuple[str, ...] = ("assistant",)
+) -> Iterator[tuple[object, TestClient]]:
+    config = booted(agents=agents, default_agent=default_agent)
+    with entered_app(config, from_store=True) as entered:
         yield entered
 
 
@@ -126,6 +130,48 @@ def test_redeeming_binds_and_names_a_new_browser_before_its_first_word() -> None
         assert reply.status_code == 200
         assert reply.json()["websocket"]["token"]
         assert "activation" not in reply.json()
+
+
+# --- the agents an invite named (#612, Q11) ---------------------------------
+
+
+def test_redeeming_binds_exactly_the_agents_the_invite_named() -> None:
+    """Not the default agent, which is set and is another agent: the
+    names rode with the token from the issuance that checked them."""
+    with deployment(agents=("assistant", "kids", "guest")) as (_, client):
+        kids = redeemed(client, token_of(client, ["kids", "guest"])).json()
+        default = redeemed(client, token_of(client)).json()
+
+        assert browsers() == {kids["mac"]: ["kids", "guest"], default["mac"]: ["assistant"]}
+
+
+def test_named_agents_are_bound_though_the_default_was_cleared_since() -> None:
+    with deployment(agents=("assistant", "kids")) as (_, client):
+        token = token_of(client, ["kids"])
+        with store_at() as store:
+            store.clear_default_agent()
+
+        answer = redeemed(client, token)
+
+        assert answer.status_code == 200
+        assert browsers() == {answer.json()["mac"]: ["kids"]}
+
+
+def test_a_named_agent_deleted_since_issuance_binds_nothing() -> None:
+    """The names are re-read inside the redemption's one transaction, so
+    an agent deleted between the two is the one race issuance cannot
+    rule out: the same refusal, the link spent, and nothing written."""
+    with deployment(agents=("assistant", "kids")) as (app, client):
+        token = token_of(client, ["kids"])
+        with store_at() as store:
+            store.delete_agent("kids")
+
+        answer = redeemed(client, token)
+
+        assert answer.status_code == 403
+        assert answer.json() == {"error": REDEEM_REFUSED}
+        assert browsers() == {}
+        assert app.state.composition.invites.held == 0
 
 
 def test_the_answer_is_kept_by_nobody_but_the_page() -> None:
@@ -567,7 +613,7 @@ def test_of_concurrent_redemptions_exactly_one_binds() -> None:
     deterministically."""
     app = create_app(booted(default_agent="assistant"), from_store=True)
     with served(app) as live:
-        issued = httpx.post(f"{live.origin}{ISSUE}", headers=BEARER)
+        issued = httpx.post(f"{live.origin}{ISSUE}", json={}, headers=BEARER)
         token = issued.json()["page"].removeprefix("/try/#")
 
         statuses = asyncio.run(_contend(live.origin, token))
@@ -609,7 +655,7 @@ def test_a_spent_link_that_bound_nothing_is_logged_by_its_failure_class(
     sentence and the failure's class as its one argument: never its
     message, the token or the MAC."""
 
-    def failing(self: ConfigStore, mac: str, name: str) -> None:
+    def failing(self: ConfigStore, mac: str, name: str, agents: object = ()) -> None:
         raise failure
 
     booted(default_agent="assistant")

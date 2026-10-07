@@ -34,6 +34,7 @@ from vinga_server.config.responses import (
     ConfigDocument,
     ConfigReloadResult,
     Invite,
+    InviteRequest,
     RuntimeInfo,
 )
 from vinga_server.config.transport import APPLY_LOCATION, check_transportable
@@ -1079,7 +1080,13 @@ def _info_path(args: Invocation) -> str:
 
 
 def _invites_path(args: Invocation) -> str:
-    return _path("runtime", "try-links")
+    return _path("runtime", "invites")
+
+
+def _invited(args: Invocation) -> object:
+    """The agents the invite binds its browser to, none for the default
+    agent; always a body, which the API requires."""
+    return {"agents": list(args.agents)}
 
 
 LIST = Act(
@@ -1131,6 +1138,8 @@ IDENTITY = Act(
 INVITE = Act(
     method="POST",
     path=_invites_path,
+    body=_invited,
+    sends=InviteRequest,
     answers=Invite,
     render=_printed(_invite_block),
     completes=_situated_link,

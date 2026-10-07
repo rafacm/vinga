@@ -130,6 +130,7 @@ from vinga_server.config.responses import (
     Envelope,
     FieldError,
     Invite,
+    InviteRequest,
     McpServerStatus,
     McpStatusSource,
     MemoryCorrection,
@@ -427,6 +428,7 @@ ENTITY_MODELS: tuple[type[BaseModel], ...] = tuple(
 REQUEST_MODELS: tuple[type[BaseModel], ...] = (
     DeviceBinding,
     PendingClaim,
+    InviteRequest,
     DeviceRename,
     DeviceReplacement,
     DeviceLocation,
@@ -464,6 +466,12 @@ _DEVICE_BODY = (
 _CLAIM_BODY = (
     'the body has to be a JSON object with at most one key, "agents", holding an '
     "array of agent names as strings; with none, the device is bound to the default "
+    "agent. Nothing sent is quoted back"
+)
+
+_INVITE_BODY = (
+    'the body has to be a JSON object with at most one key, "agents", holding an '
+    "array of agent names as strings; with none, the browser is bound to the default "
     "agent. Nothing sent is quoted back"
 )
 
@@ -1768,11 +1776,12 @@ def _runtime(api: FastAPI) -> None:
         return identity
 
     @api.post(
-        "/runtime/try-links",
+        "/runtime/invites",
         response_model=Invite,
         responses=_problems(
             401,
             409,
+            422,
             500,
             503,
             instead={
@@ -1780,11 +1789,19 @@ def _runtime(api: FastAPI) -> None:
                 503: _NO_RUNTIME_INVITE_DESCRIPTION,
             },
         ),
+        openapi_extra=request_body(InviteRequest),
     )
-    def issue_invite(issuer: InviteDep, store: StoreDep, response: Response) -> Invite:
+    def issue_invite(
+        body: RawBody,
+        issuer: InviteDep,
+        store: StoreDep,
+        loaded: LoadedAgentsDep,
+        response: Response,
+    ) -> Invite:
         """Issue an invite link: a page a browser opens to join this
-        deployment as a device, bound to the default agent before its
-        first word.
+        deployment as a device, bound before its first word to the
+        agents the body names, or to the default agent when it names
+        none.
 
         The answer carries a credential, and this is the one response
         that does. `page` is the browser page's path with a token in its
@@ -1804,21 +1821,30 @@ def _runtime(api: FastAPI) -> None:
         name that host's own origin instead, which is what `vinga info`
         does.
 
+        The body is required, and `{}` is how to name no agent: a
+        request that lost its body on the way would otherwise bind the
+        browser to the default agent rather than to the agents it
+        named. Every named agent has to be one this deployment has
+        (422, `agents-unknown`) and one this server is serving (409,
+        `agent-not-serving`), and neither refusal quotes a name.
+
         Each request is a new link. One is refused (409), with nothing
         issued, while device onboarding is off, while this server serves
         a configuration no store describes, while no default agent is
-        set, and while as many links are waiting as the server holds.
+        set for an invite that names none, and while as many links are
+        waiting as the server holds.
         """
         # The docstring is this endpoint's description in the committed
         # document, so what belongs to the handler is said here. A plain
         # `def`, like every route that reads the store, so it runs on a
         # worker thread; the store of links takes its own lock for
-        # exactly that reason. The default agent is read here, in the
-        # request that asked, because it is the one fact the decision
-        # needs that moves while the process runs.
+        # exactly that reason. The stored agents and the default agent
+        # are read in the request that asked, because they are the facts the decision
+        # needs that move while the process runs; the served agents are
+        # asked of the running server per request for the same reason.
         if issuer is None:
             raise NoRuntimeError(_NO_RUNTIME_INVITE)
-        link = issuer.issue(store.read_default_agent())
+        link = issuer.issue(_invited_agents(body), store, loaded)
         response.headers["cache-control"] = NO_STORE
         return link
 
@@ -3339,6 +3365,17 @@ def _agents(body: object) -> list[str]:
     value = _sole_value(body, "agents", _DEVICE_BODY)
     if not isinstance(value, list) or not all(isinstance(name, str) for name in value):
         raise ConfigError(_DEVICE_BODY)
+    return value
+
+
+def _invited_agents(body: object) -> list[str]:
+    """An invite's agents, the empty list where none were named, read
+    the way a claim's are: `{}`, or `agents` empty, names none."""
+    if body == {}:
+        return []
+    value = _sole_value(body, "agents", _INVITE_BODY)
+    if not isinstance(value, list) or not all(isinstance(name, str) for name in value):
+        raise ConfigError(_INVITE_BODY)
     return value
 
 

@@ -114,7 +114,7 @@ def open_link(
     `link` false, the page alone, as a person who was given only the
     onboarding URL opens it."""
     if link:
-        path, _, token = server.api("POST", "/runtime/try-links")["page"].partition("#")
+        path, _, token = server.api("POST", "/runtime/invites", {})["page"].partition("#")
         redact.register(token)
     else:
         path, token = "/try/", ""

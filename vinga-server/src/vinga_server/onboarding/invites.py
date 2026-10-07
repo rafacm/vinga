@@ -5,9 +5,14 @@ URL's fragment, which a browser sends to no server and puts in no
 `Referer`, so no proxy or access log in front of this server can record
 it; the page at `/try/` reads it, clears it from the address bar and
 redeems it with a same-origin POST (#613, D5). Redeeming spends the
-token, mints a browser identity and writes the device bound to the
-default agent and named, in one transaction, before the browser's first
-word.
+token, mints a browser identity and writes the device bound and named,
+in one transaction, before the browser's first word.
+
+An invite may name the agents its browser is bound to (#612, Q11). The
+names are checked when the invite is issued and ride with the token in
+this store, so a redemption binds exactly what the issuance checked;
+naming none binds the browser to the default agent, read when it
+redeems.
 
 What this module's callers stop having to know:
 
@@ -24,17 +29,20 @@ What this module's callers stop having to know:
   configuration API issues from a worker thread, like every route of
   its that reads the store; the claim itself is made on the event loop.
 - **When a link may be issued at all.** Onboarding on, a store behind
-  the server, a default agent to bind to, and room in the store, in
-  that order; each refusal is a fixed sentence (D5a, D6b).
+  the server, then either every named agent stored and served by the
+  world this server installed, or, naming none, a default agent to bind
+  to; and room in the store, in that order. Each refusal is a fixed
+  sentence, and none quotes a name it was sent (D5a, D6b).
 - **Which origin a link names.** The configured `server.public_url`
   when it opens a secure context (`https://`, or a loopback name), and
   nothing otherwise: never the listen address and never a guess (D5c).
   The CLI owns the other half of that rule, the loopback origin it
   derives from its own API target, because only it knows that target.
 - **What a redemption writes.** One store write that creates the
-  device, bound to the default agent and named `Browser <mac>`, or
-  refuses with nothing written; a MAC that already has a row is minted
-  again, a few times at most (D5b).
+  device, bound to the agents the invite named (or the default agent)
+  and named `Browser <mac>`, or refuses with nothing written; the names
+  are re-read inside that write's transaction, and a MAC that already
+  has a row is minted again, a few times at most (D5b).
 
 The store lives in this process's memory and nowhere else: one replica,
 as the deployment contract says, so a restart or an upgrade ends every
@@ -53,7 +61,7 @@ import logging
 import secrets
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
@@ -64,6 +72,7 @@ from urllib.parse import urlsplit
 import vinga_server.onboarding as onboarding
 from vinga_server.class_names import failure_name
 from vinga_server.config.loader import (
+    ConfigError,
     DeviceAlreadyBoundError,
     InviteRefusedError,
     SnapshotOnlyError,
@@ -92,8 +101,27 @@ ONBOARDING_OFF = (
 )
 
 NO_DEFAULT_AGENT = (
-    "no default agent is set, so a browser opening an invite link would have no agent to be "
-    "bound to. Nothing was issued."
+    "no default agent is set, so a browser opening an invite link that names no agent "
+    "would have no agent to be bound to. Nothing was issued."
+)
+
+# And the two about the agents an invite names (#612, Q11). Neither
+# quotes a name: an agent name is typed on a command line, where a
+# paste can put a credential, so the sentence names the field and the
+# rule and leaves the caller to know what it sent. The first is the
+# store's unknown-agent state, carrying its reason; the second is the
+# served world's, the state D5 names for the default agent, carrying the
+# reason a read of an agent this server has not installed carries.
+AGENTS_UNKNOWN = (
+    "the invite names at least one agent this deployment does not have, so a browser "
+    "opening it could not be bound. Nothing was issued, and what was sent is not quoted "
+    "back."
+)
+
+AGENT_NOT_SERVED = (
+    "the invite names at least one agent this server is not serving, so a browser "
+    "opening it would be bound to an agent that does not answer. Nothing was issued; an "
+    "agent written since is served once the apply that installs it has run."
 )
 
 CAPACITY_REACHED = (
@@ -136,6 +164,16 @@ ISSUE_FAILED = "an invite link was minted and could not be answered, so it was w
 Clock = Callable[[], float]
 
 
+@dataclass(frozen=True)
+class Invitation:
+    """What a spent invite binds its browser to: the agents it named, in
+    the order they were named, or none, which is the default agent read
+    when the browser redeems. Handed back by `Invites.claim` and nowhere
+    else, so the names ride with the token and nothing beside it."""
+
+    agents: tuple[str, ...] = ()
+
+
 class Invites:
     """The links issued and not yet redeemed, in this process's memory.
 
@@ -151,9 +189,10 @@ class Invites:
     def __init__(self, clock: Clock | None = None, randomness: Randomness | None = None) -> None:
         self._clock = clock
         self._randomness = randomness
-        # Token to the instant it stops being redeemable. A spent token
-        # is not here, which is the whole of how it is spent.
-        self._live: dict[str, float] = {}
+        # Token to the instant it stops being redeemable and what it
+        # binds. A spent token is not here, which is the whole of how it
+        # is spent.
+        self._live: dict[str, tuple[float, Invitation]] = {}
         self._lock = threading.Lock()
 
     def _now(self) -> float:
@@ -166,7 +205,7 @@ class Invites:
     def _prune(self, now: float) -> None:
         """Remove every record past its expiry. Held under the lock by
         both callers, so a claim never meets a half-pruned table."""
-        for token in [token for token, expires in self._live.items() if expires <= now]:
+        for token in [token for token, (expires, _) in self._live.items() if expires <= now]:
             del self._live[token]
 
     @property
@@ -177,35 +216,39 @@ class Invites:
         with self._lock:
             return len(self._live)
 
-    def issue(self) -> str:
-        """A fresh token, live for `INVITE_TTL_S`, or the capacity
-        refusal with nothing drawn and nothing held."""
+    def issue(self, agents: tuple[str, ...] = ()) -> str:
+        """A fresh token, live for `INVITE_TTL_S` and binding `agents`
+        (none: the default agent), or the capacity refusal with nothing
+        drawn and nothing held. The names are the caller's to have
+        checked; this store keeps them beside the token and hands them
+        back to the one claim that spends it."""
         with self._lock:
             now = self._now()
             self._prune(now)
             if len(self._live) >= onboarding.INVITE_CAPACITY:
                 raise InviteRefusedError(CAPACITY_REACHED)
             token = base64.urlsafe_b64encode(self._draw()).rstrip(b"=").decode("ascii")
-            self._live[token] = now + onboarding.INVITE_TTL_S
+            self._live[token] = (now + onboarding.INVITE_TTL_S, Invitation(tuple(agents)))
             return token
 
-    def claim(self, token: object) -> bool:
-        """Whether `token` was live, spending it if so. True at most
-        once per token, ever.
+    def claim(self, token: object) -> Invitation | None:
+        """What `token` binds, spending it, or None when it was not live.
+        An answer at most once per token, ever.
 
         The check and the removal are one step: one `pop`, under the
         lock, with nothing in this method that can yield. Expiry is the
         prune in front of it and nothing else, so an expired token is
         not refused by a second comparison but is simply no longer
-        there. A redemption that is told False writes nothing, which is
-        what makes the first True the only binding a link ever makes.
+        there. A redemption that is told None writes nothing, which is
+        what makes the first answer the only binding a link ever makes.
         Anything that is not a string is simply not a token.
         """
         with self._lock:
             self._prune(self._now())
             if not isinstance(token, str):
-                return False
-            return self._live.pop(token, None) is not None
+                return None
+            live = self._live.pop(token, None)
+            return None if live is None else live[1]
 
 
 def link_origin(server: ServerConfig) -> str | None:
@@ -251,21 +294,39 @@ class Issuer:
     server: ServerConfig
     snapshot_only: bool
 
-    def issue(self, default_agent: str | None) -> Invite:
-        """A link, or the refusal of the first state that rules one out.
+    def issue(
+        self, agents: Sequence[str], store: "ConfigStore", served: frozenset[str]
+    ) -> Invite:
+        """A link binding `agents`, or the refusal of the first state
+        that rules one out.
 
-        `default_agent` is what the store says now, read by the caller in
-        the request that asked: the one fact here that moves while the
-        process runs.
+        `agents` are the names the request sent, none meaning the
+        default agent; each is trimmed and a repeat is the one name it
+        repeats, which is how a binding stores them. `store` is read for
+        what it says now, in the request that asked: which agents exist,
+        or, naming none, whether a default agent is set. `served` is the
+        agents of the world this server installed, asked of it per
+        request because an apply replaces it. A named agent has to be
+        both: stored, or the redemption's write would not resolve it,
+        and served, or the browser would be bound to an agent that does
+        not answer.
         """
         if not self.server.onboarding.enabled:
             raise InviteRefusedError(ONBOARDING_OFF)
         if self.snapshot_only:
             raise SnapshotOnlyError(SNAPSHOT_ONLY)
-        if default_agent is None:
+        named = tuple(dict.fromkeys(name.strip() for name in agents))
+        if named:
+            if not set(named) <= store.read_agent_names():
+                raise ConfigError(AGENTS_UNKNOWN, reason=RefusalReason.AGENTS_UNKNOWN)
+            if not set(named) <= served:
+                raise InviteRefusedError(
+                    AGENT_NOT_SERVED, reason=RefusalReason.AGENT_NOT_SERVING
+                )
+        elif store.read_default_agent() is None:
             raise InviteRefusedError(NO_DEFAULT_AGENT, reason=RefusalReason.NO_DEFAULT_AGENT)
         origin = link_origin(self.server)
-        token = self.links.issue()
+        token = self.links.issue(named)
         answer: Invite | None = None
         try:
             answer = Invite(
@@ -297,25 +358,31 @@ async def redeem(
 
     The claim comes first and is synchronous, so a redemption that loses
     it awaits nothing and writes nothing (D5d). The winner mints an
-    identity and has the store create the device, bound to the default
-    agent and named, in one transaction (D5b); a MAC that already has a
-    row is minted again, `INVITE_MINTS` times at most, and every other
-    failure (the default agent cleared since the link was issued, a
-    database that will not answer, anything a layer under the store
-    raises) is None with nothing written and nothing raised. The
-    token is spent either way: a link is one attempt.
+    identity and has the store create the device, bound to the agents
+    the invite named or else to the default agent, and named, in one
+    transaction that re-reads them (D5b; #612, Q11); a MAC that already
+    has a row is minted again, `INVITE_MINTS` times at most, and every
+    other failure (a named agent deleted or the default agent cleared
+    since the link was issued, a database that will not answer,
+    anything a layer under the store raises) is None with nothing
+    written and nothing raised. The token is spent either way: a link
+    is one attempt.
 
     `randomness` is the minter's, injected so a test can make two draws
     collide; None is the operating system's.
     """
-    if not links.claim(token):
+    invitation = links.claim(token)
+    if invitation is None:
         return None
     for _ in range(onboarding.INVITE_MINTS):
         identity = mint(randomness)
         failed: str | None = None
         try:
             await asyncio.to_thread(
-                store.enroll_device, identity.mac, browser_device_name(identity.mac)
+                store.enroll_device,
+                identity.mac,
+                browser_device_name(identity.mac),
+                invitation.agents,
             )
         except DeviceAlreadyBoundError:
             continue

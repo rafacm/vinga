@@ -689,6 +689,14 @@ class ConfigStore:
                 raise UnknownEntityError(_NO_SUCH_DEVICE)
             return Entity(entry=record, secrets=())
 
+    def read_agent_names(self) -> frozenset[str]:
+        """The name of every stored agent and nothing else about any of
+        them: what a caller asks when all it needs is whether a name it
+        was sent is an agent this deployment has, which an invite's
+        issuance does for each agent it names (#612)."""
+        with self._transaction() as connection:
+            return frozenset(_read_domain(connection).agents)
+
     def read_default_agent(self) -> str | None:
         """The agent a newly claimed device starts with, or None. Unset
         is a configuration rather than a missing entity, so there is
@@ -1024,9 +1032,10 @@ class ConfigStore:
             return self._device_write(_DeviceBinding(mac=_mac(mac)), unconfigured=True)
         return self._device_write(_device_change(mac, list(agents)), unconfigured=True)
 
-    def enroll_device(self, mac: str, name: str) -> BoundDevice:
-        """Create one device, bound to the default agent and named, in
-        one transaction, or refuse with nothing written.
+    def enroll_device(self, mac: str, name: str, agents: Sequence[str] = ()) -> BoundDevice:
+        """Create one device, bound to `agents` or else to the default
+        agent, and named, in one transaction, or refuse with nothing
+        written.
 
         What an invite link does with the browser that redeems it (#613,
         D5b). The link is spent by then, so the write is all or nothing:
@@ -1038,16 +1047,23 @@ class ConfigStore:
         Refused rather than merged when the MAC already has a row, with
         `DeviceAlreadyBoundError`, because the caller minted that MAC
         and draws another rather than adopting somebody else's device;
-        every other refusal is a plain `ConfigError`. The default agent
-        is read inside the transaction, so one cleared since the caller
+        every other refusal is a plain `ConfigError`. `agents` are the
+        names an invite named (#612, Q11), checked when it was issued and
+        resolved again here, inside the transaction, so one deleted
+        since refuses rather than binding a device to a name nothing
+        answers to. None named means the default agent, read inside the
+        transaction for the same reason: one cleared since the caller
         decided to enroll refuses here rather than binding a device to
-        nothing. The agent is written by name, the way an operator's
-        bind is: a default agent changed later moves the devices nobody
-        bound, and this one is bound.
+        nothing. Either is written by name, the way an operator's bind
+        is: a default agent changed later moves no device.
         """
         canonical = _mac(mac)
         return self._device_write(
-            _DeviceBinding(mac=canonical, name=_device_name(canonical, name)),
+            _DeviceBinding(
+                mac=canonical,
+                name=_device_name(canonical, name),
+                agents=tuple(agents) if agents else None,
+            ),
             enrolling=True,
         )
 

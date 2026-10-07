@@ -255,7 +255,7 @@ def test_an_invite_request_that_never_got_an_answer_still_ends_info(
     real = acts._call
 
     def call(reached, method, path, *rest, **kwargs):
-        if path == "/runtime/try-links":
+        if path == "/runtime/invites":
             raise ConfigError("the configuration API could not be reached")
         return real(reached, method, path, *rest, **kwargs)
 

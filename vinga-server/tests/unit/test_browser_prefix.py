@@ -148,7 +148,8 @@ def test_the_browser_s_whole_way_in_stays_under_the_prefix() -> None:
         page_url = f"http://testserver{PREFIX}/try/"
         page = proxied.get(page_url).text
         root = client_root(proxied, page_url)
-        token = proxied.post(f"{PREFIX}/api/runtime/try-links", headers=BEARER).json()["page"]
+        issued = proxied.post(f"{PREFIX}/api/runtime/invites", json={}, headers=BEARER)
+        token = issued.json()["page"]
         body = proxied.post(
             urljoin(root, "try/redeem"),
             json={"token": token.removeprefix("/try/#")},
@@ -177,7 +178,8 @@ def test_the_browser_s_whole_way_in_stays_under_the_prefix() -> None:
 
 def test_the_onboarding_path_a_redemption_hands_over_resolves_under_the_prefix() -> None:
     with behind_a_prefix() as proxied:
-        token = proxied.post(f"{PREFIX}/api/runtime/try-links", headers=BEARER).json()["page"]
+        issued = proxied.post(f"{PREFIX}/api/runtime/invites", json={}, headers=BEARER)
+        token = issued.json()["page"]
         token = token.removeprefix("/try/#")
         page_url = f"http://testserver{PREFIX}/try/"
         redeem_url = urljoin(page_url, "redeem")

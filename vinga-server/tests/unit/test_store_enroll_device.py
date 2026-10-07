@@ -145,3 +145,44 @@ def test_the_mac_is_stored_in_its_canonical_spelling(store: ConfigStore) -> None
 
     assert enrolled.mac == MAC
     assert _row(store, MAC) is not None
+
+
+# --- the agents an invite named (#612, Q11) --------------------------------
+#
+# An invite may name the agents its browser is bound to, and those ride
+# with the token to the redemption. So the write takes them, binds them
+# rather than the default agent, and re-reads them inside its one
+# transaction: an agent deleted between the issuance and the redemption
+# refuses here, with nothing written, rather than binding a browser to a
+# name nothing answers to.
+
+
+def test_named_agents_are_bound_rather_than_the_default(store: ConfigStore) -> None:
+    _agents(store, default="nadia")
+
+    enrolled = store.enroll_device(MAC, NAME, ("sam",))
+
+    assert enrolled.agents == ("sam",)
+    assert enrolled.name == NAME
+    row = _row(store, MAC)
+    assert row is not None
+    assert row["agents"] == ["sam"]
+
+
+def test_named_agents_need_no_default_agent(store: ConfigStore) -> None:
+    _agents(store, default=None)
+
+    enrolled = store.enroll_device(MAC, NAME, ("sam", "nadia"))
+
+    assert enrolled.agents == ("sam", "nadia")
+
+
+def test_a_named_agent_deleted_since_refuses_with_nothing_written(store: ConfigStore) -> None:
+    _agents(store, default="nadia")
+    store.delete_agent("sam")
+
+    with pytest.raises(ConfigError) as refused:
+        store.enroll_device(MAC, NAME, ("sam",))
+
+    assert not isinstance(refused.value, DeviceAlreadyBoundError)
+    assert _row(store, MAC) is None

@@ -45,7 +45,7 @@ PLANTED = b"inv-sentinel-never-a-real-token!"
 assert len(PLANTED) == 32
 SENTINEL = base64.urlsafe_b64encode(PLANTED).rstrip(b"=").decode()
 
-ISSUE = "/api/runtime/try-links"
+ISSUE = "/api/runtime/invites"
 BEARER = {"Authorization": f"Bearer {TEST_API_SECRET}"}
 SAME_ORIGIN = {"Sec-Fetch-Site": "same-origin"}
 
@@ -95,18 +95,23 @@ def answered(response: httpx.Response) -> str:
 
 @contextmanager
 def deployment() -> Iterator[tuple[object, TestClient]]:
-    with entered_app(booted(default_agent="assistant"), from_store=True) as entered:
+    config = booted(agents=("assistant", "kids"), default_agent="assistant")
+    with entered_app(config, from_store=True) as entered:
         yield entered
 
 
+@pytest.mark.parametrize(
+    "body", [{}, {"agents": ["kids"]}], ids=["the-default-agent", "named-agents"]
+)
 def test_the_token_is_answered_by_the_issuance_alone(
-    caplog: pytest.LogCaptureFixture, tap: Tap
+    body: dict, caplog: pytest.LogCaptureFixture, tap: Tap
 ) -> None:
     """Issued, redeemed, checked in with, connected with, and read back
     through every API read an operator might make afterwards: the token
-    is in the issuance response and nowhere else."""
+    is in the issuance response and nowhere else, whether the invite
+    named its agents or left them to the default (#612, Q11)."""
     with caplog.at_level(logging.DEBUG), deployment() as (_, client):
-        issued = client.post(ISSUE, headers=BEARER)
+        issued = client.post(ISSUE, json=body, headers=BEARER)
         assert SENTINEL in issued.text, "the plant did not take"
 
         redeemed = client.post(REDEEM_PATH, json={"token": SENTINEL}, headers=SAME_ORIGIN)
@@ -173,11 +178,11 @@ def test_a_redemption_the_store_fails_reaches_nothing(
     token was claimed by then and is in the handler's hands, and the
     refusal still carries none of it."""
 
-    def failing(self: ConfigStore, mac: str, name: str) -> None:
+    def failing(self: ConfigStore, mac: str, name: str, agents: object = ()) -> None:
         raise StorageError("the configuration database could not be written")
 
     with caplog.at_level(logging.DEBUG), deployment() as (_, client):
-        issued = client.post(ISSUE, headers=BEARER)
+        issued = client.post(ISSUE, json={}, headers=BEARER)
         assert SENTINEL in issued.text
         monkeypatch.setattr(ConfigStore, "enroll_device", failing)
         refused = client.post(REDEEM_PATH, json={"token": SENTINEL}, headers=SAME_ORIGIN)
@@ -187,12 +192,36 @@ def test_a_redemption_the_store_fails_reaches_nothing(
     assert SENTINEL not in everywhere(caplog, tap)
 
 
+AGENT_SENTINEL = "sk-live-AGENT-NAME-SENTINEL-0000"
+
+
+@pytest.mark.parametrize(
+    "agents", [[AGENT_SENTINEL], ["kids", AGENT_SENTINEL]], ids=["alone", "beside-a-real-one"]
+)
+def test_a_refused_invite_quotes_no_name_it_was_sent(
+    agents: list[str], caplog: pytest.LogCaptureFixture, tap: Tap
+) -> None:
+    """An agent name is typed on a command line, where a paste can put a
+    credential: the refusal of one this deployment does not have names
+    the field and quotes nothing, in the body, the logs and the events,
+    and mints nothing."""
+    with caplog.at_level(logging.DEBUG), deployment() as (app, client):
+        refused = client.post(ISSUE, json={"agents": agents}, headers=BEARER)
+        held = app.state.composition.invites.held
+
+    assert refused.status_code == 422
+    assert held == 0
+    assert AGENT_SENTINEL not in answered(refused)
+    assert AGENT_SENTINEL not in everywhere(caplog, tap)
+    assert SENTINEL not in answered(refused)
+
+
 def test_a_refused_issuance_mints_nothing_to_leak(
     caplog: pytest.LogCaptureFixture, tap: Tap
 ) -> None:
     with caplog.at_level(logging.DEBUG):
         with entered_app(booted(), from_store=True) as (app, client):
-            refused = client.post(ISSUE, headers=BEARER)
+            refused = client.post(ISSUE, json={}, headers=BEARER)
             held = app.state.composition.invites.held
 
     assert refused.status_code == 409
@@ -209,7 +238,7 @@ def test_the_redemption_names_the_browser_in_no_record(
     when the browser checks in, in the fields a board's check-in uses
     (held by `test_browser_no_leak.py`)."""
     with caplog.at_level(logging.DEBUG), deployment() as (_, client):
-        token = client.post(ISSUE, headers=BEARER).json()["page"].removeprefix("/try/#")
+        token = client.post(ISSUE, json={}, headers=BEARER).json()["page"].removeprefix("/try/#")
         body = client.post(REDEEM_PATH, json={"token": token}, headers=SAME_ORIGIN).json()
 
     with store_at() as store:
@@ -239,7 +268,7 @@ def test_neither_stream_carries_the_token(
     capfd: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
 ) -> None:
     with caplog.at_level(logging.DEBUG), deployment() as (_, client):
-        issued = client.post(ISSUE, headers=BEARER)
+        issued = client.post(ISSUE, json={}, headers=BEARER)
         assert SENTINEL in issued.text
         redeemed = client.post(REDEEM_PATH, json={"token": SENTINEL}, headers=SAME_ORIGIN)
         assert redeemed.status_code == 200
@@ -276,7 +305,7 @@ def test_a_redemption_failing_with_the_token_in_its_message_carries_it_nowhere(
     contained like one it did, so nothing escapes the handler at all."""
     escaped: list[BaseException] = []
     with caplog.at_level(logging.DEBUG), deployment() as (_, client):
-        issued = client.post(ISSUE, headers=BEARER)
+        issued = client.post(ISSUE, json={}, headers=BEARER)
         assert SENTINEL in issued.text
         monkeypatch.setattr(ConfigStore, "enroll_device", carrying(kind))
         try:
@@ -319,7 +348,7 @@ def test_an_issuance_failing_with_the_token_in_its_message_carries_it_nowhere(
     monkeypatch.setattr(invites, "Invite", answering_with(kind))
     with caplog.at_level(logging.DEBUG), deployment() as (app, client):
         try:
-            answer = client.post(ISSUE, headers=BEARER)
+            answer = client.post(ISSUE, json={}, headers=BEARER)
         except Exception as failure:
             escaped.append(failure)
             answer = None
