@@ -671,7 +671,8 @@ def _agents(previous: Config, applied: Config) -> AgentsReload:
     built from.
 
     `agent_defaults` is a boolean because there is one of it and nothing
-    to name. Compared whole, grants included: everything on that layer
+    to name, and so is `builtin_agent`, the built-in agent's overrides
+    (#612), which reach that one agent. Compared whole, grants included: everything on that layer
     is applied now, and what it changes reaches whichever agents inherit
     the field that moved.
     """
@@ -679,6 +680,7 @@ def _agents(previous: Config, applied: Config) -> AgentsReload:
         added=sorted(set(applied.agents) - set(previous.agents)),
         removed=sorted(set(previous.agents) - set(applied.agents)),
         defaults_changed=previous.agent_defaults != applied.agent_defaults,
+        builtin_changed=previous.builtin_agent != applied.builtin_agent,
     )
 
 

@@ -1509,6 +1509,7 @@ _MCP_SERVER = entities.descriptor("mcp-server")
 _PROMPT_FRAGMENT = entities.descriptor("prompt-fragment")
 _AGENT = entities.descriptor("agent")
 _AGENT_DEFAULTS = entities.descriptor("agent-defaults")
+_BUILTIN_AGENT = entities.descriptor("builtin-agent")
 
 
 def _slot(descriptor: entities.EntityDescriptor, identity: str, slot: str) -> SecretLocation:
@@ -1638,6 +1639,17 @@ def _entity_reads(api: FastAPI) -> None:
         entry for the whole deployment, and never missing: an unwritten
         one reads as the empty entry."""
         return views.agent_defaults(store.read_agent_defaults())
+
+    @api.get(
+        "/builtin-agent",
+        response_model=Envelope,
+        responses=_problems(401, 409, 500),
+    )
+    def read_builtin_agent(store: StoreDep) -> dict[str, Any]:
+        """What vinga, the built-in agent, uses in place of what every
+        agent inherits. One entry for the whole deployment, and never
+        missing: an unwritten one reads as the empty entry."""
+        return views.builtin_agent(store.read_builtin_agent())
 
 
 def _reads(api: FastAPI) -> None:
@@ -1974,7 +1986,8 @@ def _runtime(api: FastAPI) -> None:
         agents' effective `mcp` grant lists, the shared prompt
         fragments, the agents themselves and the `agent_defaults` layer
         under them, which carries the stage every agent that names none
-        of its own inherits. An agent this installs is one a device can
+        of its own inherits, and the built-in agent's `builtin_agent`
+        overrides. An agent this installs is one a device can
         be bound to and reach at its next check-in; one it removes is
         one no session can be opened as from the moment this answers,
         while a conversation already talking as it finishes on the world
@@ -2566,7 +2579,9 @@ def _entity_writes(api: FastAPI) -> None:
     def write_agent(name: str, body: RawBody, store: StoreDep) -> dict[str, Any]:
         """Create or replace one agent. Every provider and MCP server it
         names has to exist already, which is what the natural creation
-        order is about."""
+        order is about. No agent may be created under vinga, the
+        built-in agent's name; one stored under it before the built-in
+        existed may still be replaced."""
         store.set_agent(name, body)
         return _acknowledge(f"agent {spoken_identity(name)}", _AGENT.notice)
 
@@ -2629,8 +2644,9 @@ def _entity_writes(api: FastAPI) -> None:
         Refused 409 when the destination is occupied, by an agent, by
         remembered facts or by recorded threads, since a rename may
         never merge two pasts into one; 422 when the new name is not a
-        name this deployment can address, or is the one the agent
-        already has. No refusal quotes either name."""
+        name this deployment can address, is the one the agent already
+        has, or is vinga, the built-in agent's. No refusal quotes either
+        name."""
         renamed = store.rename_agent(name, _to(body))
         return _acknowledge(_renamed(renamed), _rename_notice(renamed, snapshot_only))
 
@@ -2646,6 +2662,20 @@ def _entity_writes(api: FastAPI) -> None:
         there is nothing to delete."""
         store.set_agent_defaults(body)
         return _acknowledge("agent-defaults", _AGENT_DEFAULTS.notice)
+
+    @api.put(
+        "/builtin-agent",
+        response_model=Acknowledgement,
+        responses=_problems(401, 409, 422, 500),
+        openapi_extra=request_body(_BUILTIN_AGENT.model),
+    )
+    def write_builtin_agent(body: RawBody, store: StoreDep) -> dict[str, Any]:
+        """Replace what vinga, the built-in agent, uses in place of what
+        every agent inherits. One entry for the whole deployment, so
+        this is a replace and there is nothing to delete. It carries no
+        prompt and no MCP grants: neither is a field it has."""
+        store.set_builtin_agent(body)
+        return _acknowledge("builtin-agent", _BUILTIN_AGENT.notice)
 
 
 def _writes(api: FastAPI) -> None:

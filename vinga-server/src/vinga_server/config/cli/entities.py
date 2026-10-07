@@ -366,7 +366,7 @@ def _counted(section: Mapping[str, object], kind: entities.EntityDescriptor) -> 
 
 # How one entry of each kind reads in that tree, after its name: which
 # engine a provider is, how an MCP server is reached, what a fragment
-# costs, what an agent overrides. Five answers to one question, so the
+# costs, what an agent overrides. Six answers to one question, so the
 # tree above asks by kind rather than knowing them, and the table that
 # answers is at the foot of this group: it is read here and written here,
 # which is the whole of what a per-kind mapping has to be.
@@ -424,12 +424,19 @@ def _agent_defaults_summary(body: Mapping[str, object]) -> str:
     return f": {_inline(body) or '(none)'}"
 
 
+def _builtin_agent_summary(body: Mapping[str, object]) -> str:
+    """The other singleton, read the same way. Empty here means the
+    built-in agent inherits everything from agent_defaults."""
+    return f": {_inline(body) or '(none)'}"
+
+
 _SUMMARY: dict[str, Callable[[Mapping[str, object]], str]] = {
     "provider": _provider_summary,
     "mcp-server": _mcp_server_summary,
     "prompt-fragment": _prompt_fragment_summary,
     "agent": _agent_summary,
     "agent-defaults": _agent_defaults_summary,
+    "builtin-agent": _builtin_agent_summary,
 }
 
 

@@ -63,6 +63,7 @@ from vinga_server.config.models import (
     PROVIDER_STAGES,
     AgentConfig,
     AgentDefaults,
+    BuiltinAgentConfig,
     DeviceRecord,
     FillerConfig,
     McpServerConfig,
@@ -106,6 +107,10 @@ def agent(read: Entity[AgentConfig]) -> dict[str, object]:
 
 def agent_defaults(read: Entity[AgentDefaults]) -> dict[str, object]:
     return entity("agent-defaults", read)
+
+
+def builtin_agent(read: Entity[BuiltinAgentConfig]) -> dict[str, object]:
+    return entity("builtin-agent", read)
 
 
 def device(read: Entity[DeviceRecord]) -> dict[str, object]:
@@ -171,6 +176,7 @@ def config(snapshot: Snapshot) -> dict[str, object]:
             "mcp_servers": _bodies(domain.mcp_servers, "mcp-server"),
             "prompt_fragments": _bodies(domain.prompt_fragments, "prompt-fragment"),
             "agent_defaults": _body("agent-defaults", domain.agent_defaults),
+            "builtin_agent": _body("builtin-agent", domain.builtin_agent),
             "agents": _bodies(domain.agents, "agent"),
             # Keyed by MAC, which is the one identity here that cannot
             # carry this: a device row whose key is not six
@@ -277,7 +283,7 @@ def entity_body(descriptor: entities.EntityDescriptor, entry: object) -> dict[st
     secret-shaped-name rule, and every string in it shown without what a
     URL of it carries as a credential.
 
-    One builder for the five kinds, specialized by the descriptor, in
+    One builder for the six kinds, specialized by the descriptor, in
     place of the five that were written key by key. Which fields exist
     is the model's to say and the registry's to point at, and a builder
     that repeated the list was a second copy of it: the copy could only
@@ -703,6 +709,7 @@ __all__ = [
     "agent",
     "agent_defaults",
     "agents",
+    "builtin_agent",
     "config",
     "default_agent",
     "device",

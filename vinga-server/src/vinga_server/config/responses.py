@@ -130,8 +130,9 @@ class ConfigDocument(BaseModel):
 
     config: dict[str, Any] = Field(
         description=(
-            "The domain half of the configuration (providers, MCP servers, agent "
-            "defaults, agents, devices, the default agent) in the shape "
+            "The domain half of the configuration (providers, MCP servers, prompt "
+            "fragments, agent defaults, the built-in agent's overrides, agents, "
+            "devices, the default agent) in the shape "
             "`docs/reference/domain-config.md` documents, with every secret-bearing "
             "value masked."
         )
@@ -492,6 +493,15 @@ class AgentsReload(BaseModel):
             "it for the whole deployment and nothing to name. What it changes reaches "
             "every agent that inherits the field that moved."
         )
+    )
+    builtin_changed: bool = Field(
+        default=False,
+        description=(
+            "Whether `builtin_agent`, the built-in agent's overrides, moved: a boolean "
+            "for the reason `defaults_changed` is one. What it changes reaches the "
+            "built-in agent alone, at its next activation. False from a server older "
+            "than the built-in agent, which has no such entry to move."
+        ),
     )
 
 
@@ -909,6 +919,7 @@ class ConfigDiff(BaseModel):
     mcp_servers: EntityDiff
     prompt_fragments: EntityDiff
     agent_defaults: SingletonDiff
+    builtin_agent: SingletonDiff
     agents: AgentsDiff
     devices: LiveKind
     default_agent: LiveKind
@@ -1291,8 +1302,9 @@ class Acknowledgement(BaseModel):
             "apply at that device's next OTA check or connection with nothing asked of "
             "the server. Every other kind this API writes, which is the whole of the "
             "rest of the domain half (the provider entries, the MCP entries, the "
-            "secret slots on either, the prompt fragments, the agents and "
-            "`agent_defaults`), is stored and waits for the stored configuration to be "
+            "secret slots on either, the prompt fragments, the agents, "
+            "`agent_defaults` and `builtin_agent`), is stored and waits for the stored "
+            "configuration to be "
             "installed on the running server, which no restart is needed for. A "
             "binding naming an agent this server is not serving yet carries a sentence "
             "of its own, because both halves are true at once: the row is live, and "
@@ -1336,8 +1348,8 @@ class AppliedEntry(BaseModel):
 
     # A closed token rather than a string, because it is printed as
     # itself: the renderer composes `<section>.<identity>` and puts it
-    # on stdout, so a section is one of the seven words this API can
-    # emit or it is a body nobody vouched for. The seven are the domain
+    # on stdout, so a section is one of the eight words this API can
+    # emit or it is a body nobody vouched for. The eight are the domain
     # document's own top-level keys, which `ConfigDiff` above names one
     # field at a time; the apply route validates its answer against this
     # model, so a section added to the configuration and not to this
@@ -1347,6 +1359,7 @@ class AppliedEntry(BaseModel):
         "mcp_servers",
         "prompt_fragments",
         "agent_defaults",
+        "builtin_agent",
         "agents",
         "devices",
         "default_agent",
@@ -1354,7 +1367,8 @@ class AppliedEntry(BaseModel):
         description=(
             "Which section of the domain configuration the entry is in: one of "
             "`providers`, `mcp_servers`, `prompt_fragments`, `agent_defaults`, "
-            "`agents`, `devices`, `default_agent`. The entries are listed in that "
+            "`builtin_agent`, `agents`, `devices`, `default_agent`. The entries are "
+            "listed in that "
             "order, which is the order the configuration documents as its write, read "
             "and creation order."
         )
@@ -1364,8 +1378,8 @@ class AppliedEntry(BaseModel):
             "The entry's identity under that section, as the row holds it rather than "
             "as the document spelled it: `<stage>.<name>` for a provider, the "
             "canonical form of the MAC for a device, the name for everything else. "
-            "Empty for `agent_defaults` and `default_agent`, which hold one thing "
-            "rather than entries."
+            "Empty for `agent_defaults`, `builtin_agent` and `default_agent`, which "
+            "hold one thing rather than entries."
         )
     )
     outcome: Literal["wrote", "unchanged"] = Field(

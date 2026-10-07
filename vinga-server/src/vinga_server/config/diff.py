@@ -74,7 +74,7 @@ from vinga_server.config.secrets import SecretStore, provider_identity
 
 # Which kind converges where: the one decision site, as data.
 #
-# Held to `models.DOMAIN_KEYS` by a test, so a seventh domain kind
+# Held to `models.DOMAIN_KEYS` by a test, so a ninth domain kind
 # arrives with a failing test naming this module rather than falling
 # silently out of the answer. That is the two-structures rule applied to
 # this map: what the domain is has one home, and this reads it.
@@ -83,6 +83,7 @@ APPLIES: Mapping[str, Applies] = {
     "mcp_servers": Applies.RELOAD,
     "prompt_fragments": Applies.RELOAD,
     "agent_defaults": Applies.RELOAD,
+    "builtin_agent": Applies.RELOAD,
     "agents": Applies.RELOAD,
     "devices": Applies.CHECK_IN,
     "default_agent": Applies.CHECK_IN,
@@ -218,6 +219,16 @@ def config_diff(running: Loaded, stored: Loaded, mcp: McpPending) -> ConfigDiff:
             changed=not _same_layer(
                 running.config.agent_defaults, stored.config.agent_defaults
             ),
+        ),
+        # Model equality alone: the built-in's overrides carry no
+        # grants, so there is no second spelling of one to see through.
+        # A change here also shows under `agents` whenever it changes
+        # what the built-in is served as, or whether it is served, since
+        # both sides compose it into their agents (#612); this field is
+        # what says the override itself is pending, whichever it did.
+        builtin_agent=SingletonDiff(
+            applies=APPLIES["builtin_agent"],
+            changed=running.config.builtin_agent != stored.config.builtin_agent,
         ),
         agents=AgentsDiff(
             applies=APPLIES["agents"],
