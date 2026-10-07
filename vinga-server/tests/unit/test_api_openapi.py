@@ -154,6 +154,7 @@ def test_the_document_describes_every_route_the_api_serves() -> None:
         # reader for.
         "/agents/{name}/rename": ["post"],
         "/agent-defaults": ["get", "put"],
+        "/builtin-agent": ["get", "put"],
         "/devices": ["get"],
         "/devices/pending": ["get"],
         "/devices/pending/{code}": ["post"],
@@ -294,6 +295,7 @@ def test_a_write_declares_the_entity_schema_it_takes() -> None:
         ("/mcp-servers/{name}", "put", "McpServerConfig"),
         ("/agents/{name}", "put", "AgentConfig"),
         ("/agent-defaults", "put", "AgentDefaults"),
+        ("/builtin-agent", "put", "BuiltinAgentConfig"),
         ("/devices/{mac}", "put", "DeviceBinding"),
         # Add-by-code takes the same body as bind-by-MAC: the code names
         # the device, and the agents are the same argument.
@@ -753,6 +755,7 @@ def test_the_entity_schemas_are_registered_with_their_definitions() -> None:
         "McpServerConfig",
         "AgentConfig",
         "AgentDefaults",
+        "BuiltinAgentConfig",
         # The three argument-shaped bodies, injected the same way and for
         # the same reason: they document a shape the runtime parser
         # enforces, and are deliberately not declared as body types.

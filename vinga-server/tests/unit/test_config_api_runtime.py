@@ -129,8 +129,12 @@ def seed(database: DatabaseConfig, config: Config) -> None:
         for name, entry in config.mcp_servers.items():
             store.set_mcp_server(name, entry.model_dump(exclude_unset=True))
         store.set_agent_defaults(config.agent_defaults.model_dump(exclude_unset=True))
+        store.set_builtin_agent(config.builtin_agent.model_dump(exclude_unset=True))
+        # The stored agents and not the served ones: the built-in agent
+        # is composed into the served configuration and is never a row.
         for name, agent in config.agents.items():
-            store.set_agent(name, agent.model_dump(exclude_unset=True))
+            if not config.is_builtin(name):
+                store.set_agent(name, agent.model_dump(exclude_unset=True))
         store.set_default_agent(config.default_agent)
     finally:
         engine.dispose()
@@ -896,6 +900,7 @@ def answer(
         ),
         prompt_fragments=EntityDiff(applies=Applies.RELOAD, **NOTHING),
         agent_defaults=SingletonDiff(applies=Applies.RESTART, changed=False),
+        builtin_agent=SingletonDiff(applies=Applies.RELOAD, changed=False),
         agents=AgentsDiff(
             applies=Applies.RESTART,
             **NOTHING,
@@ -989,6 +994,7 @@ def test_the_diff_answers_every_kind_with_its_own_regime(database: DatabaseConfi
             "changed": [],
         },
         "agent_defaults": {"applies": "restart", "changed": False},
+        "builtin_agent": {"applies": "reload", "changed": False},
         "agents": {
             "applies": "restart",
             "added": [],

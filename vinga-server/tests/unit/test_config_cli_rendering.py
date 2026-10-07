@@ -563,7 +563,12 @@ def _every_section(**overrides: object) -> dict[str, object]:
             "fallback_degraded": [],
         },
         "providers": {"built": [], "reused": [], "retired": []},
-        "agents": {"added": [], "removed": [], "defaults_changed": False},
+        "agents": {
+            "added": [],
+            "removed": [],
+            "defaults_changed": False,
+            "builtin_changed": False,
+        },
     } | overrides
 
 
@@ -924,6 +929,7 @@ DIFF_EMPTY: dict[str, object] = {
     "mcp_servers": {"applies": "reload", "added": [], "removed": [], "changed": []},
     "prompt_fragments": {"applies": "reload", "added": [], "removed": [], "changed": []},
     "agent_defaults": {"applies": "reload", "changed": False},
+    "builtin_agent": {"applies": "reload", "changed": False},
     "agents": {
         "applies": "reload",
         "added": [],

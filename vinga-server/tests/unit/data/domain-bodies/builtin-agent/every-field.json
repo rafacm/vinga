@@ -1,0 +1,10 @@
+{
+  "llm": "claude",
+  "asr": "whisper",
+  "tts": "voice",
+  "vad": "silero",
+  "filler": {"enabled": false, "delay_ms": 1800.0, "phrases": []},
+  "fallback": {"enabled": true, "phrase": "I could not answer that."},
+  "memory": {"enabled": true},
+  "prompt_includes": ["household"]
+}

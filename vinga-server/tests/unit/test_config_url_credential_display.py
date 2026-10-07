@@ -957,7 +957,8 @@ def test_the_reference_refusal_lists_the_names_without_their_credential(
     with pytest.raises(ConfigError) as caught:
         load_boot_config()
 
-    assert f"(defined: {HISTORIC_SHOWN})" in str(caught.value)
+    # Beside the built-in agent's name, which always resolves (#612).
+    assert f"(defined: {HISTORIC_SHOWN}, vinga)" in str(caught.value)
     _carries_no_sentinel(chain(caught.value))
 
 
@@ -1135,7 +1136,7 @@ def test_the_check_command_speaks_a_name_that_is_itself_secret_shaped(
     assert cli.main(["check"]) == 1
 
     printed = capsys.readouterr()
-    assert f"(defined: {SECRET_SHAPED})" in printed.err
+    assert f"(defined: {SECRET_SHAPED}, vinga)" in printed.err
     assert spoken_identity(SECRET_SHAPED) == SECRET_SHAPED
 
 

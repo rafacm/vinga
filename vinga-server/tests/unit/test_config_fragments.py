@@ -22,6 +22,7 @@ from vinga_server.config.loader import ConfigError, StorageError, compose_config
 from vinga_server.config.models import (
     AgentConfig,
     AgentDefaults,
+    BuiltinAgentConfig,
     DatabaseConfig,
     FileConfig,
     McpServerConfig,
@@ -71,6 +72,7 @@ class Snapshot:
         self.mcp_servers: dict[str, McpServerConfig] = {}
         self.prompt_fragments = prompt_fragments or {}
         self.agent_defaults = agent_defaults or AgentDefaults()
+        self.builtin_agent = BuiltinAgentConfig()
         self.agents = agents or {}
         self.devices: dict[str, list[str]] = {}
         self.default_agent: str | None = None

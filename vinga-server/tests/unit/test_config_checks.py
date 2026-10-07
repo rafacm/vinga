@@ -13,6 +13,7 @@ from vinga_server.config import Config
 from vinga_server.config.models import (
     AgentConfig,
     AgentDefaults,
+    BuiltinAgentConfig,
     DeviceRecord,
     McpServerConfig,
     PromptFragmentConfig,
@@ -31,6 +32,7 @@ class Snapshot:
     mcp_servers: dict[str, McpServerConfig] = field(default_factory=dict)
     prompt_fragments: dict[str, PromptFragmentConfig] = field(default_factory=dict)
     agent_defaults: AgentDefaults = field(default_factory=AgentDefaults)
+    builtin_agent: BuiltinAgentConfig = field(default_factory=BuiltinAgentConfig)
     agents: dict[str, AgentConfig] = field(default_factory=dict)
     devices: dict[str, DeviceRecord] = field(default_factory=dict)
     default_agent: str | None = None
@@ -90,13 +92,15 @@ def test_an_unknown_binding_and_default_are_reference_problems() -> None:
 
     problems = check_references(snapshot)
 
+    # With no agent stored, the one name that resolves is the built-in
+    # agent's (#612), so that is what the refusal offers.
     assert (
-        "default_agent: names no agent that exists, and the name is not quoted back; "
-        "no agents are defined"
+        "default_agent: names no agent that exists, and the name is not quoted back "
+        "(defined: vinga)"
     ) in problems
     assert (
         "devices.aa:bb:cc:dd:ee:ff: entry 1 names no agent that exists, and the name is "
-        "not quoted back; no agents are defined"
+        "not quoted back (defined: vinga)"
     ) in problems
 
 

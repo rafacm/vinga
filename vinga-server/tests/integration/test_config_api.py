@@ -194,7 +194,12 @@ def test_the_reload_answers_over_a_real_socket(served_api) -> None:
         # And the last section, present and empty for the same reason
         # again: the agent set is what this apply installs, and the
         # store and the world being served agree that there is none.
-        "agents": {"added": [], "removed": [], "defaults_changed": False},
+        "agents": {
+            "added": [],
+            "removed": [],
+            "defaults_changed": False,
+            "builtin_changed": False,
+        },
     }
 
 
