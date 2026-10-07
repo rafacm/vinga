@@ -44,6 +44,7 @@ from vinga_server.config.loader import (
     UnknownEntityError,
 )
 from vinga_server.config.models import (
+    BUILTIN_AGENT,
     DEVICE_LOCATION_BLANK,
     DatabaseConfig,
     DeviceRecord,
@@ -58,7 +59,6 @@ from vinga_server.config.store import (
     DEVICE_NAME_RESERVED,
     DEVICE_NAME_TAKEN,
     DEVICE_TEXT_CREDENTIAL,
-    NOTHING_TO_ENROLL_ONTO,
     ConfigStore,
 )
 from vinga_server.db import open_database, schema
@@ -216,19 +216,18 @@ def test_a_claim_naming_no_agent_binds_the_default_agent(store: ConfigStore) -> 
     assert _record(store).agents == ["nadia"]
 
 
-def test_a_claim_naming_no_agent_with_no_default_writes_nothing(
+def test_a_claim_naming_no_agent_with_no_default_binds_the_built_in_agent(
     store: ConfigStore,
 ) -> None:
-    """Until vinga is the default that always exists (#612, M3), the
-    enrolment's sentence answers, and nothing is created."""
+    """The effective default always exists since #612: unset is vinga,
+    the built-in agent, so the claim binds the board to it, by name, as
+    a claim onto any default agent does."""
     _agents(store)
 
-    with pytest.raises(ConfigError) as refused:
-        store.claim_device(MAC)
+    claimed = store.claim_device(MAC)
 
-    assert NOTHING_TO_ENROLL_ONTO in str(refused.value)
-    assert not isinstance(refused.value, DeviceAlreadyBoundError)
-    assert MAC not in store.load().domain.devices
+    assert claimed.agents == (BUILTIN_AGENT,)
+    assert _record(store).agents == [BUILTIN_AGENT]
 
 
 def test_a_claim_is_not_refused_because_a_default_agent_is_set(

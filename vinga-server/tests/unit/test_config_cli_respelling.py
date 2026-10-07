@@ -116,10 +116,13 @@ RESPELLINGS: tuple[tuple[str, str], ...] = (
         "devices map is now the allowlist\n\n-- stderr\nThis applies at the device's "
         "next OTA check or connection: a running server reads device bindings as it "
         "needs them, so no restart is needed.",
+        # Since #612 unset is vinga, the built-in agent, which this
+        # store's world does not serve, so the clear waits for the
+        # install as a write naming vinga would.
         "== default-agent-clear\nexit 0\n-- stdout\nwrote default agent cleared; a "
-        "claim now has to name its agents\n\n-- stderr\nThe next claim that names no "
-        "agent reads this, so no restart is needed; no device already bound changes, "
-        "since the default agent is only the agent a newly claimed device starts with.",
+        "claim naming no agent now binds vinga, the built-in agent\n\n-- stderr\n"
+        "stored, not serving yet: run `vinga apply` to install it on the running "
+        "server, and `vinga diff` to list everything pending.",
     ),
     ("config set agent-defaults -f", "config agent-defaults set -f"),
     ("config set agent <name>", "config agent set <name>"),

@@ -156,6 +156,12 @@ BUILTIN_UNPROVIDED = (
 )
 BUILTIN_UNKNOWN = "vinga is not served ({status})."
 
+# And how `info` names the default agent when none is stored, which is
+# the built-in agent: unset and `default-agent set vinga` mean the same
+# thing (#612, D7), so the tally says which agent that is rather than
+# that there is none.
+BUILTIN_DEFAULT = "vinga (built in)"
+
 # The label in front of the build that answered. One line and not two:
 # a version and the revision it was cut from are one fact about one
 # process, and a reader who has the first without the second has half an
@@ -850,7 +856,7 @@ def _builtin_line(answered: object) -> list[str]:
 
 def _configured_counts(document: Mapping[str, object]) -> str:
     """What `info` prints of the stored half: how much of each kind
-    there is, and which agent an unbound board reaches.
+    there is, and which agent a newly bound board starts with.
 
     One line, and only of what has something to say. A kind nothing was
     written of is absent rather than printed as a zero: a column of
@@ -903,8 +909,9 @@ def _configured_counts(document: Mapping[str, object]) -> str:
     ]
     devices = len(read["devices"])
     # Asked of the value the answer carried rather than of what it
-    # prints as: a null is a deployment with no default agent, and a
-    # name that renders to nothing is one that has one, for the reason
+    # prints as: a null is a deployment with no default agent stored,
+    # whose default is vinga, the built-in agent (#612), and a name that
+    # renders to nothing is one that has one, for the reason
     # `UNNAMEABLE` is there for.
     named = read["default_agent"]
     if not counted and not devices and named is None:
@@ -913,7 +920,9 @@ def _configured_counts(document: Mapping[str, object]) -> str:
         f"{devices} device{'' if devices == 1 else 's'} bound" if devices else "no devices"
     )
     counted.append(
-        "no default agent" if named is None else f"default agent {printable(named) or UNNAMEABLE}"
+        f"default agent {BUILTIN_DEFAULT}"
+        if named is None
+        else f"default agent {printable(named) or UNNAMEABLE}"
     )
     return f"\n{CONFIGURED} " + ", ".join(counted) + "\n"
 

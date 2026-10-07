@@ -419,7 +419,7 @@ def test_a_kind_nothing_was_written_of_is_absent(
     """
     assert (
         tally(run, monkeypatch, capsys)
-        == "configured: 1 provider, no devices, no default agent"
+        == "configured: 1 provider, no devices, default agent vinga (built in)"
     )
 
 
@@ -486,7 +486,7 @@ def test_the_singleton_is_named_only_when_something_is_set_in_it(
         pytest.param("   ", "default agent ?", id="whitespace-only"),
         pytest.param("\t\n", "default agent ?", id="nothing-but-blanks"),
         pytest.param("", "default agent ?", id="empty"),
-        pytest.param(None, "no default agent", id="no-default-agent"),
+        pytest.param(None, "default agent vinga (built in)", id="no-default-agent"),
     ],
 )
 def test_a_default_agent_that_renders_to_nothing_is_still_one(

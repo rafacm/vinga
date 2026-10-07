@@ -100,6 +100,7 @@ from vinga_server.config.loader import (
 )
 from vinga_server.config.models import (
     API_MOUNT_PATH,
+    BUILTIN_AGENT,
     BuiltinState,
     Config,
     DatabaseConfig,
@@ -547,7 +548,9 @@ _CLAIM_REFUSED = (
 # configuration and not an absence, so the line says what the deployment
 # now is. Underscored because its only reader is the route below: a
 # public name is what a module offers, and this one offers nothing.
-_CLEARED_DEFAULT_AGENT = "default agent cleared; a claim now has to name its agents"
+_CLEARED_DEFAULT_AGENT = (
+    "default agent cleared; a claim naming no agent now binds vinga, the built-in agent"
+)
 
 # How the document describes each refusal a route can answer with. The
 # sentence a caller actually receives is the repository's own; these say
@@ -2801,8 +2804,9 @@ def _writes(api: FastAPI) -> None:
         # A claim that named no agent sent no names to protect, so its
         # refusals travel as themselves: the replacement would say the
         # request named an agent this deployment lacks, which it did not,
-        # and the repository's sentence (no default agent is set) quotes
-        # nothing the request carried.
+        # and the repository's own sentences quote nothing the request
+        # carried. It is bound to the effective default, which always
+        # exists since #612 (vinga when none is set).
         refused = False
         superseded = False
         bound = None
@@ -3054,16 +3058,25 @@ def _writes(api: FastAPI) -> None:
         responses=_problems(401, 409, 500),
     )
     def remove_default_agent(
-        store: StoreDep, snapshot_only: SnapshotOnlyDep
+        store: StoreDep, loaded: LoadedAgentsDep, snapshot_only: SnapshotOnlyDep
     ) -> dict[str, Any]:
-        """Unset it, after which a claim has to name its agents.
-        Idempotent, like the CLI: there is no such thing as a default
-        agent that was already not set. Live, like the delete above:
-        the next claim naming no agent is refused."""
+        """Unset it, after which a claim naming no agent binds a device
+        to vinga, the built-in agent, exactly as `default_agent: vinga`
+        does. Idempotent, like the CLI: there is no such thing as a
+        default agent that was already not set. Live, like the delete
+        above: the next claim naming no agent reads it."""
         store.clear_default_agent()
+        # Unset is vinga, the built-in agent (#612, D7), so the notice is
+        # the one a write naming vinga would get: waiting for the install
+        # while this server is not serving it.
         return _acknowledge(
             _CLEARED_DEFAULT_AGENT,
-            _binding_notice(snapshot_only=snapshot_only, live=DEFAULT_AGENT_NOTICE),
+            _binding_notice(
+                _unloaded([BUILTIN_AGENT], loaded),
+                snapshot_only,
+                unserved=DEFAULT_AGENT_UNSERVED_NOTICE,
+                live=DEFAULT_AGENT_NOTICE,
+            ),
         )
 
     @api.post(

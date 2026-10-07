@@ -197,10 +197,12 @@ def _expected_boundaries(method: str, path: str) -> frozenset[str]:
     apply's business. A binding to an agent this application cannot
     serve names both, since the row is live and the agent it names is
     not. A default agent naming such an agent names the apply alone,
-    since it reaches no device's check-in (#612). A start is on no kind
-    at all, which is the whole of what an earlier milestone did.
+    since it reaches no device's check-in (#612), and so does clearing
+    it, since unset is vinga, the built-in agent, which this application
+    does not serve either. A start is on no kind at all, which is the
+    whole of what an earlier milestone did.
     """
-    if method == "delete" and path.startswith(("/devices/", "/default-agent")):
+    if method == "delete" and path.startswith("/devices/"):
         return frozenset({CHECK_IN})
     if path.startswith("/devices/"):
         return frozenset({CHECK_IN, RELOAD})
@@ -289,16 +291,40 @@ def test_an_unserved_default_agent_is_not_answered_as_a_binding(
 
 def test_removing_a_binding_is_always_live(serving_client: TestClient) -> None:
     """Nothing has to be loaded for a device to stop being served, so
-    neither delete has a case where it waits for a restart."""
+    unbinding has no case where it waits for a restart."""
     _pipeline(serving_client)
     serving_client.put("/devices/aa:bb:cc:dd:ee:ff", json={"agents": ["sam"]})
 
     unbound = serving_client.delete("/devices/aa:bb:cc:dd:ee:ff")
-    cleared = serving_client.delete("/default-agent")
 
     assert boundaries(unbound.json()) == {CHECK_IN}
-    assert boundaries(cleared.json()) == {CHECK_IN}
-    assert cleared.json()["notice"] == DEFAULT_AGENT_NOTICE.sentence
+
+
+@pytest.mark.parametrize(
+    ("served", "expected", "notice"),
+    [
+        (frozenset({"sam", "vinga"}), {CHECK_IN}, DEFAULT_AGENT_NOTICE),
+        (frozenset({"sam"}), {RELOAD}, DEFAULT_AGENT_UNSERVED_NOTICE),
+    ],
+    ids=["built-in-served", "built-in-not-served"],
+)
+def test_clearing_the_default_agent_is_answered_as_naming_vinga(
+    database: DatabaseConfig,
+    served: frozenset[str],
+    expected: set[str],
+    notice: object,
+) -> None:
+    """Unset is vinga, the built-in agent (#612, D7), so clearing the
+    default is acknowledged exactly as setting it to vinga is: live
+    while this server serves vinga, waiting for the install while it
+    does not."""
+    api = build_api(TOKEN, database, lambda: served)
+    with TestClient(api, headers={"Authorization": f"Bearer {TOKEN}"}) as client:
+        _pipeline(client)
+        cleared = client.delete("/default-agent")
+
+    assert boundaries(cleared.json()) == expected
+    assert cleared.json()["notice"] == notice.sentence  # type: ignore[attr-defined]
 
 
 def test_the_notice_is_about_the_row_and_not_about_the_request(
