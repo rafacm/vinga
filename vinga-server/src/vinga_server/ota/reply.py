@@ -136,11 +136,13 @@ def token_for(
 
     A device the configuration does not resolve to an agent is turned
     away at the websocket anyway, so issuing it a token would only widen
-    what an unauthenticated endpoint hands out: the `devices` map plus
-    `default_agent` is the allowlist, and this is where it bites. That
-    device is `denied`, whatever the auth setting says, because being
-    unresolved is the stronger fact: turning authentication off does not
-    give a board an agent to talk to.
+    what an unauthenticated endpoint hands out: the `devices` map is the
+    allowlist, on every deployment since #612, and this is where it
+    bites. `agents` is the bound list and nothing else, so a device with
+    no record of its own arrives here empty whatever `default_agent`
+    says. That device is `denied`, whatever the auth setting says,
+    because being unresolved is the stronger fact: turning
+    authentication off does not give a board an agent to talk to.
 
     The empty string is sent rather than the key omitted, in both the
     no-agent and the auth-disabled case, because the firmware persists

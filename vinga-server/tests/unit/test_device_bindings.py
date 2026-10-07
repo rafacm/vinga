@@ -122,17 +122,44 @@ def test_a_bind_is_seen_by_the_next_connection_with_no_restart(tmp_path: Path) -
             assert hello(websocket)["type"] == "hello"
 
 
-def test_the_default_agent_is_live_too(tmp_path: Path) -> None:
-    """Both inputs of the resolution are read, not just one: an unknown
-    MAC follows `default_agent` as it stands now."""
+@pytest.mark.parametrize("home", ["database", "snapshot"])
+def test_an_unbound_device_reaches_no_agent_while_a_default_is_set(home: str) -> None:
+    """An unbound device only pairs (#612): the default agent is the
+    agent a newly bound device starts with and admits nothing, so a MAC
+    with no record of its own resolves to nothing in both homes of the
+    rule, the stored row's and the served snapshot's, and through both
+    reads, the check-in's and the connect's. One test over both, so the
+    fallback restored in either arm fails it."""
+    config = booted(devices={BOUND_MAC: ["assistant"]}, default_agent="assistant")
+    generations = world(config)
+    view = (
+        DeviceBindings.open(generations)
+        if home == "database"
+        else DeviceBindings.snapshot_only(generations)
+    )
+    try:
+        assert config.default_agent == "assistant"
+        assert view.names_for(DEVICE_MAC).names == ()
+        assert view.attachment_for(DEVICE_MAC).names.names == ()
+        # And a bound device still reaches exactly what it is bound to.
+        assert view.names_for(BOUND_MAC).names == ("assistant",)
+    finally:
+        view.dispose()
+
+
+def test_setting_a_default_agent_admits_no_unbound_device(tmp_path: Path) -> None:
+    """The live half: a default agent written while the server runs
+    leaves an unbound board showing a code rather than handing it a
+    token, which is what it used to do."""
     config = booted()
     with TestClient(create_app(config, from_store=True)) as client:
-        assert token_of(client) == ""
-
         with store_at() as store:
             store.set_default_agent("assistant")
 
-        assert token_of(client) != ""
+        body = check_in(client)
+
+    assert body["websocket"]["token"] == ""
+    assert body["activation"]["code"].isdigit()
 
 
 def test_deleting_a_binding_stops_the_next_token(tmp_path: Path) -> None:
@@ -558,8 +585,8 @@ def test_a_default_agent_that_is_not_a_name_falls_back_too(
     finally:
         bindings.dispose()
 
-    # The snapshot's default agent, rather than silence.
-    assert resolved.names == ("assistant",)
+    # The snapshot's answer, which binds this MAC to nothing.
+    assert resolved.names == ()
     _fell_back_over_an_unreadable_row(caplog)
 
 
@@ -816,14 +843,15 @@ def test_the_attachment_answers_the_binding_and_the_record_at_once() -> None:
 
 
 def test_a_mac_with_no_row_attaches_to_nothing() -> None:
-    """A device a default agent stands behind is served and has no
-    record, and this says so rather than inventing one."""
+    """A MAC with no row reaches no agent, a default agent set or not
+    (#612), and has no record, and this says so rather than inventing
+    one."""
     config = booted(devices={DEVICE_MAC: ["assistant"]}, default_agent="assistant")
     bindings = DeviceBindings.open(world(config))
     try:
         attachment = bindings.attachment_for("11:22:33:44:55:66")
 
-        assert attachment.names.names == ("assistant",)
+        assert attachment.names.names == ()
         assert attachment.record is None
     finally:
         bindings.dispose()

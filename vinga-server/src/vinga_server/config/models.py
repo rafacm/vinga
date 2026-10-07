@@ -4716,15 +4716,26 @@ class Config(DomainConfig):
         whether the connection is made."""
         return {grant.server for agent in self.agents for grant in self.mcp_for_agent(agent)}
 
+    def bound_to(self, mac: str) -> tuple[str, ...]:
+        """The agents this snapshot binds a device to: its record's
+        list, the first of them the one a conversation starts on, or
+        nothing.
+
+        Nothing else, and that is the rule rather than a gap in it: an
+        unbound device only pairs (#612), so `default_agent`, which names
+        the agent a newly bound device starts with, reaches no device
+        that has no record. The one home of what a snapshot binds;
+        `DeviceBindings` answers from here whenever it is not answering
+        from the stored row."""
+        record = self.devices.get(normalize_mac(mac))
+        return () if record is None else tuple(record.agents)
+
     def agents_for_device(self, mac: str) -> list[str]:
         """The agents a device may talk to, the first of them the one a
-        conversation starts on. Unknown devices fall back to default_agent;
-        a device with no binding and no default_agent resolves to nothing,
-        and is turned away."""
-        record = self.devices.get(normalize_mac(mac))
-        if record is not None and record.agents:
-            return list(record.agents)
-        return [self.default_agent] if self.default_agent is not None else []
+        conversation starts on, derived from `bound_to` so the two
+        cannot come to disagree. A device with no binding resolves to
+        nothing, whatever `default_agent` says, and is turned away."""
+        return list(self.bound_to(mac))
 
 
 def _check_binding(mac: str, bound: object) -> None:

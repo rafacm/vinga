@@ -236,13 +236,6 @@ class PendingDevices:
             if device is not None:
                 self._forget(device.code)
 
-    def retire_all(self) -> None:
-        """Forget every device, because a default agent now covers all
-        of them at once."""
-        with self._lock:
-            self._by_mac.clear()
-            self._by_code.clear()
-
     def release(self, code: str) -> None:
         """Put a reserved code back, for a claim whose write failed, and
         give it long enough to be used.

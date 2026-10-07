@@ -88,14 +88,13 @@ async def activation_for(
     is none.
 
     The gate is database truth rather than the servable-agent filter:
-    the two disagree exactly when a binding or a default agent names an
-    agent this server is not serving yet, and that state must not mint a
-    code for a device an operator has already added. Such a device gets
-    no code and no token, and the caller says which reload will serve
-    it. The other side of the same coin is upgrade
-    compatibility: a deployment with a default agent covers every
-    unknown MAC by design, so its devices keep receiving a token and no
-    activation object, exactly as before.
+    the two disagree exactly when a binding names an agent this server
+    is not serving yet, and that state must not mint a code for a device
+    an operator has already added. Such a device gets no code and no
+    token, and the caller says which reload will serve it. Nothing else
+    stands between an unknown MAC and a code: a default agent covers no
+    device since #612, so a device with no binding of its own is offered
+    one on every deployment, whatever `default_agent` says.
 
     Its collaborators arrive as arguments: this answers a question, it
     does not reach into a running server for the material to answer it.
@@ -104,8 +103,7 @@ async def activation_for(
         return Unbound(None, "not_applicable")
     # `agents` are the bound names the world being served can serve and
     # `unloaded` the ones it cannot, so the two being empty together is
-    # the database holding neither a binding row for this MAC nor a
-    # default agent.
+    # the database holding no binding row for this MAC.
     if resolution.agents or resolution.unloaded:
         return Unbound(None, "not_applicable")
     if not resolution.authoritative:

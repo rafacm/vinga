@@ -580,32 +580,31 @@ def test_binding_a_device_by_its_mac_takes_it_out_of_the_listing(
     assert len(entries) == 1
 
 
-def test_setting_a_default_agent_empties_the_listing(
+def test_setting_a_default_agent_leaves_the_listing_alone(
     client: TestClient, pending: PendingDevices
 ) -> None:
-    """It covers every device that has no binding of its own, which is
-    every device in this table."""
-    _waiting(pending)
-    _waiting(pending, OTHER_MAC)
+    """It covers no device since #612, so every board in this table is
+    still waiting, and its code now binds it to that agent when the
+    claim names none."""
+    code = _waiting(pending)
+    other = _waiting(pending, OTHER_MAC)
 
     assert client.put("/default-agent", json={"name": "assistant"}).status_code == 200
 
-    assert client.get("/devices/pending").json() == {}
+    assert set(client.get("/devices/pending").json()) == {code, other}
 
 
 def test_unsetting_a_default_agent_leaves_the_listing_alone(
     client: TestClient, pending: PendingDevices
 ) -> None:
-    """Uncovering a device is not configuring it: a board that was
-    waiting is still waiting, and its code still works."""
+    """A board that was waiting is still waiting, and its code still
+    works."""
     code = _waiting(pending)
     client.put("/default-agent", json={"name": "assistant"})
-    second = _waiting(pending)
 
     assert client.delete("/default-agent").status_code == 200
 
-    assert client.get("/devices/pending").json()[second]["mac"] == MAC
-    assert second != code
+    assert client.get("/devices/pending").json()[code]["mac"] == MAC
 
 
 # And the same housekeeping from an applied document, which binds the
@@ -643,23 +642,22 @@ def test_an_applied_binding_that_changed_nothing_still_retires_the_code(
     assert code not in client.get("/devices/pending").json()
 
 
-def test_an_applied_default_agent_empties_the_listing(
+def test_an_applied_default_agent_leaves_the_listing_alone(
     client: TestClient, pending: PendingDevices
 ) -> None:
-    _waiting(pending)
-    _waiting(pending, OTHER_MAC)
+    code = _waiting(pending)
+    other = _waiting(pending, OTHER_MAC)
 
     assert client.post("/apply", json={"default_agent": "assistant"}).status_code == 200
 
-    assert client.get("/devices/pending").json() == {}
+    assert set(client.get("/devices/pending").json()) == {code, other}
 
 
 def test_an_applied_null_default_agent_leaves_the_listing_alone(
     client: TestClient, pending: PendingDevices
 ) -> None:
-    """Uncovering a device is not configuring it, exactly as the DELETE
-    beside it: the explicit null unsets the setting and retires
-    nothing."""
+    """Exactly as the DELETE beside it: the explicit null unsets the
+    setting and retires nothing."""
     client.post("/apply", json={"default_agent": "assistant"})
     code = _waiting(pending)
 
