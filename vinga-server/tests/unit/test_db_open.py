@@ -90,7 +90,7 @@ EXPECTED_COLUMNS = {
 
 # The head of the packaged domain chain, which is one revision. A new
 # migration moves this line, deliberately.
-HEAD = "3004_reach_replaces_egress"
+HEAD = "3005_builtin_agent"
 
 SCHEMA = DOMAIN_CHAIN.schema
 

@@ -340,7 +340,7 @@ def test_an_include_list_round_trips_write_shaped(store: ConfigStore, layer: str
     if layer == "agent_defaults":
         store.set_agent_defaults({"llm": "claude", "prompt_includes": written})
         table, where = schema.agent_defaults, schema.agent_defaults.c.id
-        identity = schema.AGENT_DEFAULTS_ID
+        identity = schema.SINGLETON_ID
     else:
         store.set_agent("poet", {"prompt": "P", "prompt_includes": written})
         table, where = schema.agents, schema.agents.c.name
@@ -382,7 +382,7 @@ def test_a_body_written_before_the_includes_field_loads_unchanged(
         .where(schema.agents.c.name == "sam")
         .values(body='{"prompt": "You are Sam."}'),
         update(schema.agent_defaults)
-        .where(schema.agent_defaults.c.id == schema.AGENT_DEFAULTS_ID)
+        .where(schema.agent_defaults.c.id == schema.SINGLETON_ID)
         .values(
             body='{"llm": "claude", "asr": "whisper", "tts": "voice", '
             '"vad": "silero", "mcp": ["home"]}'

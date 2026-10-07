@@ -53,7 +53,7 @@ BASELINE = "3001_postgres_domain"
 # the revision under test: `open_database` brings a chain all the way
 # up, so a migration added after `3002` moves this line even though the
 # subject of this file does not move.
-HEAD = "3004_reach_replaces_egress"
+HEAD = "3005_builtin_agent"
 
 STAGE = "llm"
 NAME = "claude"

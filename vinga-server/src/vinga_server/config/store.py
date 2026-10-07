@@ -1915,9 +1915,9 @@ def _row_identity(descriptor: EntityDescriptor, identity: Sequence[str]) -> dict
     """The columns that address one row: the parameters the kind is
     addressed by, under their own names, since a path parameter and the
     column it selects on are the same fact. A kind addressed by nothing
-    is the singleton, whose one row is written under a fixed key."""
+    is a singleton, whose one row is written under a fixed key."""
     if not descriptor.addressing:
-        return {"id": schema.AGENT_DEFAULTS_ID}
+        return {"id": schema.SINGLETON_ID}
     return dict(zip(descriptor.addressing, identity, strict=True))
 
 
