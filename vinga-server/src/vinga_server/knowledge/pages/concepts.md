@@ -259,8 +259,9 @@ device's own record, and the first entry is the default. A device
 with no binding reaches no agent at all: it is offered an activation
 code to be claimed by, and nothing else, so the devices map is always
 the allowlist. The deployment's `default_agent` is the agent a newly
-bound device starts with: a claim that names no agent binds the board
-to it, and it admits nothing by itself
+bound device starts with, and vinga, the built-in agent, when none is
+set: a claim that names no agent binds the board to it, and it admits
+nothing by itself
 ([the decision record](adr/2026-10-07-an-unbound-device-only-pairs.md)).
 
 A fresh wake always gets the default agent: the binding is resolved
