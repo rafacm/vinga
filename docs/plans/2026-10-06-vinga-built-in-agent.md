@@ -693,6 +693,13 @@ which M5 must demonstrate before it ships.**
 This is a decision about the local baseline, so it is recorded for
 Rafael on #612 with these numbers, and the baseline item in
 `product-promises.md` is written only in M5, from the gate M5 meets.
+**M5 and M7 do not start until Rafael confirms it** (plan review round
+2, finding 3): the issue named the local preset's 8B model and a lookup
+for everything beyond the prompt, and the fallback changes what the
+local stack promises. Rafael asked on 2026-10-06 for a more modern
+model than the two 8B ones to be measured, which is how Gemma 4 entered
+the gate; the fallback is new and is his to accept. M1 to M4 and M6 do
+not depend on it.
 
 ## Smaller decisions
 
@@ -1198,15 +1205,22 @@ Reviewed 2026-10-07 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.1
    invite`; pairing by code stays open to a browser as to a board
    (decision 10), and a code admits nothing until the operator claims
    it. So M1's always-minting `try_identity` lets a browser *ask* to
-   join, never join, and M1 is deployable as cut. The M1 tests already
-   assert a minted browser is offered a code and refused a token until
-   it is claimed.
+   join, never join, and M1 is deployable as cut. M1 adds the test: a
+   freshly minted browser identity checks in, is offered a code, and is
+   refused a token until the code is claimed.
 
 3. **P1: The local-stack fallback contradicts the settled local-agent decision.**
 
    Evidence: the issue requires the local preset’s 8B model and a lookup tool for knowledge beyond the prompt. The plan instead selects `gemma4:e4b` and says that, if its new gate fails, local vinga ships without lookup (Gate (`docs/plans/2026-10-06-vinga-built-in-agent.md:667`), fallback (`docs/plans/2026-10-06-vinga-built-in-agent.md:680`)). Its own restatement still says “the rest is a lookup tool” (decision 7 (`docs/plans/2026-10-06-vinga-built-in-agent.md:174`)).
 
    Plan should say: keep the local preset on an 8B model and make M5 a ship gate for lookup reliability, or return to the issue for a decision changing the model-size and lookup requirements. It must not redefine the local baseline after the fact.
+
+   *Resolution:* accepted as an escalation rather than resolved in the plan.
+   The plan keeps the measured recommendation (Gemma 4 e4b, shape A,
+   M5's pass bar, the prompt-only fallback) and now says M5 and M7 do
+   not start until Rafael confirms it on #612, where the gate's numbers
+   are posted (Gate). Decision 7's restatement stands as the target the
+   M5 bar is measured against.
 
 4. **P2: The board-type sentinel test cannot pass against the existing event contract.**
 
