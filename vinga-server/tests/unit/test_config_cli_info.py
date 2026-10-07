@@ -38,8 +38,8 @@ from vinga_server.config.cli import acts, deployment, reach
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.models import ServerConfig
 from vinga_server.config.responses import RuntimeInfo
+from vinga_server.onboarding.invites import Invites, Issuer
 from vinga_server.onboarding.origin import onboarding_url
-from vinga_server.onboarding.try_links import Issuer, TryLinks
 
 # Not a real secret, and shaped so a substring check for what is derived
 # from it cannot match by accident.
@@ -527,7 +527,7 @@ def test_two_runs_against_one_state_are_the_same_bytes(
     """What is filtered off the line is a function of the stored state,
     so filtering is not a determinism violation: two runs against one
     state answer the same bytes, but for the one line that is new on
-    purpose. Since #613 each run issues a try link, and a link is a
+    purpose. Since #613 each run issues an invite link, and a link is a
     fresh single-use token every time, so that line differs and is the
     only one that does.
 
@@ -537,7 +537,7 @@ def test_two_runs_against_one_state_are_the_same_bytes(
     run.
     """
     run.runtime["identity"] = identity(monkeypatch)
-    run.runtime["try_links"] = Issuer(TryLinks(), ServerConfig(), False)
+    run.runtime["invites"] = Issuer(Invites(), ServerConfig(), False)
     configured(run)
     capsys.readouterr()
 
@@ -761,7 +761,7 @@ def test_both_acts_are_answered_by_the_address_the_banner_named(
 
     printed = capsys.readouterr().out
     assert len(reads) == 1, reads
-    # All three requests (the identity, the try link, the counts), and
+    # All three requests (the identity, the invite link, the counts), and
     # the line that named where they would go.
     assert len(run.reached) == 3, run.reached
     assert set(run.reached) == {run.reached[0]}

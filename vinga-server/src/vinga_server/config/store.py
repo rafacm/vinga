@@ -327,7 +327,7 @@ class LiveDevice:
     than a field so that there is one answer computed in one place
     whichever read built the value. The rule is the configuration's:
     binding a board creates its record and calls it `Device <mac>` until
-    somebody names it, a try link calls the browser it binds
+    somebody names it, an invite link calls the browser it binds
     `Browser <mac>`, and both spellings are refused to every writer
     whose own MAC they do not name (`DEVICE_NAME_RESERVED`), so a name
     in either shape is a placeholder this server minted rather than a
@@ -1028,7 +1028,7 @@ class ConfigStore:
         """Create one device, bound to the default agent and named, in
         one transaction, or refuse with nothing written.
 
-        What a try link does with the browser that redeems it (#613,
+        What an invite link does with the browser that redeems it (#613,
         D5b). The link is spent by then, so the write is all or nothing:
         a binding and a name used to be two writes, and a failure
         between them left a device bound under the wrong name with
@@ -1287,7 +1287,7 @@ class ConfigStore:
         something that is not there is a request that addressed nothing;
         `unconfigured` is the activation code's condition, refusing a
         device the configuration has already spoken about. `enrolling`
-        is a try link's: no row may exist either. Both of the last two
+        is an invite link's: no row may exist either. Both of the last two
         create a device, and one arriving with no agents named is bound
         to the default agent, read here under the lock, or refused when
         none is set.
@@ -2428,7 +2428,7 @@ def _swapped_record(record: DeviceRecord, old: str, new: str) -> DeviceRecord:
 
     The one name that MOVES is the one nobody chose. `Device <mac>` is
     what this server calls a board until somebody names it (and
-    `Browser <mac>` a browser a try link bound), the spelling is
+    `Browser <mac>` a browser an invite link bound), the spelling is
     reserved to the device whose own MAC it is
     (`_refuse_reserved_name`), and it is how every reader tells "nobody
     has named this" from a name. Left behind after a swap it would be
@@ -3751,7 +3751,7 @@ def _refuse_device_credential(what: str, value: str | None) -> None:
 def _refuse_reserved_name(mac: str, name: str | None) -> None:
     """One submitted device name, refused if it takes a spelling the
     server mints for a device nobody has named: `Device <mac>` for a
-    board, `Browser <mac>` for a browser a try link bound.
+    board, `Browser <mac>` for a browser an invite link bound.
 
     Asked of what a caller SENT and never of what a row holds, the rule
     `_refuse_device_credential` follows and for the same reason: a name
@@ -3762,7 +3762,7 @@ def _refuse_reserved_name(mac: str, name: str | None) -> None:
     from a store where a board has never been named carries
     `Device <its mac>`, one holding a browser carries `Browser <its
     mac>`, and applying either back has to write the record it came
-    from rather than refuse it. It is also what lets the try link's
+    from rather than refuse it. It is also what lets the invite link's
     enroll write the browser's name through this same check, and the
     honest way to spell "take the name back off this device", which is
     otherwise not sayable at all.

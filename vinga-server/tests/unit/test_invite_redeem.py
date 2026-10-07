@@ -1,4 +1,4 @@
-"""Redeeming a try link from the page (#613, D5, D5b, D5d, D5e).
+"""Redeeming an invite link from the page (#613, D5, D5b, D5d, D5e).
 
 The link is `<origin>/try/#<token>`. A fragment never reaches a server,
 so `GET /try/` is the same inert page for everybody and spends nothing:
@@ -46,10 +46,10 @@ from vinga_server.db import read_engine
 from vinga_server.memory.store import PromptMemory
 from vinga_server.onboarding import onboarding_key, onboarding_path
 from vinga_server.onboarding.browser import CLIENT_ID_NAMESPACE
-from vinga_server.onboarding.try_links import (
+from vinga_server.onboarding.invites import (
     SPENT_ALL_TAKEN,
     SPENT_UNENROLLED,
-    TryLinks,
+    Invites,
     redeem,
 )
 from vinga_server.runtime import prompt
@@ -77,7 +77,7 @@ def redeemed(client: TestClient, token: object, headers: dict[str, str] = SAME_O
 
 
 def browsers() -> dict[str, list[str]]:
-    """Every device named as a try link names one, by MAC, with what
+    """Every device named as an invite link names one, by MAC, with what
     it is bound to, read from the store underneath the server."""
     with store_at() as store:
         devices = store.load().domain.devices
@@ -173,7 +173,7 @@ def test_unknown_expired_and_spent_tokens_are_one_answer(
     with deployment() as (_, client):
         spent = token_of(client)
         assert redeemed(client, spent).status_code == 200
-        monkeypatch.setattr(onboarding, "TRY_LINK_TTL_S", 0.0)
+        monkeypatch.setattr(onboarding, "INVITE_TTL_S", 0.0)
         expired = token_of(client)
 
         answers = [
@@ -197,7 +197,7 @@ def test_fetching_the_page_spends_nothing() -> None:
             page = client.get(path, headers={"Purpose": "prefetch"})
             assert page.status_code == 200
             assert token not in page.text
-        assert app.state.composition.try_links.held == 1
+        assert app.state.composition.invites.held == 1
 
         assert redeemed(client, token).status_code == 200
 
@@ -297,7 +297,7 @@ def test_a_body_that_is_not_a_token_is_the_same_refusal_and_spends_nothing(
 
         assert refused.status_code == 403
         assert refused.json() == {"error": REDEEM_REFUSED}
-        assert app.state.composition.try_links.held == 1
+        assert app.state.composition.invites.held == 1
         assert browsers() == {}
 
 
@@ -360,7 +360,7 @@ def test_a_default_agent_cleared_since_issuance_binds_nothing() -> None:
         assert answer.status_code == 403
         assert answer.json() == {"error": REDEEM_REFUSED}
         assert browsers() == {}
-        assert app.state.composition.try_links.held == 0
+        assert app.state.composition.invites.held == 0
 
 
 def test_a_restart_ends_every_unredeemed_link() -> None:
@@ -426,7 +426,7 @@ def test_a_minted_mac_that_is_taken_is_drawn_again() -> None:
     booted(default_agent="assistant")
     with store_at() as store:
         store.bind_device("02:11:22:33:44:55", ["assistant"])
-        links = TryLinks()
+        links = Invites()
         token = links.issue()
 
         identity = asyncio.run(redeem(links, token, store, repeating(TAKEN, FREE)))
@@ -443,7 +443,7 @@ def test_a_redemption_that_never_draws_a_free_mac_writes_nothing() -> None:
     with store_at() as store:
         store.bind_device("02:11:22:33:44:55", ["assistant"])
         before = store.load().domain.devices
-        links = TryLinks()
+        links = Invites()
         token = links.issue()
 
         identity = asyncio.run(redeem(links, token, store, repeating(TAKEN)))
@@ -454,7 +454,7 @@ def test_a_redemption_that_never_draws_a_free_mac_writes_nothing() -> None:
 
 
 def test_the_draws_are_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(onboarding, "TRY_LINK_MINTS", 2)
+    monkeypatch.setattr(onboarding, "INVITE_MINTS", 2)
     booted(default_agent="assistant")
     drawn: list[int] = []
 
@@ -464,7 +464,7 @@ def test_the_draws_are_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with store_at() as store:
         store.bind_device("02:11:22:33:44:55", ["assistant"])
-        links = TryLinks()
+        links = Invites()
         assert asyncio.run(redeem(links, links.issue(), store, taken)) is None
 
     assert drawn == [6, 6]
@@ -479,7 +479,7 @@ def test_a_redeemed_browser_is_not_introduced_by_its_mac() -> None:
     address aloud."""
     booted(default_agent="assistant")
     with store_at() as store:
-        links = TryLinks()
+        links = Invites()
         identity = asyncio.run(redeem(links, links.issue(), store, repeating(FREE)))
     assert identity is not None
     engine = read_engine(DatabaseConfig())
@@ -512,7 +512,7 @@ def test_a_refusal_that_is_not_a_collision_is_not_drawn_again() -> None:
         return FREE
 
     with store_at() as store:
-        links = TryLinks()
+        links = Invites()
         assert asyncio.run(redeem(links, links.issue(), store, counted)) is None
 
     assert drawn == [6]
@@ -535,7 +535,7 @@ async def _contend(origin: str, token: str) -> list[int]:
     return sorted(answer.status_code for answer in answers)
 
 
-async def _redeemed_together(links: TryLinks, token: str, store) -> list[object]:
+async def _redeemed_together(links: Invites, token: str, store) -> list[object]:
     return await asyncio.gather(*(redeem(links, token, store) for _ in range(CONTENDERS)))
 
 
@@ -549,7 +549,7 @@ def test_of_redemptions_started_together_exactly_one_binds() -> None:
     whose requests happened to overlap."""
     booted(default_agent="assistant")
     with store_at() as store:
-        links = TryLinks()
+        links = Invites()
         token = links.issue()
 
         outcomes = asyncio.run(_redeemed_together(links, token, store))
@@ -578,16 +578,16 @@ def test_of_concurrent_redemptions_exactly_one_binds() -> None:
 
 # --- a spent link that bound nothing is said, by its class only ------------
 
-PLANTED_TOKEN = "dHJ5LXNlbnRpbmVsLW5ldmVyLWEtcmVhbC10b2tlbiE"
+PLANTED_TOKEN = "aW52LXNlbnRpbmVsLW5ldmVyLWEtcmVhbC10b2tlbiE"
 MINTED_MAC = "02:66:77:88:99:aa"
-TRY_LINKS_LOGGER = "vinga_server.onboarding.try_links"
+INVITES_LOGGER = "vinga_server.onboarding.invites"
 
 
 def warnings_of(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
     return [
         record
         for record in caplog.records
-        if record.name == TRY_LINKS_LOGGER and record.levelno == logging.WARNING
+        if record.name == INVITES_LOGGER and record.levelno == logging.WARNING
     ]
 
 
@@ -615,7 +615,7 @@ def test_a_spent_link_that_bound_nothing_is_logged_by_its_failure_class(
     booted(default_agent="assistant")
     monkeypatch.setattr(ConfigStore, "enroll_device", failing)
     with store_at() as store, caplog.at_level(logging.DEBUG):
-        links = TryLinks(randomness=lambda length: b"try-sentinel-never-a-real-token!")
+        links = Invites(randomness=lambda length: b"inv-sentinel-never-a-real-token!")
         token = links.issue()
         assert token == PLANTED_TOKEN
         identity = asyncio.run(redeem(links, token, store, repeating(FREE)))
@@ -638,7 +638,7 @@ def test_a_spent_link_whose_every_draw_was_taken_is_logged(
     booted(default_agent="assistant")
     with store_at() as store, caplog.at_level(logging.DEBUG):
         store.bind_device("02:11:22:33:44:55", ["assistant"])
-        links = TryLinks()
+        links = Invites()
         assert asyncio.run(redeem(links, links.issue(), store, repeating(TAKEN))) is None
 
     (record,) = warnings_of(caplog)
@@ -651,7 +651,7 @@ def test_a_redraw_that_then_binds_logs_nothing(caplog: pytest.LogCaptureFixture)
     booted(default_agent="assistant")
     with store_at() as store, caplog.at_level(logging.DEBUG):
         store.bind_device("02:11:22:33:44:55", ["assistant"])
-        links = TryLinks()
+        links = Invites()
         assert asyncio.run(redeem(links, links.issue(), store, repeating(TAKEN, FREE)))
 
     assert warnings_of(caplog) == []
@@ -662,6 +662,6 @@ def test_a_link_that_was_never_live_logs_nothing(caplog: pytest.LogCaptureFixtur
     told; nothing was spent by it, so there is nothing to say."""
     booted(default_agent="assistant")
     with store_at() as store, caplog.at_level(logging.DEBUG):
-        assert asyncio.run(redeem(TryLinks(), "A" * 43, store)) is None
+        assert asyncio.run(redeem(Invites(), "A" * 43, store)) is None
 
     assert warnings_of(caplog) == []

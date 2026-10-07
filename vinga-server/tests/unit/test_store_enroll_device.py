@@ -1,7 +1,7 @@
 """Creating a device bound to the default agent and named, in one write
 (#613, D5b).
 
-A try link binds the browser that redeems it, and the link is spent by
+An invite link binds the browser that redeems it, and the link is spent by
 then: whatever the write leaves behind is all there is. So the device
 row is created, bound to the default agent and named in one
 transaction, or not at all. Before this method a binding and a name

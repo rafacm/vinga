@@ -114,12 +114,12 @@ def runner(monkeypatch: pytest.MonkeyPatch, database: str | None = None):
         # test puts True here to reach the answer a write gives when
         # nothing running reads what was written.
         "snapshot_only": False,
-        # And what issues a try link, which on a deployment is built
+        # And what issues an invite link, which on a deployment is built
         # from the server's own store of links. None here for the reason
         # the identity is: an application built without a server around
         # it has nothing a browser could redeem a link against, and the
         # action refuses.
-        "try_links": None,
+        "invites": None,
     }
     # Every client the entry point built, kept so a test can read the
     # timeouts a command chose after it has run.
@@ -167,7 +167,7 @@ def runner(monkeypatch: pytest.MonkeyPatch, database: str | None = None):
             agent_prompt=runtime["agent_prompt"],
             identity=runtime["identity"],
             snapshot_only=bool(runtime["snapshot_only"]),
-            try_links=runtime["try_links"],
+            invites=runtime["invites"],
         )
         # A base URL with a path prefix is the deployed shape, where the
         # sub-application is mounted on the server's own port, so the

@@ -90,12 +90,12 @@ from vinga_server.config.loader import (
     DatabaseBusyError,
     DeviceAlreadyBoundError,
     DeviceNameConflictError,
+    InviteRefusedError,
     ProviderRefusedError,
     ReloadInProgressError,
     RunningConfigMovedError,
     SnapshotOnlyError,
     StorageError,
-    TryLinkRefusedError,
     UnknownEntityError,
 )
 from vinga_server.config.models import (
@@ -129,6 +129,7 @@ from vinga_server.config.responses import (
     DeviceReplacement,
     Envelope,
     FieldError,
+    Invite,
     McpServerStatus,
     McpStatusSource,
     MemoryCorrection,
@@ -143,7 +144,6 @@ from vinga_server.config.responses import (
     SecretValue,
     ServableAgents,
     StoredSecretLocation,
-    TryLink,
     request_body,
 )
 from vinga_server.config.secrets import MASK, SecretLocation, load_keys, provider_identity
@@ -162,6 +162,7 @@ from vinga_server.events.live import (
 )
 from vinga_server.events.values import ClassName
 from vinga_server.memory import api as memory
+from vinga_server.onboarding.invites import Issuer
 
 # The pending table, imported like anything else since issue #143 split
 # the onboarding package. It used to be a forward reference, because the
@@ -190,7 +191,6 @@ from vinga_server.memory import api as memory
 # constraint holds by construction.
 from vinga_server.onboarding.pending import PendingDevice as PendingRecord
 from vinga_server.onboarding.pending import PendingDevices
-from vinga_server.onboarding.try_links import Issuer
 
 events = ServerEvents(__name__)
 
@@ -356,13 +356,13 @@ REFUSAL_STATUS: dict[type[ConfigError], int] = {
     # And the same again for the device record's own occupied
     # destination: a name another board already answers to, folded.
     DeviceNameConflictError: 409,
-    # And a try link that was not issued, because the deployment is in a
+    # And an invite link that was not issued, because the deployment is in a
     # state where opening one could not bind a browser: onboarding off,
     # no default agent, or as many links waiting as the store holds.
     # Nothing was changed, which is the whole of what the status says;
     # the second clears when a default agent is set and the third as
     # links are opened or expire, and the sentence says which it is.
-    TryLinkRefusedError: 409,
+    InviteRefusedError: 409,
     StorageError: 500,
     NoRuntimeError: 503,
     # The seventh is an ordinary 422 with a type of its own, which is what
@@ -686,15 +686,15 @@ _NO_RUNTIME_DIFF_DESCRIPTION = _description("no-runtime-diff")
 # invented would be a claim about a server that is not there.
 _NO_RUNTIME_INFO_DESCRIPTION = _description("no-runtime-info")
 
-# And the try link's two (#613). Its 409 is none of the states the
+# And the invite link's two (#613). Its 409 is none of the states the
 # shared sentence lists: it is the deployment, not the database, that
 # refuses, and two of its causes do not clear by being retried. Its 503
 # is an action's rather than a read's, for the reason the reload's is:
 # there is no running server to hold a link, so there is nothing a
 # browser could redeem one against.
-_TRY_LINK_REFUSED_DESCRIPTION = _description("try-link-refused")
+_INVITE_REFUSED_DESCRIPTION = _description("invite-refused")
 
-_NO_RUNTIME_TRY_LINK_DESCRIPTION = _description("no-runtime-try-link")
+_NO_RUNTIME_INVITE_DESCRIPTION = _description("no-runtime-invite")
 
 # The rename's two, and both are about what a caller should DO next,
 # which is the half a shared sentence gets wrong here.
@@ -727,8 +727,8 @@ _RENAME_REFUSED_DESCRIPTION = _description("rename-refused")
 # What the caller is told, which is not the shared sentence, for the
 # reason the diff's is not. Nothing of the deployment is named: what is
 # missing is the server, not something the caller asked for wrongly.
-_NO_RUNTIME_TRY_LINK = (
-    "this API has no running server around it, so there is nothing to hold a try link "
+_NO_RUNTIME_INVITE = (
+    "this API has no running server around it, so there is nothing to hold an invite link "
     "and nothing a browser could redeem one against. A deployment reaches this action "
     "on its server's own port."
 )
@@ -999,11 +999,11 @@ class ApiRuntime:
     # than the constant read at the route, so a test injects a short one
     # instead of waiting out the default.
     keepalive_s: float = KEEPALIVE_S
-    # What issues a try link (#613): the store of live links this
+    # What issues an invite link (#613): the store of live links this
     # server redeems against, with what it decides by. None for an
     # application built without a server around it, which would issue a
     # link nothing could ever redeem, so the route refuses instead.
-    try_links: Issuer | None = None
+    invites: Issuer | None = None
 
 
 def build_api(
@@ -1019,7 +1019,7 @@ def build_api(
     identity: RuntimeInfo | None = None,
     live: LiveEvents | None = None,
     keepalive_s: float = KEEPALIVE_S,
-    try_links: Issuer | None = None,
+    invites: Issuer | None = None,
 ) -> FastAPI:
     """The sub-application the server mounts: the routes, gated.
 
@@ -1106,7 +1106,7 @@ def build_api(
         identity,
         live,
         keepalive_s,
-        try_links=try_links,
+        invites=invites,
     )
     # A lifespan of its own, which runs only when this application is the
     # top-level one: it opens the configuration database and installs the
@@ -1139,7 +1139,7 @@ def build_api_runtime(
     live: LiveEvents | None = None,
     keepalive_s: float = KEEPALIVE_S,
     memory_erased: Callable[[], None] | None = None,
-    try_links: Issuer | None = None,
+    invites: Issuer | None = None,
 ) -> ApiRuntime:
     """What a request to this application resolves out of the server
     around it, assembled.
@@ -1189,7 +1189,7 @@ def build_api_runtime(
         identity=identity,
         live=live,
         keepalive_s=keepalive_s,
-        try_links=try_links,
+        invites=invites,
     )
 
 
@@ -1396,15 +1396,15 @@ def _identity(request: Request) -> RuntimeInfo | None:
 IdentityDep = Annotated[RuntimeInfo | None, Depends(_identity)]
 
 
-def _try_links(request: Request) -> Issuer | None:
-    """What issues a try link, or None for an application built without
+def _invites(request: Request) -> Issuer | None:
+    """What issues an invite link, or None for an application built without
     a server around it. Taken from the application for the reason the
     store is."""
     runtime: ApiRuntime = request.app.state.api_runtime
-    return runtime.try_links
+    return runtime.invites
 
 
-TryLinkDep = Annotated[Issuer | None, Depends(_try_links)]
+InviteDep = Annotated[Issuer | None, Depends(_invites)]
 def _live(request: Request) -> LiveEvents | None:
     """Everyone watching the running server's events, or None for an
     application built without one. Taken from the application for the
@@ -1769,20 +1769,20 @@ def _runtime(api: FastAPI) -> None:
 
     @api.post(
         "/runtime/try-links",
-        response_model=TryLink,
+        response_model=Invite,
         responses=_problems(
             401,
             409,
             500,
             503,
             instead={
-                409: _TRY_LINK_REFUSED_DESCRIPTION,
-                503: _NO_RUNTIME_TRY_LINK_DESCRIPTION,
+                409: _INVITE_REFUSED_DESCRIPTION,
+                503: _NO_RUNTIME_INVITE_DESCRIPTION,
             },
         ),
     )
-    def issue_try_link(issuer: TryLinkDep, store: StoreDep, response: Response) -> TryLink:
-        """Issue a try link: a page a browser opens to join this
+    def issue_invite(issuer: InviteDep, store: StoreDep, response: Response) -> Invite:
+        """Issue an invite link: a page a browser opens to join this
         deployment as a device, bound to the default agent before its
         first word.
 
@@ -1817,7 +1817,7 @@ def _runtime(api: FastAPI) -> None:
         # request that asked, because it is the one fact the decision
         # needs that moves while the process runs.
         if issuer is None:
-            raise NoRuntimeError(_NO_RUNTIME_TRY_LINK)
+            raise NoRuntimeError(_NO_RUNTIME_INVITE)
         link = issuer.issue(store.read_default_agent())
         response.headers["cache-control"] = NO_STORE
         return link

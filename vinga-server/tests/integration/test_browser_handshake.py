@@ -39,7 +39,7 @@ BROWSER_MAC = "02:41:9c:7d:3e:58"
 BROWSER_CLIENT = "3d9e1f5a-6b2c-5d8e-9f1a-0c4b6d8e2f7a"
 BOARD_MAC = "aa:bb:cc:dd:ee:02"
 
-# Both devices bound by name, the browser as a redeemed try link binds
+# Both devices bound by name, the browser as a redeemed invite link binds
 # it: an unbound device only pairs (#612).
 CONFIG = Config(
     providers=MOCK_PROVIDERS,

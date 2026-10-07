@@ -55,7 +55,7 @@ def connect(client: TestClient, subprotocols: list[str], headers: dict[str, str]
 
 def bound_browser() -> Config:
     """`config_with_agent` with the browser bound as well, the way a
-    redeemed try link binds it: an unbound browser only pairs (#612), and
+    redeemed invite link binds it: an unbound browser only pairs (#612), and
     what these tests are about is a browser that is admitted."""
     config = config_with_agent()
     config.devices[BROWSER_MAC] = DeviceRecord(agents=["assistant"])

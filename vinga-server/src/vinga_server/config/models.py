@@ -3643,7 +3643,7 @@ def mint_device_id() -> str:
 
 # The words a name this server mints for a device starts with, one per
 # way a device comes to be bound: a board bound by an operator (or by a
-# claim) is a `Device`, and a browser a try link binds is a `Browser`,
+# claim) is a `Device`, and a browser an invite link binds is a `Browser`,
 # so an operator tells the two apart at a glance in a listing. The one
 # home of both spellings: the names below are built from these, and so
 # is what reads a name as one nobody chose, so the two cannot drift.
@@ -3670,7 +3670,7 @@ def default_device_name(mac: str) -> str:
 
 
 def browser_device_name(mac: str) -> str:
-    """What a browser a try link binds is called (#613, D5b), until
+    """What a browser an invite link binds is called (#613, D5b), until
     somebody names it."""
     return _minted_device_name(BROWSER_NAME_WORD, mac)
 
@@ -3693,7 +3693,7 @@ def minted_device_names(mac: str) -> tuple[str, ...]:
 def is_default_device_name(name: str) -> bool:
     """Whether a name is a shape the server mints rather than one a
     person chose: `Device <mac>` for a board, `Browser <mac>` for a
-    browser a try link bound.
+    browser an invite link bound.
 
     The spellings are reserved: every writer that submits a name is
     refused either shape unless it is one of the device's own minted
@@ -4076,7 +4076,7 @@ class DeviceRecord(BaseModel):
             "What this device is called, free-form, spoken aloud by the agent. Names "
             "are unique once case and spacing are folded together. Leave it out and "
             "the stored name is kept, or `Device <mac>` is taken for a new record. "
-            "That spelling is reserved, and so is `Browser <mac>`, what a try link "
+            "That spelling is reserved, and so is `Browser <mac>`, what an invite link "
             "calls the browser it binds: a name of either form is refused for any "
             "device whose own MAC it is not, because it is what the server calls a "
             "device nobody has named and an agent is told the name rather than made "

@@ -561,10 +561,10 @@ connected at the time and a later swap does not make that untrue.
 loud about it. Free-form, because a slug reads badly in speech, and unique
 across the deployment once case and whitespace are folded together. The
 `Device <mac>` spelling is reserved for the board whose MAC it is, and
-`Browser <mac>`, what a try link calls the browser it binds, for the device
-whose MAC it is: an agent is told which device it is speaking through, so a
-name in either shape means nobody has named this device and the agent says
-nothing about it rather than reading a MAC address out loud.
+`Browser <mac>`, what an invite link calls the browser it binds, for the
+device whose MAC it is: an agent is told which device it is speaking through,
+so a name in either shape means nobody has named this device and the agent
+says nothing about it rather than reading a MAC address out loud.
 
 `vinga device relocate <mac> <location>` says where a board stands and `vinga
 device clear-location <mac>` unsets it. Free text and not unique: two devices

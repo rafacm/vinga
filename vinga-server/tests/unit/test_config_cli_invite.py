@@ -1,6 +1,6 @@
-"""`vinga info`'s try link line (#613, D5, D5a, D5c, D6b, D7a).
+"""`vinga info`'s invite link line (#613, D5, D5a, D5c, D6b, D7a).
 
-`info` issues a try link and prints it, `<origin>/try/#<token>`, on a
+`info` issues an invite link and prints it, `<origin>/try/#<token>`, on a
 line of its own under a label saying what it does. Which origin is
 split between the two ends: the server names its configured public
 origin when that opens a secure context in a browser, and otherwise
@@ -30,11 +30,11 @@ from vinga_server.config.cli import acts, deployment
 from vinga_server.config.loader import ConfigError
 from vinga_server.config.models import ServerConfig
 from vinga_server.config.responses import RuntimeInfo
-from vinga_server.onboarding.try_links import (
+from vinga_server.onboarding.invites import (
     NO_DEFAULT_AGENT,
     ONBOARDING_OFF,
+    Invites,
     Issuer,
-    TryLinks,
 )
 
 LINK = re.compile(r"^(?P<origin>\S+)/try/#(?P<token>[A-Za-z0-9_-]{43})$")
@@ -57,12 +57,12 @@ def identity() -> RuntimeInfo:
     )
 
 
-def deploy(run, server: ServerConfig | None = None, *, default_agent: bool = True) -> TryLinks:
+def deploy(run, server: ServerConfig | None = None, *, default_agent: bool = True) -> Invites:
     """A deployment around the API: its identity, a store with an agent
     in it, and the issuer the composition root would build."""
-    links = TryLinks()
+    links = Invites()
     run.runtime["identity"] = identity()
-    run.runtime["try_links"] = Issuer(links, server or ServerConfig(), False)
+    run.runtime["invites"] = Issuer(links, server or ServerConfig(), False)
     assert run("agent", "set", "sam", "prompt=You are Sam.") == 0
     if default_agent:
         assert run("default-agent", "set", "sam") == 0
@@ -91,7 +91,7 @@ def test_a_loopback_target_prints_a_localhost_link(
     assert LINK.match(link).group("origin") == f"http://localhost:{port()}"
     # The label is the line above, saying what the link does; the link
     # stands alone so it can be selected whole.
-    assert lines[lines.index(link) - 1] == f"{deployment.TRY_LINK_LABEL}:"
+    assert lines[lines.index(link) - 1] == f"{deployment.INVITE_LABEL}:"
     assert links.held == 1
     assert printed.err == ""
 
@@ -141,7 +141,7 @@ def test_a_target_that_is_not_loopback_with_no_configured_origin_prints_no_link(
     printed = capsys.readouterr()
     assert link_lines(printed.out) == []
     assert "/try/#" not in printed.out + printed.err
-    assert f"{deployment.TRY_LINK_LABEL}: {deployment.NO_LINK_ORIGIN}" in printed.out.splitlines()
+    assert f"{deployment.INVITE_LABEL}: {deployment.NO_LINK_ORIGIN}" in printed.out.splitlines()
 
 
 def test_a_configured_origin_is_used_whatever_the_target(
@@ -167,10 +167,10 @@ def test_with_no_default_agent_the_refusal_and_its_remedy_stand_in_its_place(
     printed = capsys.readouterr()
     assert link_lines(printed.out) == []
     line = next(
-        line for line in printed.out.splitlines() if line.startswith(deployment.TRY_LINK_LABEL)
+        line for line in printed.out.splitlines() if line.startswith(deployment.INVITE_LABEL)
     )
     assert line == (
-        f"{deployment.TRY_LINK_LABEL}: {NO_DEFAULT_AGENT} Set one with "
+        f"{deployment.INVITE_LABEL}: {NO_DEFAULT_AGENT} Set one with "
         f"`vinga default-agent set <name>`, and a browser opening a link is bound to that "
         f"agent."
     )
@@ -190,7 +190,7 @@ def test_with_onboarding_off_the_refusal_stands_in_its_place(
     assert run("info") == 0
 
     out = capsys.readouterr().out
-    assert f"{deployment.TRY_LINK_LABEL}: {ONBOARDING_OFF}" in out.splitlines()
+    assert f"{deployment.INVITE_LABEL}: {ONBOARDING_OFF}" in out.splitlines()
     assert link_lines(out) == []
 
 
@@ -198,7 +198,7 @@ def test_a_server_that_issues_no_links_does_not_fail_info(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """An application with no server around it, or a server from before
-    try links existed: a refusal this API wrote, of the one act whose
+    invite links existed: a refusal this API wrote, of the one act whose
     refusal is a line of the answer rather than the end of it."""
     run.runtime["identity"] = identity()
     capsys.readouterr()
@@ -206,7 +206,7 @@ def test_a_server_that_issues_no_links_does_not_fail_info(
     assert run("info") == 0
 
     out = capsys.readouterr().out
-    line = next(line for line in out.splitlines() if line.startswith(deployment.TRY_LINK_LABEL))
+    line = next(line for line in out.splitlines() if line.startswith(deployment.INVITE_LABEL))
     assert "no running server around it" in line
 
 
@@ -245,7 +245,7 @@ def test_each_run_is_a_new_link(run, capsys: pytest.CaptureFixture[str]) -> None
     assert links.held == 2
 
 
-def test_a_try_link_request_that_never_got_an_answer_still_ends_info(
+def test_an_invite_request_that_never_got_an_answer_still_ends_info(
     run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Only a refusal the API wrote is a line of the answer. A request
@@ -266,7 +266,7 @@ def test_a_try_link_request_that_never_got_an_answer_still_ends_info(
 
     printed = capsys.readouterr()
     assert "could not be reached" in printed.err
-    assert deployment.TRY_LINK_LABEL not in printed.out
+    assert deployment.INVITE_LABEL not in printed.out
     assert "configured:" not in printed.out
 
 

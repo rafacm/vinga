@@ -378,8 +378,8 @@ class SnapshotOnlyError(ConfigError):
     """
 
 
-class TryLinkRefusedError(ConfigError):
-    """A try link was not issued, because this deployment is in a state
+class InviteRefusedError(ConfigError):
+    """An invite link was not issued, because this deployment is in a state
     where opening one could not do what the link promises (#613).
 
     A link's promise is that the browser opening it is bound to an agent

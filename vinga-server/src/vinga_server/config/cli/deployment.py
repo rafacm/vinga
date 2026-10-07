@@ -33,8 +33,8 @@ from vinga_server.config.responses import (
     ConfigDiff,
     ConfigDocument,
     ConfigReloadResult,
+    Invite,
     RuntimeInfo,
-    TryLink,
 )
 from vinga_server.config.transport import APPLY_LOCATION, check_transportable
 
@@ -140,11 +140,11 @@ ONBOARDING_OFF_HERE = (
     "which is not printed here, since it is this deployment's secret."
 )
 
-# The label in front of the try link (#613), which says what the link
+# The label in front of the invite link (#613), which says what the link
 # does, so the link itself stands alone on the line under it for the
 # reason the onboarding URL does: it is selected whole and opened, and a
 # label in front of it is a label pasted into an address bar.
-TRY_LINK_LABEL = "try link (opens this deployment in a browser, once, within ten minutes)"
+INVITE_LABEL = "invite link (opens this deployment in a browser, once, within ten minutes)"
 
 # And what stands after the label when neither end can name an origin a
 # browser can open the page on: the server has no `https://` public URL
@@ -824,7 +824,7 @@ def _identity_block(info: Mapping[str, object]) -> str:
 
 
 def _situated_link(link: Mapping[str, object], address: Address) -> Mapping[str, object]:
-    """A try link with its origin named, where this client can name it.
+    """An invite link with its origin named, where this client can name it.
 
     The server names its configured public origin when it has one a
     browser can use, and nothing otherwise; what it cannot know is the
@@ -848,8 +848,8 @@ def _situated_link(link: Mapping[str, object], address: Address) -> Mapping[str,
     return {**link, "origin": f"{parts.scheme}://{authority}"}
 
 
-def _try_link_block(link: Mapping[str, object]) -> str:
-    """What `info` prints of a try link: the label, and the link alone
+def _invite_block(link: Mapping[str, object]) -> str:
+    """What `info` prints of an invite link: the label, and the link alone
     on the line under it, or the sentence that stands in its place.
 
     Made printable like every other value an answer carries; not
@@ -859,18 +859,18 @@ def _try_link_block(link: Mapping[str, object]) -> str:
     is printed (D7a).
     """
     if link["origin"] is None:
-        return f"\n{TRY_LINK_LABEL}: {NO_LINK_ORIGIN}\n"
-    return f"\n{TRY_LINK_LABEL}:\n{printable(f'{link["origin"]}{link["page"]}', UNBOUNDED)}\n"
+        return f"\n{INVITE_LABEL}: {NO_LINK_ORIGIN}\n"
+    return f"\n{INVITE_LABEL}:\n{printable(f'{link["origin"]}{link["page"]}', UNBOUNDED)}\n"
 
 
-def _try_link_declined(sentence: str) -> None:
-    """The server's refusal of a try link, where the link would be.
+def _invite_declined(sentence: str) -> None:
+    """The server's refusal of an invite link, where the link would be.
 
     A refusal of this act is a state of the deployment (no default
     agent yet, onboarding off, the store full) rather than a failure of
     `info`, so it is a line of the answer and the command goes on.
     """
-    print(f"\n{TRY_LINK_LABEL}: {printable(sentence, UNBOUNDED)}")
+    print(f"\n{INVITE_LABEL}: {printable(sentence, UNBOUNDED)}")
 
 
 def _configured_counts(document: Mapping[str, object]) -> str:
@@ -1078,7 +1078,7 @@ def _info_path(args: Invocation) -> str:
     return _path("runtime", "info")
 
 
-def _try_links_path(args: Invocation) -> str:
+def _invites_path(args: Invocation) -> str:
     return _path("runtime", "try-links")
 
 
@@ -1124,17 +1124,17 @@ IDENTITY = Act(
     render=_printed(_identity_block),
 )
 
-# A try link, issued for whoever runs `info` (#613). The one act in this
+# An invite link, issued for whoever runs `info` (#613). The one act in this
 # grammar that writes running state from a command that otherwise only
 # reads: each run is a new link, which is the point of printing one. Its
 # refusal is a line of the answer rather than the end of the command.
-TRY_LINK = Act(
+INVITE = Act(
     method="POST",
-    path=_try_links_path,
-    answers=TryLink,
-    render=_printed(_try_link_block),
+    path=_invites_path,
+    answers=Invite,
+    render=_printed(_invite_block),
     completes=_situated_link,
-    declined=_try_link_declined,
+    declined=_invite_declined,
 )
 
 
