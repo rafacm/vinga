@@ -10,14 +10,32 @@ This package imports nothing beyond the standard library, so
 the configuration client is held to.
 
 What a caller stops knowing: where the pages live and that they are a
-copy, and how a page is cut into sections.
+copy, how a page is cut into sections, and how a reported board type
+maps to a guide.
 
 - `library` reads the copy once per process and cuts it into sections.
+- `boards` names the board guides and answers a board type with its
+  guide's facts, or with fixed text when no guide is named for it.
 
 This `__init__` is the interface. Submodules import their siblings
 directly and take nothing from here, so only this file aggregates.
 """
 
+from vinga_server.knowledge.boards import (
+    NOT_BOARD_GUIDES,
+    VAGUE_BOARD_FACTS,
+    board_facts,
+    board_guides,
+)
 from vinga_server.knowledge.library import Section, pages, section, sections
 
-__all__ = ["Section", "pages", "section", "sections"]
+__all__ = [
+    "NOT_BOARD_GUIDES",
+    "VAGUE_BOARD_FACTS",
+    "Section",
+    "board_facts",
+    "board_guides",
+    "pages",
+    "section",
+    "sections",
+]
