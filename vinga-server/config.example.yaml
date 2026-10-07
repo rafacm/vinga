@@ -13,9 +13,10 @@
 # reference server`), which carries every key with its type, default,
 # bounds and the combinations refused at boot. The domain half,
 # everything about what the server says and to whom
-# (providers, mcp_servers, prompt_fragments, agent_defaults, agents,
-# devices, default_agent), lives in the Postgres database
-# server.database names and is written with the config commands. A whole
+# (providers, mcp_servers, prompt_fragments, agent_defaults,
+# builtin_agent, agents, devices, default_agent), lives in the Postgres
+# database server.database names and is written with the config
+# commands. A whole
 # deployment is one document, imported and then installed:
 #
 #   vinga-server config import -f examples/presets/local-stack.yaml
@@ -26,10 +27,18 @@
 # and one entity at a time is what editing it afterwards looks like:
 #
 #   vinga-server config provider set llm claude -f examples/llm-anthropic.yaml
+#   vinga-server config builtin-agent set -f examples/builtin-agent.yaml
 #   vinga-server config agent set sam -f examples/agent.yaml
 #   vinga-server config device bind aa:bb:cc:dd:ee:ff sam
 #   vinga-server config device rename aa:bb:cc:dd:ee:ff "Kitchen speaker"
 #   vinga-server config device relocate aa:bb:cc:dd:ee:ff "the kitchen"
+#
+# The second of those writes vinga, the built-in agent every deployment
+# has: the server composes it from the build it ships in, and
+# builtin_agent holds only the providers, voice and shared fragments it
+# uses in place of agent_defaults, which is how its reply language is
+# set. It is served once every stage resolves, there or through
+# agent_defaults.
 #
 # A device is a record rather than a binding: binding a board creates
 # one, with a server-minted id that stays the same while the rest of the

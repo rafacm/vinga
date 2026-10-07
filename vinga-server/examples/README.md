@@ -104,6 +104,7 @@ the reference it displaces.
 | `mcp-server-streamable-http.yaml` | `mcp_servers`, an HTTP endpoint |
 | `prompt-fragment.yaml` | `prompt_fragments`, one shared block of prompt text |
 | `agent-defaults.yaml` | `agent_defaults`, the singleton |
+| `builtin-agent.yaml` | `builtin_agent`, the built-in agent's overrides |
 | `agent.yaml` | `agents`, one agent |
 
 Devices and the default agent have no fragments: they are written with

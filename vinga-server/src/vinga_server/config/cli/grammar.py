@@ -928,15 +928,15 @@ def _invocation(
 #
 # Typer reads a signature, so an argument shape is a function and a
 # command is one of these applied to its row. There are fewer of them
-# than there are commands because the grammar repeats itself: five kinds
+# than there are commands because the grammar repeats itself: six kinds
 # addressed by a name, one addressed by a stage and a name, two settings
 # addressed by a MAC and by six digits on a screen.
 
 
 def _plain(row: Command) -> Callable[..., None]:
     """A command that addresses nothing: the reads of the whole
-    configuration and of the running server, the apply, and the
-    singleton, which is the one entity there is only one of."""
+    configuration and of the running server, the apply, and the two
+    singletons, each an entity there is only one of."""
 
     def run(
         context: typer.Context,

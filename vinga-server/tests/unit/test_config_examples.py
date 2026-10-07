@@ -55,7 +55,14 @@ COMMAND = re.compile(rf"^#\s+{reach.PROGRAM} (\S+ set\b.*?) -f ")
 # Providers, MCP servers and prompt fragments have to exist before
 # anything references them: a write leaving a reference unresolved is
 # refused, by design.
-ORDER = ("provider", "mcp-server", "prompt-fragment", "agent-defaults", "agent")
+ORDER = (
+    "provider",
+    "mcp-server",
+    "prompt-fragment",
+    "agent-defaults",
+    "builtin-agent",
+    "agent",
+)
 
 # One key of the example configuration, as written or as commented out.
 # The example's own convention is that a field whose default is right

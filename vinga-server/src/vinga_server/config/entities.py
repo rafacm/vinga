@@ -9,10 +9,10 @@ the one place for what a model cannot carry: how the kind is addressed,
 which surfaces it has, and the prose that is about the kind rather than
 about any field of it.
 
-Three tiers, because the package really has three. Five kinds are
+Three tiers, because the package really has three. Six kinds are
 written with a command of their own and read back through the API
 (`EntityDescriptor`). Two shapes are only ever nested inside one of
-those five, and so have no command, no route and no example file of
+those six, and so have no command, no route and no example file of
 their own (`NestedShape`). Two domain-level fields are a mapping and a
 scalar rather than an entity, written with their own verbs and read
 without an envelope (`Setting`). One registry tuple per tier, in the
@@ -52,10 +52,12 @@ from typing import ClassVar
 from pydantic import BaseModel
 
 from vinga_server.config.models import (
+    BUILTIN_AGENT,
     PROGRAM,
     SERVER_PROGRAM,
     AgentConfig,
     AgentDefaults,
+    BuiltinAgentConfig,
     FallbackConfig,
     FillerConfig,
     McpGrant,
@@ -678,6 +680,44 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         has_delete=False,
         notice=APPLY_NOTICE,
     ),
+    EntityDescriptor(
+        name="builtin-agent",
+        title="Built-in agent",
+        location="builtin_agent",
+        model=BuiltinAgentConfig,
+        purpose=(
+            f"What {BUILTIN_AGENT}, the built-in agent, uses in place of what every "
+            "agent inherits from agent_defaults. The server composes it from the build "
+            "it ships in, so this entry holds no prompt and no MCP grants: only its "
+            "providers, its voice, its filler, fallback and memory sections, and the "
+            "shared fragments its prompt carries, which is how its reply language is "
+            "set."
+        ),
+        command=f"{PROGRAM} builtin-agent set -f fragment.yaml",
+        examples=("builtin-agent.yaml",),
+        notes=(
+            "This entry is a singleton, like agent_defaults: there is one of it, "
+            "writing it replaces it whole, and it is not keyed by anything.",
+            f"{BUILTIN_AGENT} is served whenever every provider stage resolves, through "
+            "this entry or through agent_defaults, and no stored agent is named "
+            f"{BUILTIN_AGENT}. A stage that resolves nowhere leaves it unserved rather "
+            "than refusing the boot, and the server says which stages are missing.",
+            f"An agent named {BUILTIN_AGENT} that was stored before the built-in agent "
+            "existed is the operator's own agent and is served in its place. Renaming "
+            "that agent and applying brings the built-in back, and keeps what the "
+            "renamed agent remembered and the threads it can resume. No new agent "
+            f"may be created under the name {BUILTIN_AGENT}, or renamed to it.",
+            f"What {BUILTIN_AGENT} remembers and the conversations it can resume are its "
+            "device's: it writes and reads that device's memory, and searches only the "
+            "threads held on that device.",
+        ),
+        route="/builtin-agent",
+        addressing=(),
+        moved_key="builtin_agent",
+        table="builtin_agent",
+        has_delete=False,
+        notice=APPLY_NOTICE,
+    ),
 )
 
 
@@ -711,7 +751,7 @@ NESTED: tuple[NestedShape, ...] = (
     NestedShape(
         name="filler",
         title="Filler",
-        location="agent_defaults.filler, agents.<name>.filler",
+        location="agent_defaults.filler, builtin_agent.filler, agents.<name>.filler",
         model=FillerConfig,
         purpose=(
             "Masking reply latency with a pre-synthesized filled pause. Nested inside "
@@ -725,7 +765,7 @@ NESTED: tuple[NestedShape, ...] = (
     NestedShape(
         name="fallback",
         title="Fallback",
-        location="agent_defaults.fallback, agents.<name>.fallback",
+        location="agent_defaults.fallback, builtin_agent.fallback, agents.<name>.fallback",
         model=FallbackConfig,
         purpose=(
             "What a failed reply says out loud and on the display. Nested inside an "
@@ -750,7 +790,7 @@ NESTED: tuple[NestedShape, ...] = (
     NestedShape(
         name="memory",
         title="Memory",
-        location="agent_defaults.memory, agents.<name>.memory",
+        location="agent_defaults.memory, builtin_agent.memory, agents.<name>.memory",
         model=MemoryPolicy,
         purpose=(
             "Whether an agent remembers anything at all. Nested inside an agent or "
