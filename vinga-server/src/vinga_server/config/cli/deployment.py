@@ -138,6 +138,24 @@ ONBOARDING_OFF_HERE = (
     "which is not printed here, since it is this deployment's secret."
 )
 
+# What `info` says when the installed world does not serve vinga, the
+# built-in agent (#612): one sentence per token the server answers, each
+# naming the remedy in this client's own grammar, since the server
+# states the state and the side that owns the grammar names what to run
+# about it (#386). A token this client does not know is said as it came.
+BUILTIN_LABEL = "built-in agent"
+BUILTIN_DISPLACED = (
+    "vinga is not served, because an agent stored under that name is served in its "
+    f"place. Rename that agent, which keeps what it remembers and its threads, with "
+    f"`{PROGRAM} agent rename vinga <new>` and then `{PROGRAM} apply`."
+)
+BUILTIN_UNPROVIDED = (
+    "vinga is not served, because no provider is named for {stages}, in builtin_agent "
+    f"or in agent_defaults. Name one with `{PROGRAM} builtin-agent set` or "
+    f"`{PROGRAM} agent-defaults set`, and then `{PROGRAM} apply`."
+)
+BUILTIN_UNKNOWN = "vinga is not served ({status})."
+
 # The label in front of the build that answered. One line and not two:
 # a version and the revision it was cut from are one fact about one
 # process, and a reader who has the first without the second has half an
@@ -788,8 +806,9 @@ def _identity_block(info: Mapping[str, object]) -> str:
     # body where the three say different things, so this branch and the
     # value it is about are one fact rather than two that have to be
     # kept in step here.
+    builtin = _builtin_line(info.get("builtin_agent"))
     if not info["onboarding_enabled"]:
-        return "\n".join([*lines, ONBOARDING_OFF_HERE]) + "\n"
+        return "\n".join([*lines, ONBOARDING_OFF_HERE, *builtin]) + "\n"
     url = info["onboarding_url"]
     provenance = printable(str(info["onboarding_provenance"]), UNBOUNDED)
     return (
@@ -798,10 +817,35 @@ def _identity_block(info: Mapping[str, object]) -> str:
                 *lines,
                 f"{ONBOARDING_URL_LABEL}, {provenance}:",
                 printable(str(url), UNBOUNDED),
+                *builtin,
             ]
         )
         + "\n"
     )
+
+
+def _builtin_line(answered: object) -> list[str]:
+    """What `info` prints about the built-in agent: nothing while it is
+    served or when the server says nothing about it, and otherwise one
+    paragraph saying why not and what to run.
+
+    Read as `RuntimeInfo` already validated it, so the status is one of
+    the server's tokens and the stages are a list; still printed through
+    the display door, since what answered at `--api-url` is not this
+    command's to vouch for.
+    """
+    if not isinstance(answered, Mapping) or answered.get("status") == "served":
+        return []
+    status = answered.get("status")
+    if status == "displaced":
+        sentence = BUILTIN_DISPLACED
+    elif status == "unprovided":
+        stages = answered.get("stages") or []
+        named = ", ".join(printable(str(stage)) for stage in stages)
+        sentence = BUILTIN_UNPROVIDED.format(stages=named)
+    else:
+        sentence = BUILTIN_UNKNOWN.format(status=printable(str(status)))
+    return ["", f"{BUILTIN_LABEL}: {sentence}"]
 
 
 def _configured_counts(document: Mapping[str, object]) -> str:

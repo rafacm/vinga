@@ -937,14 +937,47 @@ class ConfigDiff(BaseModel):
 type ConfigDiffReader = Callable[[], Awaitable[ConfigDiff]]
 
 
+# Whether the installed world serves vinga, the built-in agent (#612),
+# as the three answers `models.builtin_status` decides. Spelled here
+# rather than imported, because this module imports pydantic and
+# nothing of this server (`test_cli_import_weight.py`); a test holds the
+# two spellings to one set.
+BUILTIN_STATUSES = ("served", "displaced", "unprovided")
+
+
+class BuiltinAgentStatus(BaseModel):
+    """Whether the world this server has installed serves vinga, the
+    built-in agent, and if not, why not."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    status: Literal["served", "displaced", "unprovided"] = Field(
+        description=(
+            "`served`, or why not: `displaced` when an agent stored under the name "
+            "vinga is served in its place, which a rename of that agent and an "
+            "apply clear; `unprovided` when a provider stage resolves through "
+            "neither `builtin_agent` nor `agent_defaults`. A client maps a token it "
+            "knows to its own remedy and says the token it does not."
+        )
+    )
+    stages: list[str] = Field(
+        description=(
+            "The provider stages that resolve nowhere, in pipeline order, for "
+            "`unprovided`; empty for the other two."
+        )
+    )
+
+
 class RuntimeInfo(BaseModel):
-    """Which deployment this is: the build that is running, and the URL
-    a board is onboarded at.
+    """Which deployment this is: the build that is running, the URL a
+    board is onboarded at, and whether the built-in agent is served.
 
     The one answer to "what server am I talking to". Every field of it
-    is a fact of the process and of the file half it booted from,
-    neither of which a reload moves, so the whole of it is composed once
-    at startup and answered as it stands.
+    but the last is a fact of the process and of the file half it booted
+    from, neither of which a reload moves, so those are composed once at
+    startup and answered as they stand. The last, `builtin_agent`, is the
+    one live field: an apply can change it, so it is read from the world
+    installed at the moment of the request.
 
     It carries a credential, and it is the only read here that does. The
     onboarding URL's last segment is a key derived from the device-auth
@@ -1000,6 +1033,15 @@ class RuntimeInfo(BaseModel):
             "the URL above is, and non-null exactly when that is: the three fields are "
             "one fact and this shape refuses a body that makes them two."
         )
+    )
+    builtin_agent: BuiltinAgentStatus | None = Field(
+        default=None,
+        description=(
+            "Live, unlike the fields above: whether the world installed when this "
+            "request was answered serves vinga, the built-in agent, read per request "
+            "so an apply that changes it is reflected at once. Null only from a "
+            "server older than the built-in agent."
+        ),
     )
 
     @model_validator(mode="after")

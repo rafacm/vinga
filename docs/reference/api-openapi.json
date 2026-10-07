@@ -5813,6 +5813,36 @@
         "title": "AssembledPrompt",
         "description": "The system prompt a session opening now as this agent would be\nsent."
       },
+      "BuiltinAgentStatus": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "served",
+              "displaced",
+              "unprovided"
+            ],
+            "title": "Status",
+            "description": "`served`, or why not: `displaced` when an agent stored under the name vinga is served in its place, which a rename of that agent and an apply clear; `unprovided` when a provider stage resolves through neither `builtin_agent` nor `agent_defaults`. A client maps a token it knows to its own remedy and says the token it does not."
+          },
+          "stages": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Stages",
+            "description": "The provider stages that resolve nowhere, in pipeline order, for `unprovided`; empty for the other two."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status",
+          "stages"
+        ],
+        "title": "BuiltinAgentStatus",
+        "description": "Whether the world this server has installed serves vinga, the\nbuilt-in agent, and if not, why not."
+      },
       "ConfigDiff": {
         "properties": {
           "providers": {
@@ -7673,6 +7703,17 @@
             ],
             "title": "Onboarding Provenance",
             "description": "Where the origin in that URL came from, in the words the startup banner uses (`from server.public_url`, `guessed from the listen address, ...`), or null when onboarding is off. Two of the three sources are inferences, so a URL that named neither would read as fact. It is null exactly when the URL above is, and non-null exactly when that is: the three fields are one fact and this shape refuses a body that makes them two."
+          },
+          "builtin_agent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BuiltinAgentStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Live, unlike the fields above: whether the world installed when this request was answered serves vinga, the built-in agent, read per request so an apply that changes it is reflected at once. Null only from a server older than the built-in agent."
           }
         },
         "additionalProperties": false,
@@ -7685,7 +7726,7 @@
           "onboarding_provenance"
         ],
         "title": "RuntimeInfo",
-        "description": "Which deployment this is: the build that is running, and the URL\na board is onboarded at.\n\nThe one answer to \"what server am I talking to\". Every field of it\nis a fact of the process and of the file half it booted from,\nneither of which a reload moves, so the whole of it is composed once\nat startup and answered as it stands.\n\nIt carries a credential, and it is the only read here that does. The\nonboarding URL's last segment is a key derived from the device-auth\nsecret and it stands in front of the token issuer, which is why the\nstartup banner deliberately prints the origin and not the URL. The\ngate in front of this API is what makes serving it here no wider\nthan what the caller already holds: the bearer token grants\neverything this API can do, secret writes included. The response\ncarries `Cache-Control: no-store` for the same reason, and the one\nclient that renders it prints it on stdout and nowhere else."
+        "description": "Which deployment this is: the build that is running, the URL a\nboard is onboarded at, and whether the built-in agent is served.\n\nThe one answer to \"what server am I talking to\". Every field of it\nbut the last is a fact of the process and of the file half it booted\nfrom, neither of which a reload moves, so those are composed once at\nstartup and answered as they stand. The last, `builtin_agent`, is the\none live field: an apply can change it, so it is read from the world\ninstalled at the moment of the request.\n\nIt carries a credential, and it is the only read here that does. The\nonboarding URL's last segment is a key derived from the device-auth\nsecret and it stands in front of the token issuer, which is why the\nstartup banner deliberately prints the origin and not the URL. The\ngate in front of this API is what makes serving it here no wider\nthan what the caller already holds: the bearer token grants\neverything this API can do, secret writes included. The response\ncarries `Cache-Control: no-store` for the same reason, and the one\nclient that renders it prints it on stdout and nowhere else."
       },
       "SecretSlot": {
         "properties": {
