@@ -625,6 +625,37 @@ def test_add_device_binds_the_board_showing_the_code(
     assert boundaries(captured.err) == {CHECK_IN, RELOAD}
 
 
+def test_add_device_naming_no_agent_binds_the_default_agent(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The agent is optional, a payload group of zero or more (#612):
+    none binds the board to the default agent, and the line names the
+    agent it bound, since the operator typed nothing but six digits."""
+    _an_agent(run)
+    run("default-agent", "set", "sam")
+    code = _showing(run)
+    capsys.readouterr()
+
+    assert run("device", "pending", "claim", code) == 0
+
+    assert capsys.readouterr().out == "wrote device aa:bb:cc:dd:ee:ff bound to sam\n"
+
+
+def test_add_device_naming_no_agent_with_no_default_says_so(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _an_agent(run)
+    code = _showing(run)
+    capsys.readouterr()
+
+    assert run("device", "pending", "claim", code) == 1
+
+    captured = capsys.readouterr()
+    assert "no default agent is set" in captured.err
+    assert captured.out == ""
+    assert "Traceback" not in captured.err
+
+
 def test_add_device_retires_the_code(run, capsys: pytest.CaptureFixture[str]) -> None:
     _an_agent(run)
     code = _showing(run)

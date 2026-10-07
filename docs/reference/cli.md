@@ -2102,7 +2102,8 @@ Options:
 Commands:
   list   the devices showing an activation code, and the code each is showing
   claim  bind the device showing this activation code, which is the six digits
-         on its screen; use device bind when you know the MAC instead
+         on its screen, to the agents named or else to the default agent; use
+         device bind when you know the MAC instead
 ```
 
 ### `vinga device pending list`
@@ -2128,14 +2129,15 @@ Options:
 ### `vinga device pending claim`
 
 ```
-Usage: vinga device pending claim [OPTIONS] {CODE} {AGENT}
+Usage: vinga device pending claim [OPTIONS] {CODE} [AGENT]
 
   bind the device showing this activation code, which is the six digits on its
-  screen; use device bind when you know the MAC instead
+  screen, to the agents named or else to the default agent; use device bind when
+  you know the MAC instead
 
 Arguments:
   CODE   the six digits the device is showing and speaking  [required]
-  AGENT  [required]
+  AGENT  the agents to bind it to; none binds it to the default agent
 
 Options:
   --config PATH  path to the YAML config file naming server.port and

@@ -132,6 +132,7 @@ from vinga_server.config.responses import (
     McpStatusSource,
     MemoryCorrection,
     MemoryStateKey,
+    PendingClaim,
     PendingDevice,
     Problem,
     PromptBlock,
@@ -424,6 +425,7 @@ ENTITY_MODELS: tuple[type[BaseModel], ...] = tuple(
 # model-chosen key.
 REQUEST_MODELS: tuple[type[BaseModel], ...] = (
     DeviceBinding,
+    PendingClaim,
     DeviceRename,
     DeviceReplacement,
     DeviceLocation,
@@ -456,6 +458,12 @@ PROBLEM_MODELS: tuple[type[BaseModel], ...] = (Problem, FieldError)
 _DEVICE_BODY = (
     'the body has to be a JSON object with exactly one key, "agents", holding an '
     "array of agent names as strings. Nothing sent is quoted back"
+)
+
+_CLAIM_BODY = (
+    'the body has to be a JSON object with at most one key, "agents", holding an '
+    "array of agent names as strings; with none, the device is bound to the default "
+    "agent. Nothing sent is quoted back"
 )
 
 _DEFAULT_AGENT_BODY = (
@@ -2647,7 +2655,7 @@ def _writes(api: FastAPI) -> None:
         "/devices/pending/{code}",
         response_model=Acknowledgement,
         responses=_problems(401, 404, 409, 422, 500),
-        openapi_extra=request_body(DeviceBinding),
+        openapi_extra=request_body(PendingClaim),
     )
     def add_device(
         code: str,
@@ -2672,8 +2680,14 @@ def _writes(api: FastAPI) -> None:
         bind and one retryable refusal. A write that fails releases the
         reservation, leaving the code claimable again, because the
         device is still showing it.
+
+        The agents are optional, which is where this differs from the
+        write by MAC (#612): none named binds the device to the default
+        agent, which the repository reads inside the write's own
+        transaction, so the acknowledgement is the only place the
+        operator learns which agent that was.
         """
-        agents = _agents(body)
+        agents = _claimed_agents(body)
         claim = pending.reserve(code)
         if claim.in_flight:
             raise ClaimInFlightError(_CODE_IN_FLIGHT)
@@ -2694,6 +2708,12 @@ def _writes(api: FastAPI) -> None:
         # codebase settled on: `from None` clears the cause and leaves
         # the context, so the rejected value would still be reachable on
         # the exception that travels out.
+        #
+        # A claim that named no agent sent no names to protect, so its
+        # refusals travel as themselves: the replacement would say the
+        # request named an agent this deployment lacks, which it did not,
+        # and the repository's sentence (no default agent is set) quotes
+        # nothing the request carried.
         refused = False
         superseded = False
         bound = None
@@ -2709,6 +2729,8 @@ def _writes(api: FastAPI) -> None:
         except (UnknownEntityError, DatabaseBusyError, StorageError):
             raise
         except ConfigError:
+            if not agents:
+                raise
             refused = True
         finally:
             # Every way out but the successful one leaves the device
@@ -3310,6 +3332,18 @@ def _agents(body: object) -> list[str]:
     return value
 
 
+def _claimed_agents(body: object) -> list[str]:
+    """A claim's agents, the empty list where none were named: an empty
+    object, or `agents` empty, which is the one thing `PendingClaim`
+    allows that `DeviceBinding` does not."""
+    if body == {}:
+        return []
+    value = _sole_value(body, "agents", _CLAIM_BODY)
+    if not isinstance(value, list) or not all(isinstance(name, str) for name in value):
+        raise ConfigError(_CLAIM_BODY)
+    return value
+
+
 def _name(body: object) -> str:
     value = _sole_value(body, "name", _DEFAULT_AGENT_BODY)
     if not isinstance(value, str):
@@ -3733,6 +3767,7 @@ __all__ = [
     "Envelope",
     "FieldError",
     "McpServerStatus",
+    "PendingClaim",
     "PendingDevice",
     "Problem",
     "PromptBlock",

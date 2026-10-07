@@ -22,6 +22,7 @@ from vinga_server.config.responses import (
     DeviceRename,
     DeviceReplacement,
     Envelope,
+    PendingClaim,
     PendingDevice,
 )
 
@@ -169,12 +170,14 @@ BIND_DEVICE = Act(
 )
 
 # The same binding, addressed by the six digits on a board's screen
-# instead of by a MAC nobody has had to find.
+# instead of by a MAC nobody has had to find. The body is the binding's
+# own shape, and an empty agent list is what `PendingClaim` reads as
+# none named: the default agent.
 ADD_DEVICE = Act(
     method="POST",
     path=_claim_path,
     body=_binding,
-    sends=DeviceBinding,
+    sends=PendingClaim,
     answers=Acknowledgement,
     refusal=UNREADABLE_WRITE,
     render=_acknowledged,

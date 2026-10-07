@@ -32,7 +32,7 @@ from vinga_server.config.loader import DatabaseBusyError
 from vinga_server.config.models import PROGRAM, SERVER_PROGRAM, DatabaseConfig
 from vinga_server.config.responses import RefusalReason
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
-from vinga_server.config.store import ALREADY_BOUND, ALREADY_COVERED, ConfigStore
+from vinga_server.config.store import ALREADY_BOUND, NOTHING_TO_ENROLL_ONTO, ConfigStore
 from vinga_server.db import open_database
 from vinga_server.onboarding import CODE_TTL_S, PendingDevices
 
@@ -476,22 +476,59 @@ def test_a_claim_will_not_replace_a_binding_made_underneath_it(
     assert client.get("/devices/pending").json() == {}
 
 
-def test_a_claim_will_not_bind_a_device_a_default_agent_now_covers(
+def test_a_claim_binds_a_device_though_a_default_agent_was_set_since(
     client: TestClient, pending: PendingDevices, database: DatabaseConfig
 ) -> None:
+    """A default agent covers no device since #612, so one set while the
+    code was on a screen decided nothing about this board, and the claim
+    binds it to the agent it names."""
     code = _waiting(pending)
     with _beside(database) as store:
         store.set_default_agent("assistant")
 
-    refused = _claim(client, code, "written-since-boot")
+    claimed = _claim(client, code, "written-since-boot")
 
-    assert refused.status_code == 404
-    # Its sibling and not one of the five: this refusal names no command
-    # either, so it has nothing to say a token about, and its body
-    # carries exactly the four members it always has.
-    assert refusal_body(refused.json(), 404) == ALREADY_COVERED
+    assert claimed.status_code == 200, claimed.text
+    assert client.get(f"/devices/{MAC}").json()["entity"]["agents"] == [
+        "written-since-boot"
+    ]
+
+
+@pytest.mark.parametrize("body", [{}, {"agents": []}])
+def test_a_claim_naming_no_agent_binds_the_default_agent(
+    client: TestClient, pending: PendingDevices, body: dict[str, object]
+) -> None:
+    """The agent a newly bound device starts with, which is what a
+    default agent is now, and the acknowledgement names it (D8): the
+    operator typed six digits and learns which agent the board is on."""
+    assert client.put("/default-agent", json={"name": "written-since-boot"}).status_code == 200
+    code = _waiting(pending)
+
+    claimed = client.post(f"/devices/pending/{code}", json=body)
+
+    assert claimed.status_code == 200, claimed.text
+    assert claimed.json()["wrote"] == f"device {MAC} bound to written-since-boot"
+    assert client.get(f"/devices/{MAC}").json()["entity"]["agents"] == [
+        "written-since-boot"
+    ]
+    assert client.get("/devices/pending").json() == {}
+
+
+def test_a_claim_naming_no_agent_with_no_default_leaves_the_code_claimable(
+    client: TestClient, pending: PendingDevices
+) -> None:
+    """Nothing is created, the store's own sentence travels (it quotes
+    nothing the request carried, since the request carried no names),
+    and the board is still showing a number that works."""
+    code = _waiting(pending)
+
+    refused = client.post(f"/devices/pending/{code}", json={})
+
+    assert refused.status_code == 422
+    assert refused.json()["detail"] == NOTHING_TO_ENROLL_ONTO
     assert MAC not in refused.text
     assert client.get("/devices").json() == {}
+    assert _claim(client, code).status_code == 200
 
 
 def test_a_superseded_claim_leaves_the_address_on_no_surface(

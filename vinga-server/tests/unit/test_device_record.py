@@ -58,6 +58,7 @@ from vinga_server.config.store import (
     DEVICE_NAME_RESERVED,
     DEVICE_NAME_TAKEN,
     DEVICE_TEXT_CREDENTIAL,
+    NOTHING_TO_ENROLL_ONTO,
     ConfigStore,
 )
 from vinga_server.db import open_database, schema
@@ -200,6 +201,47 @@ def test_a_claim_still_refuses_a_device_the_configuration_has_spoken_about(
 
     with pytest.raises(DeviceAlreadyBoundError):
         store.claim_device(MAC, ["nadia"])
+
+
+def test_a_claim_naming_no_agent_binds_the_default_agent(store: ConfigStore) -> None:
+    """What a default agent is for since #612: the agent a newly bound
+    device starts with, read inside the claim's own transaction."""
+    _agents(store)
+    store.set_default_agent("nadia")
+
+    claimed = store.claim_device(MAC)
+
+    assert claimed.agents == ("nadia",)
+    assert is_device_id(claimed.id)
+    assert _record(store).agents == ["nadia"]
+
+
+def test_a_claim_naming_no_agent_with_no_default_writes_nothing(
+    store: ConfigStore,
+) -> None:
+    """Until vinga is the default that always exists (#612, M3), the
+    enrolment's sentence answers, and nothing is created."""
+    _agents(store)
+
+    with pytest.raises(ConfigError) as refused:
+        store.claim_device(MAC)
+
+    assert NOTHING_TO_ENROLL_ONTO in str(refused.value)
+    assert not isinstance(refused.value, DeviceAlreadyBoundError)
+    assert MAC not in store.load().domain.devices
+
+
+def test_a_claim_is_not_refused_because_a_default_agent_is_set(
+    store: ConfigStore,
+) -> None:
+    """A default agent covers no device any more, so one set while a
+    code was on a screen leaves nothing for the claim to refuse over."""
+    _agents(store)
+    store.set_default_agent("nadia")
+
+    claimed = store.claim_device(MAC, ["sam"])
+
+    assert claimed.agents == ("sam",)
 
 
 # --- the record's two writable halves ---------------------------------

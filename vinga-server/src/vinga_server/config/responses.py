@@ -1466,6 +1466,30 @@ class DeviceBinding(BaseModel):
     )
 
 
+class PendingClaim(BaseModel):
+    """What a claim by activation code carries: the agents the device
+    is to reach, or none, for the default agent.
+
+    A model of its own rather than `DeviceBinding` with a looser field,
+    because the two writes differ in exactly this: a write by MAC is
+    also the rebind verb, where an omitted agent could mean the default
+    or a mistake, and a claim is a new device, which is what a default
+    agent is for (#612)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    agents: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The agents this device is bound to, by name, with the meaning they have "
+            "in a device binding. Left out or empty, the device is bound to the "
+            "default agent, the agent a newly bound device starts with, and the claim "
+            "is refused with nothing changed when none is set. Every name has to be an "
+            "agent that exists, or the claim is refused."
+        ),
+    )
+
+
 class DefaultAgentName(BaseModel):
     """What a default-agent write carries. Clearing it is the DELETE,
     not a null here: one way to say a thing."""
@@ -1474,9 +1498,10 @@ class DefaultAgentName(BaseModel):
 
     name: str = Field(
         description=(
-            "The agent an unbound device reaches. It has to be an agent that exists. "
-            "To unset it, DELETE this resource, which leaves the devices map as the "
-            "allowlist."
+            "The agent a newly bound device starts with: a claim by activation code "
+            "that names no agent binds the device to it. It admits no device by "
+            "itself. It has to be an agent that exists. To unset it, DELETE this "
+            "resource, after which a claim has to name its agents."
         )
     )
 
