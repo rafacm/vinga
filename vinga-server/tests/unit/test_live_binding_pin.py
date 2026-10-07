@@ -19,12 +19,20 @@ they are different kinds of promise:
   started selecting the whole row would still answer correctly and
   would still pass every test below, which is why the text is here.
 - **The answers.** What the read says for a bound device, for a device
-  with no row, for a device with no row while a default agent stands
-  behind it, and for a MAC spelled the other way. These are the
-  behaviours the endpoint branches on.
+  with no row, for a device with no row while a default agent is set,
+  and for a MAC spelled the other way. These are the behaviours the
+  endpoint branches on.
 
 Neither half reaches into the module. The statements are what the
 database was asked, and the answers are what the caller got.
+
+The pin moved once, deliberately, and as a behavior change rather than
+a reshape (#612): the read used to send a second statement, for the
+`default_agent` row, because an unbound device reached the default
+agent. An unbound device only pairs now, so the default agent is no
+input to whether a board is served, and the read stopped asking for it.
+The commit that changed the read is the commit that changed this file,
+and nothing else.
 """
 
 from collections.abc import Iterator
@@ -38,8 +46,7 @@ from vinga_server.config.secrets import generate_key
 from vinga_server.config.store import ConfigStore, LiveBinding, read_live_binding
 from vinga_server.db import open_database, read_engine
 
-# The two statements one lookup sends, in the order it sends them, as
-# the psycopg cursor is given them.
+# The one statement a lookup sends, as the psycopg cursor is given it.
 #
 # Written out rather than built, which is the whole point of a pin: a
 # statement derived from the same metadata the code derives it from
@@ -50,12 +57,6 @@ BINDING_STATEMENT = (
     "SELECT domain.devices.agents \n"
     "FROM domain.devices \n"
     "WHERE domain.devices.mac = %(mac_1)s::VARCHAR"
-)
-
-DEFAULT_AGENT_STATEMENT = (
-    "SELECT domain.domain_settings.value \n"
-    "FROM domain.domain_settings \n"
-    "WHERE domain.domain_settings.key = %(key_1)s::VARCHAR"
 )
 
 MAC = "aa:bb:cc:dd:ee:ff"
@@ -112,7 +113,7 @@ def _bootable(store: ConfigStore) -> None:
     store.set_agent("sam", {"prompt": "You are Sam."})
 
 
-def test_the_lookup_sends_exactly_these_two_statements(
+def test_the_lookup_sends_exactly_this_statement(
     store: ConfigStore, lookup: Engine
 ) -> None:
     _bootable(store)
@@ -120,22 +121,23 @@ def test_the_lookup_sends_exactly_these_two_statements(
 
     statements, parameters, _ = _sent(lookup, MAC)
 
-    assert statements == [BINDING_STATEMENT, DEFAULT_AGENT_STATEMENT]
-    assert parameters == [{"mac_1": MAC}, {"key_1": "default_agent"}]
+    assert statements == [BINDING_STATEMENT]
+    assert parameters == [{"mac_1": MAC}]
 
 
-def test_the_two_statements_are_the_same_on_a_device_with_no_row(
+def test_the_statement_is_the_same_on_a_device_with_no_row(
     store: ConfigStore, lookup: Engine
 ) -> None:
-    """A miss is not a different read. The statements and their
-    parameters are what a device that was never bound produces too, so
-    the pin covers the path an unknown board takes."""
+    """A miss is not a different read. The statement and its parameters
+    are what a device that was never bound produces too, so the pin
+    covers the path an unknown board takes, a default agent set or not."""
     _bootable(store)
+    store.set_default_agent("sam")
 
     statements, parameters, _ = _sent(lookup, MAC)
 
-    assert statements == [BINDING_STATEMENT, DEFAULT_AGENT_STATEMENT]
-    assert parameters == [{"mac_1": MAC}, {"key_1": "default_agent"}]
+    assert statements == [BINDING_STATEMENT]
+    assert parameters == [{"mac_1": MAC}]
 
 
 def test_a_shouted_mac_binds_the_canonical_one(
@@ -146,9 +148,9 @@ def test_a_shouted_mac_binds_the_canonical_one(
 
     statements, parameters, answered = _sent(lookup, SHOUTED)
 
-    assert statements == [BINDING_STATEMENT, DEFAULT_AGENT_STATEMENT]
+    assert statements == [BINDING_STATEMENT]
     assert parameters[0] == {"mac_1": MAC}
-    assert answered == LiveBinding(agents=("sam",), default_agent=None)
+    assert answered == LiveBinding(agents=("sam",))
 
 
 def test_a_bound_device_answers_with_its_agents(
@@ -160,7 +162,7 @@ def test_a_bound_device_answers_with_its_agents(
 
     _, _, answered = _sent(lookup, MAC)
 
-    assert answered == LiveBinding(agents=("sam", "nadia"), default_agent=None)
+    assert answered == LiveBinding(agents=("sam", "nadia"))
 
 
 def test_a_device_with_no_row_answers_empty(store: ConfigStore, lookup: Engine) -> None:
@@ -169,24 +171,24 @@ def test_a_device_with_no_row_answers_empty(store: ConfigStore, lookup: Engine) 
 
     _, _, answered = _sent(lookup, MAC)
 
-    assert answered == LiveBinding(agents=(), default_agent=None)
+    assert answered == LiveBinding(agents=())
 
 
-def test_the_default_agent_travels_with_the_binding(
+def test_a_default_agent_answers_nothing_for_an_unbound_device(
     store: ConfigStore, lookup: Engine
 ) -> None:
-    """Both rows in one answer, which is the property the read exists
-    for: an unbound device and the agent standing behind it are one
-    question."""
+    """What the second statement used to carry, and why it went: an
+    unbound device reaches no agent, so a default agent standing behind
+    it is not part of the answer."""
     _bootable(store)
     store.set_default_agent("sam")
 
     _, _, answered = _sent(lookup, MAC)
 
-    assert answered == LiveBinding(agents=(), default_agent="sam")
+    assert answered == LiveBinding(agents=())
 
 
-def test_a_bound_device_reports_the_default_agent_too(
+def test_a_bound_device_answers_its_own_agents_whatever_the_default(
     store: ConfigStore, lookup: Engine
 ) -> None:
     _bootable(store)
@@ -196,4 +198,4 @@ def test_a_bound_device_reports_the_default_agent_too(
 
     _, _, answered = _sent(lookup, MAC)
 
-    assert answered == LiveBinding(agents=("nadia",), default_agent="sam")
+    assert answered == LiveBinding(agents=("nadia",))

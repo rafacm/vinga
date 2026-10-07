@@ -4,11 +4,11 @@
 pinned byte for byte (`test_live_binding_pin.py`). Beside it, #449 adds
 the two this file is about:
 
-- **`read_live_attachment`**, what a connect asks: the binding, the
-  default agent behind it and the record the conversation will attach
-  to, from one snapshot. Its first two statements are the ones
-  `read_live_binding` sends, character for character, which is asserted
-  here by capturing both rather than by transcribing either.
+- **`read_live_attachment`**, what a connect asks: the binding and the
+  record the conversation will attach to, from one snapshot. Its first
+  statement is the one `read_live_binding` sends, character for
+  character, which is asserted here by capturing both rather than by
+  transcribing either.
 - **`read_live_device_by_id`**, what a reply asks on every round: that
   record as it stands now, addressed by the identity it attached to.
 
@@ -104,7 +104,7 @@ def test_the_attachment_answers_the_binding_and_the_record_together(
 
     resolved = read_live_attachment(lookup, MAC)
 
-    assert resolved.binding == LiveBinding(agents=("sam",), default_agent=None)
+    assert resolved.binding == LiveBinding(agents=("sam",))
     assert resolved.device is not None
     assert resolved.device.mac == MAC
     assert resolved.device.name == f"Device {MAC}"
@@ -120,10 +120,10 @@ def test_the_attachment_sends_the_pinned_statements_and_one_more(
     at all keeps the statement it was pinned with, and the record is a
     statement of its own in the same transaction.
 
-    The two are compared against what `read_live_binding` itself sends,
+    It is compared against what `read_live_binding` itself sends,
     captured here rather than transcribed. `test_live_binding_pin.py`
-    is what pins those two to their exact text, byte for byte, and this
-    asserts the attachment sends THOSE, so the pin covers both entry
+    is what pins that to its exact text, byte for byte, and this
+    asserts the attachment sends THAT, so the pin covers both entry
     points and neither file restates the other.
     """
     bound(store)
@@ -131,23 +131,23 @@ def test_the_attachment_sends_the_pinned_statements_and_one_more(
     pinned, _ = statements(lookup, lambda: read_live_binding(lookup, MAC))
     sent, _ = statements(lookup, lambda: read_live_attachment(lookup, MAC))
 
-    assert len(pinned) == 2
-    assert sent[:2] == pinned
-    assert len(sent) == 3
-    assert "domain.devices.id" in sent[2] and "domain.devices.mac = " in sent[2]
+    assert len(pinned) == 1
+    assert sent[:1] == pinned
+    assert len(sent) == 2
+    assert "domain.devices.id" in sent[1] and "domain.devices.mac = " in sent[1]
 
 
 def test_a_board_with_no_row_attaches_to_nothing(
     store: ConfigStore, lookup: Engine
 ) -> None:
-    """A MAC a default agent stands behind is served and has no record,
-    and a conversation on it says nothing about its device."""
+    """A MAC with no row is bound to nothing and has no record, a
+    default agent set or not (#612)."""
     bound(store, OTHER_MAC)
     store.set_default_agent("sam")
 
     resolved = read_live_attachment(lookup, MAC)
 
-    assert resolved.binding.default_agent == "sam"
+    assert resolved.binding == LiveBinding(agents=())
     assert resolved.device is None
 
 

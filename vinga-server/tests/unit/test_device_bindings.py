@@ -488,9 +488,10 @@ def _fell_back_over_an_unreadable_row(caplog: pytest.LogCaptureFixture) -> None:
     round on #507 caught. `_warn` records `ClassName.of(exc)`, so this
     field is the second place in the tree where the classification an
     unreadable stored row now gets is visible from outside: a malformed
-    binding and a malformed default agent are read through `_list` and
-    `_stored`, both of which raise `StoredConfigUnreadableError` since
-    that milestone, and the value moved with them. A database that
+    binding is read through `_list` and `_stored`, both of which raise
+    `StoredConfigUnreadableError` since that milestone, and the value
+    moved with them. (A malformed default agent was the second such row
+    until #612, when the live read stopped reading the default agent.) A database that
     cannot be reached goes on saying `StorageError`, which is the case
     above this one.
 
@@ -557,36 +558,6 @@ def test_a_row_no_write_could_have_made_falls_back_rather_than_refusing(
         bindings.dispose()
 
     assert resolved.names == ("assistant",)
-    _fell_back_over_an_unreadable_row(caplog)
-
-
-def test_a_default_agent_that_is_not_a_name_falls_back_too(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-    """The other row, and the one that used to be read as None: a
-    malformed default agent would have quietly turned every unbound
-    device away."""
-    config = booted(devices={BOUND_MAC: ["assistant"]}, default_agent="assistant")
-    bindings = DeviceBindings.open(world(config))
-    try:
-        engine = open_database(DatabaseConfig())
-        try:
-            with engine.begin() as connection:
-                connection.execute(
-                    update(schema.domain_settings)
-                    .where(schema.domain_settings.c.key == schema.DEFAULT_AGENT_KEY)
-                    .values(value=17)
-                )
-        finally:
-            engine.dispose()
-
-        with caplog.at_level(logging.WARNING):
-            resolved = bindings.names_for(DEVICE_MAC)
-    finally:
-        bindings.dispose()
-
-    # The snapshot's answer, which binds this MAC to nothing.
-    assert resolved.names == ()
     _fell_back_over_an_unreadable_row(caplog)
 
 

@@ -279,19 +279,17 @@ class Replaced:
 
 @dataclass(frozen=True)
 class LiveBinding:
-    """What a running server re-reads about one device: its binding, and
-    the default agent standing behind it.
+    """What a running server re-reads about one device: its binding.
 
-    Both together because they are one question (which agents may this
-    device talk to) answered by two rows, and reading them apart would
-    let a write between them produce an answer neither state ever had.
-    An empty `agents` means the device has no row, which is different
-    from a row that could not be read: that one never becomes a
-    `LiveBinding` at all.
+    Which agents may this device talk to, answered by its own row and
+    nothing else: the default agent stood behind it until #612, when an
+    unbound device came to get pairing only, and the read stopped asking
+    for it. An empty `agents` means the device has no row, which is
+    different from a row that could not be read: that one never becomes
+    a `LiveBinding` at all.
     """
 
     agents: tuple[str, ...]
-    default_agent: str | None
 
 
 @dataclass(frozen=True)
@@ -362,9 +360,8 @@ class LiveAttachment:
     device: LiveDevice | None
 
 
-# What a refusal about these two rows names. Not a single row's
-# location, because the two are validated together, and the model that
-# validates them names the field that failed inside this.
+# What a refusal about the binding row names, and the model that
+# validates it names the field that failed inside this.
 _LIVE_BINDING_LOCATION = "the stored device bindings"
 
 # What a conditional bind refuses with, and why neither sentence names
@@ -1437,28 +1434,27 @@ class ConfigStore:
 
 
 def read_live_binding(engine: Engine, mac: str) -> LiveBinding:
-    """One device's binding and the default agent, read while the server
-    runs, through the rules that govern every other read of them.
+    """One device's binding, read while the server runs, through the
+    rules that govern every other read of it.
 
     The one read this module serves that is not the CLI's or the API's.
     It exists here rather than beside its caller for the reason the rest
     of the file does: what a stored row means is decided in one place. A
     reader of its own would have had to restate the rules that a binding
-    is a non-empty list of non-blank names without duplicates, that the
-    MAC key is canonical, and that `default_agent` is a name and not
-    whatever JSON the column holds, and a restatement that drifted
-    would answer a device differently from the boot that validated the
-    same rows.
+    is a non-empty list of non-blank names without duplicates and that
+    the MAC key is canonical, and a restatement that drifted would
+    answer a device differently from the boot that validated the same
+    row.
 
     Two differences from the reads above, both about where it runs. It
     takes the engine rather than a `ConfigStore`, because a device path
     reads through a read-only connection that never migrates and never
-    takes the advisory lock (`db.read_engine`), and it reads two rows
-    rather than the whole configuration, in one transaction, so a write
-    landing between them cannot produce a state that never existed. The
-    engine's repeatable-read isolation is what makes that last part
-    true: under read-committed each of the two statements would take a
-    snapshot of its own, which is exactly the torn read.
+    takes the advisory lock (`db.read_engine`), and it reads one row
+    rather than the whole configuration. It used to read two, the
+    binding and the default agent, and stopped at #612: an unbound
+    device only pairs, so the default agent decides nothing about
+    whether a board is served, and the byte pin on this read
+    (`tests/unit/test_live_binding_pin.py`) moved with it.
 
     Anything unreadable leaves as a `ConfigError`: a
     `StoredConfigUnreadableError` for a row that does not validate, the
@@ -1483,38 +1479,26 @@ def _live_binding(connection: Connection, mac: str) -> LiveBinding:
     bound = connection.execute(
         select(schema.devices.c.agents).where(schema.devices.c.mac == mac)
     ).scalar()
-    default_agent = connection.execute(
-        select(schema.domain_settings.c.value).where(
-            schema.domain_settings.c.key == schema.DEFAULT_AGENT_KEY
-        )
-    ).scalar()
     # Assembled into the same model the whole snapshot is validated
-    # through, so these two rows meet exactly the validators they met at
-    # boot: the array check first, which is the one a string would slip
-    # past (iterating it succeeds and yields its characters), then the
-    # model.
+    # through, so this row meets exactly the validators it met at boot:
+    # the array check first, which is the one a string would slip past
+    # (iterating it succeeds and yields its characters), then the model.
     data: dict[str, object] = {}
     if bound is not None:
         data["devices"] = {mac: _list(f"devices.{mac}", "agents", bound)}
-    if default_agent is not None:
-        data["default_agent"] = default_agent
     live = _stored(DomainConfig, _LIVE_BINDING_LOCATION, data)
     record = live.devices.get(mac)
-    return LiveBinding(
-        () if record is None else tuple(record.agents), live.default_agent
-    )
+    return LiveBinding(() if record is None else tuple(record.agents))
 
 
 def read_live_attachment(engine: Engine, mac: str) -> LiveAttachment:
-    """What a connect resolves about one board: its binding, the default
-    agent behind it, and the record its conversation will attach to, all
-    from one snapshot.
+    """What a connect resolves about one board: its binding and the
+    record its conversation will attach to, from one snapshot.
 
-    Three statements in the one repeatable-read transaction
-    `read_live_binding` opens for two, and the first two are that
-    function's own, character for character, because they are the same
-    private read (`tests/unit/test_live_device_read.py` pins the three
-    against the constants `test_live_binding_pin.py` pins the two). The
+    Two statements in one repeatable-read transaction, and the first is
+    `read_live_binding`'s own, character for character, because it is
+    the same private read (`tests/unit/test_live_device_read.py` pins
+    the two against the constant `test_live_binding_pin.py` pins). The
     binding is not widened to carry the record, and the record is not
     widened into the binding: what a board depends on to be served at
     all keeps the statement it was pinned with, and what a conversation
