@@ -37,6 +37,10 @@ _TITLE = "# "
 
 _FENCES = ("```", "~~~")
 
+# What `section` says when the page or the heading is not there. Fixed,
+# for the reason its docstring gives.
+NO_SUCH_SECTION = "the packaged pages have no section under that page and heading"
+
 
 @dataclass(frozen=True)
 class Section:
@@ -128,9 +132,13 @@ def section(page: str, heading: str | None) -> Section:
     """The one section of `page` under `heading` (None for its lead).
 
     Raises LookupError when the page or the heading is not there, so a
-    renamed heading fails loudly rather than reading as empty text.
+    renamed heading fails loudly rather than reading as empty text. The
+    message is fixed and quotes neither argument: the caller passed
+    both, so it already knows which section it asked for, and a value
+    that should never have been passed must not reach a message, a
+    traceback or a log line through the refusal.
     """
     for cut in sections():
         if cut.page == page and cut.heading == heading:
             return cut
-    raise LookupError(f"the packaged page {page!r} has no section headed {heading!r}")
+    raise LookupError(NO_SUCH_SECTION)
