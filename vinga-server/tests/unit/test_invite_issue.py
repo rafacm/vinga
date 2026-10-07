@@ -396,3 +396,24 @@ def test_the_answer_carries_the_configured_origin() -> None:
         body = client.post(ISSUE, json={}, headers=BEARER).json()
 
     assert body["origin"] == "https://vinga.test.invalid"
+
+
+def test_an_invite_naming_vinga_is_issued_while_vinga_is_served() -> None:
+    """Review round 1, finding 2: vinga is an agent this deployment has
+    though no row stores it, so it is checked as one the way
+    `check_references` resolves it, and then held to the world like any
+    named agent: issued while served, refused as not serving while it
+    is not, never refused as unknown."""
+    served = booted(agent_defaults=dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"))
+    with entered_app(served, from_store=True) as (app, client):
+        assert invite(client, ["vinga"]).status_code == 200
+        assert held(app) == 1
+
+    # The defaults cleared again, since both worlds are written to one
+    # store: vinga is unprovided now.
+    with entered_app(booted(agent_defaults={}), from_store=True) as (app, client):
+        refused = invite(client, ["vinga"])
+
+        assert refused.status_code == 409
+        assert refused.json()["reason"] == "agent-not-serving"
+        assert held(app) == 0

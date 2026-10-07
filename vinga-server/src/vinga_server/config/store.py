@@ -91,6 +91,7 @@ from vinga_server.config.models import (
     normalize_device_bindings,
     normalize_mac,
     refusal_line,
+    resolvable_agents,
     safe_location,
     url_credential,
     validation_problems,
@@ -706,12 +707,16 @@ class ConfigStore:
             return Entity(entry=record, secrets=())
 
     def read_agent_names(self) -> frozenset[str]:
-        """The name of every stored agent and nothing else about any of
-        them: what a caller asks when all it needs is whether a name it
-        was sent is an agent this deployment has, which an invite's
-        issuance does for each agent it names (#612)."""
+        """Every agent name a binding may name, and nothing else about
+        any of them: the stored agents and vinga, the built-in agent,
+        which no row stores (`models.resolvable_agents`, the rule
+        `check_references` resolves a binding by). What a caller asks
+        when all it needs is whether a name it was sent is an agent this
+        deployment has, which an invite's issuance does for each agent
+        it names (#612); whether that agent is served is a question
+        about the installed world, asked after this one."""
         with self._transaction() as connection:
-            return frozenset(_read_domain(connection).agents)
+            return resolvable_agents(_read_domain(connection))
 
     def read_default_agent(self) -> str | None:
         """The agent a newly claimed device starts with, or None. Unset
