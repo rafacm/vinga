@@ -392,6 +392,14 @@ The subagent's brief states, verbatim where possible:
   regenerate the manifest the failure names, with
   `uv run python -m tests.census.test_command_spellings` or
   `uv run python -m tests.census.test_reach_ins`, never by hand.
+  The lane holds a third committed artifact, which is a copy rather
+  than a manifest: the built-in agent's packaged Use pages under
+  `src/vinga_server/knowledge/pages/`, byte for byte against
+  `docs/concepts.md`, `docs/glossary.md` and `docs/devices/`. A
+  milestone that edits any of those pages regenerates the copy in the
+  same change, with
+  `uv run python -m tests.census.test_packaged_pages`, and so does a
+  rebase that brings in such an edit, conflict or not.
 - **Run `tests/census` last, after the final prose edit.** The
   implementation-doc section, the changelog fragment and any
   footprint page are written late in a milestone, and each can quote
@@ -447,8 +455,9 @@ findings in the same fix round.
 
 Two CI shapes to know:
 a docs-only diff outside `docs/reference/` runs the `docs` workflow
-(link check plus the `tests/census` lane, which is both the
-command-spellings and the reach-in census), not the server
+(link check plus the `tests/census` lane, which is the
+command-spellings and the reach-in census and the packaged-pages
+check), not the server
 lanes, and its green is the check the PR waits for; and a
 `pull_request` event that never registers a run is
 a GitHub failure mode this repository has seen a whole day of
@@ -477,7 +486,8 @@ rebase merge that deletes the base branch auto-closes stacked
 children unrecoverably. Retarget every child PR to `main` BEFORE
 merging its parent, and rebase children with `git rebase --onto`
 after each merge. When both sides of a rebase regenerated the same
-generated artifact (a census manifest, a committed reference), the
+generated artifact (a census manifest, the packaged Use pages, a
+committed reference), the
 textual merge is a state neither side produced: regenerate on the
 rebased tree and prove it green before pushing.
 
