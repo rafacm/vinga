@@ -27,11 +27,13 @@ says so.
 
 A browser becomes a device in one of two ways. Both need the server's
 onboarding switched on, which is the default, since the page is not
-served without it. An invite link that names no agent also needs the
-server to have a default agent, which the link binds the browser to;
-one that names its agents needs none. Pairing needs no default agent
-either, when the person claiming the code names the agent. The browser
-lane joins both ways.
+served without it. An invite link that names no agent binds the
+browser to the server's default agent, which is vinga, the built-in
+agent, unless the person running it set another, so it also needs the
+server to be serving that agent; one that names its agents binds to
+those. Pairing works whatever the default, and a claim that names no
+agent binds the browser to the default too. The browser lane joins
+both ways.
 
 **With an invite link.** Whoever runs the server runs
 `vinga device invite`, which prints a new invite link each time, an
@@ -70,9 +72,9 @@ code with the words "Tell the person who runs this server this code,
 so they can connect this browser"; once they claim it
 (`vinga device pending claim <code>`, which binds this browser to the
 server's default agent, or to the agent the command names), the
-conversation starts by itself. With onboarding on, this works whether
-or not the server has a default agent: a browser with no identity
-pairs, as every new device does.
+conversation starts by itself. With onboarding on, this works whatever
+the default agent is: a browser with no identity pairs, as every new
+device does.
 
 Either way the browser remembers that it is a device, and opening the
 page at `/talk/` again, without a link, offers Start straight away. A

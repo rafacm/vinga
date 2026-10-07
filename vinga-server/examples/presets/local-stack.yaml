@@ -28,8 +28,9 @@
 #
 #   vinga device bind aa:bb:cc:dd:ee:ff assistant
 #
-# Set a default agent and a claim may leave the agent out, binding the
-# board to that one; it reaches no unbound board by itself:
+# A claim may leave the agent out, binding the board to the default
+# agent, which is vinga, the built-in agent, unless you name another;
+# the default reaches no unbound board by itself:
 #
 #   vinga default-agent set assistant
 #
