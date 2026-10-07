@@ -848,7 +848,13 @@ lane (`tests/local/`) for real models.
   arm fails.
 - **Sentinels.** A board type shaped like an instruction and a
   credential is planted at a check-in and asserted absent from
-  `llm.systems`, both log formats and every event (M4). A lookup query
+  `llm.systems`, the session's state, every log line and event field
+  M4 adds, and both log formats outside the two surfaces that already
+  carry it by design: `ota_check`'s bounded `board` field and the
+  DEBUG `ota_check_body` event, both untrusted device descriptors this
+  plan does not change (the second is an open follow-up of its own).
+  The test asserts those two still carry exactly what they carried,
+  so the exception is pinned rather than assumed (M4). A lookup query
   carrying a credential-shaped string is asserted absent from both log
   formats and every event field. It may appear only in the two content
   surfaces: the conversation record, and the tool-argument field of the
@@ -1227,6 +1233,14 @@ Reviewed 2026-10-07 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.1
    Evidence: the test plan requires a credential-shaped board type to be absent from every event (Tests (`docs/plans/2026-10-06-vinga-built-in-agent.md:836`)). Existing OTA handling deliberately emits the bounded reported board in every `ota_check` event (ota/reply.py (`vinga-server/src/vinga_server/ota/reply.py:417`), ota/reply.py (`vinga-server/src/vinga_server/ota/reply.py:442`)), and also retains the submitted body in the DEBUG event (ota/reply.py (`vinga-server/src/vinga_server/ota/reply.py:517`)). The plan itself acknowledges `ota_check.board` as the source for a real-board measurement.
 
    Plan should say: either change the existing OTA event policy to redact credential-shaped untrusted descriptors, with its own compatibility and documentation review, or narrow the M4 test to new prompt, session, log, and event surfaces while explicitly listing the pre-existing OTA content surfaces as authorized exceptions. The current wording makes the no-leak test false.
+
+   *Resolution:* accepted. The sentinel test is narrowed to the surfaces M4
+   creates or feeds (the prompt, the session, the log lines and event
+   fields M4 adds), and names `ota_check.board` and the DEBUG
+   `ota_check_body` event as the pre-existing descriptor surfaces it
+   leaves alone, pinned to carry exactly what they carry today. Changing
+   the OTA event policy is out of this plan's scope; the DEBUG body is
+   already an open follow-up.
 
 5. **P2: `builtin_agent` is not fully specified as a domain section, so invalid overrides can evade write-time validation and pending-state reporting.**
 
