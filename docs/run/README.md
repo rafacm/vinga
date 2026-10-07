@@ -89,7 +89,7 @@ Changing the server rather than running it is
   says, and what each costs at a start and an apply.
 - [Onboarding a device](onboarding-a-device.md): the short URL a board
   is given, checking what answers there, binding the board by the code
-  it shows, and the try link that binds a browser.
+  it shows, and the invite link that binds a browser.
 
 ## Observing
 

@@ -1,6 +1,6 @@
 # The browser client
 
-A page your vinga server serves at `/try/`, which makes a web browser
+A page your vinga server serves at `/talk/`, which makes a web browser
 on a computer a device: the computer's microphone is the device's
 microphone, its speakers are the device's speaker, and the page is its
 screen. It speaks to the server exactly as a board does, checking in
@@ -32,24 +32,25 @@ agent, which the link binds the browser to. Pairing needs no default
 agent when the person claiming the code names the agent. The browser
 lane joins both ways.
 
-**With a try link.** Whoever runs the server runs `vinga info`, which
-prints a new try link each time, an address ending in `/try/#`
-followed by a long code. Opening it is the whole of joining: the page
-tells the server, the server makes this browser a device bound to its
-default agent, named `Browser` and the device's address, and the page
-says:
+**With an invite link.** Whoever runs the server runs
+`vinga device invite`, which prints a new invite link each time, an
+address ending in `/talk/#` followed by a long code. The link may name
+the agents the browser is to talk to (a child's browser bound to a
+kids' agent, say); one that names none binds it to the server's default
+agent. Opening it is the whole of joining: the page tells the server,
+the server makes this browser a device bound to those agents, named
+`Browser` and the device's address, and the page says:
 
-> This browser is now a device of this server, bound to its default
-> agent. Press Start to talk.
+> This browser is now a device of this server. Press Start to talk.
 
 The page removes the code from the address bar as soon as it has read
 it. A link works once, for ten minutes, and a restart of the server
 ends every link nobody has opened yet; a link that cannot be used any
 more says so on the page and asks for a new one. How links are issued,
 and which address they name, is in
-[Onboarding a device](../run/onboarding-a-device.md#a-browser-by-a-try-link).
+[Onboarding a device](../run/onboarding-a-device.md#a-browser-by-an-invite-link).
 
-**By pairing with a code.** Opened with no try link, the page asks for
+**By pairing with a code.** Opened with no invite link, the page asks for
 the onboarding URL: the address `vinga info` prints for a board's
 captive portal, which whoever runs the server can give you. Paste the
 whole URL, press Join, then press Start. The page takes only a URL
@@ -73,7 +74,9 @@ or not the server has a default agent: a browser with no identity
 pairs, as every new device does.
 
 Either way the browser remembers that it is a device, and opening the
-page at `/try/` again, without a link, offers Start straight away.
+page at `/talk/` again, without a link, offers Start straight away. A
+bookmark to the page's old address, `/try/`, shows nothing: open
+`/talk/` instead, and the browser is still the device it was.
 
 ## Controls
 
@@ -188,7 +191,7 @@ anywhere else the page says, and starts nothing:
 > This browser cannot run vinga's client: it lacks a secure connection
 > (open this page over https, or on localhost).
 
-So a try link naming `localhost` works only in a browser on the
+So an invite link naming `localhost` works only in a browser on the
 server's own computer, and a browser on another computer needs the
 server reached over `https://`, which is the operator's to set up
 ([Exposing a deployment](../run/exposing-a-deployment.md)). The same
@@ -209,15 +212,16 @@ handed only for that conversation.
 That stored identity is the device. Clearing the site's data, or
 opening the page in another browser, another browser profile, or a
 private window, is a new browser to the server, with no identity: the
-page asks for a try link or the onboarding URL again, and joins as a
-new device, which from the onboarding URL means pairing by a code. Opening a fresh try link in a browser that is already a
+page asks for an invite link or the onboarding URL again, and joins as
+a new device, which from the onboarding URL means pairing by a code.
+Opening a fresh invite link in a browser that is already a
 device does the same, replacing its identity with a new one. The
 device it was before stays on the server, named and bound as it was,
 until whoever runs the server deletes it; no browser holds its
 identity any more.
 
 A browser that refuses to store anything for the site cannot join, and
-the page says so. By then a try link has been spent, so ask for a new
+the page says so. By then an invite link has been spent, so ask for a new
 one once storage is allowed.
 
 ## Which browsers were checked
@@ -233,8 +237,8 @@ discovering and calling the page's two controls; a browser pairing by
 its code, after refusing an onboarding URL from another server and a
 bare path; and a microphone that fails to start, which the page
 releases. The same Chromium has
-also joined through a try link printed by `vinga info` and held a
-conversation outside the lane.
+also joined through a link printed by the server's command line and
+held a conversation outside the lane.
 
 No other browser has been checked: not Firefox, not Safari, not
 desktop Chrome or Edge, and no browser on a phone or tablet. Whether

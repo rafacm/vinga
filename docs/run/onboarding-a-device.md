@@ -161,56 +161,74 @@ mismatches is the sign of a typo or a rotation; the URL to compare
 against is what `vinga-server config ota-url` prints on your own
 terminal.
 
-## A browser, by a try link
+## A browser, by an invite link
 
-A browser can be a device too: the server serves a page at `/try/`
+A browser can be a device too: the server serves a page at `/talk/`
 that joins the deployment the way a board does, checking in at the
 short URL and talking over the same WebSocket. What a board gets from
 its captive portal and a claimed code, a browser gets from one link,
-which `vinga info` prints each time it runs:
+which `vinga device invite` prints each time it runs, and is the only
+command that prints one:
 
 ```console
-$ vinga info
-...
-try link (opens this deployment in a browser, once, within ten minutes):
-http://localhost:8003/try/#Xq3b...
+$ vinga device invite
+http://localhost:8003/talk/#Xq3b...
 ```
 
-Opening it binds that browser to the default agent before it says a
-word: the server creates a device named `Browser <its MAC>` (a MAC the
-server makes up, which no board can have), the page keeps the identity
-in the browser's own storage, and `vinga list` shows it among the
-devices beside the boards. That name is a placeholder, like a board's
-`Device <its MAC>`: the agent never says it out loud, and nothing else
-may take it, until you rename the device. Pressing Start on the page
-then asks for the microphone and holds a conversation with that agent,
-as a board would.
+The link is all it prints on stdout, so a script can hold one without
+showing it, as `link=$(vinga device invite)`; the line that says it
+worked goes to stderr. Each `--agent <name>` names an agent the browser
+is to be bound to, repeated for several:
+
+```console
+$ vinga device invite --agent kids
+```
+
+Opening it binds that browser to those agents before it says a word,
+or to the default agent when the link named none: the server creates a
+device named `Browser <its MAC>` (a MAC the server makes up, which no
+board can have), the page keeps the identity in the browser's own
+storage, and `vinga list` shows it among the devices beside the boards.
+That name is a placeholder, like a board's `Device <its MAC>`: the
+agent never says it out loud, and nothing else may take it, until you
+rename the device. Pressing Start on the page then asks for the
+microphone and holds a conversation with that agent, as a board would.
 
 The link is a credential, and it is short-lived on purpose. It works
 once: a second browser opening the same link is told it cannot be
 used. It expires ten minutes after it was printed if nobody opens it,
 and a restart of the server, an upgrade included, ends every link not
-yet opened, so after one run `vinga info` again for a fresh link. The
-token is the part after `#`, which a browser never sends to any server
-or proxy, so opening the link puts it in no access log; a link preview
-or a scanner fetching the URL gets the page and spends nothing. Only
-the page's own script reads it, clears it from the address bar, and
-hands it back to the server once.
+yet opened, so after one run `vinga device invite` again for a fresh
+link. The token is the part after `#`, which a browser never sends to
+any server or proxy, so opening the link puts it in no access log; a
+link preview or a scanner fetching the URL gets the page and spends
+nothing. Only the page's own script reads it, clears it from the
+address bar, and hands it back to the server once.
 
 Which address the link names follows from where a browser's
 microphone works, which is a secure context: an `https://` origin or
 `localhost`. When `server.public_url` is an `https://` origin (or a
-loopback one), the link names it. Otherwise `vinga info` names
+loopback one), the link names it. Otherwise `vinga device invite` names
 `localhost` on the port it reached the API on, when it reached it on
 this machine, and prints no link at all when it did not, asking for an
-`https://` `server.public_url` instead. It never names the listen
-address.
+`https://` `server.public_url` instead and failing. It never names the
+listen address.
 
-`vinga info` prints a sentence in the link's place, and carries on,
-when the server will not issue one: with no default agent set (set one
-with `vinga default-agent set <name>`, since a link binds to it), with
-`server.onboarding.enabled` off, and while as many links are waiting to
-be opened as the server holds.
+The command fails, prints nothing on stdout and says why on stderr,
+when the server will not issue a link: a named agent this deployment
+does not have (`vinga list` shows the agents there are), a named agent
+the server is not serving yet (`vinga apply` installs one written
+since), no agent named and no default agent set (set one with
+`vinga default-agent set <name>`), `server.onboarding.enabled` off, and
+while as many links are waiting to be opened as the server holds.
+`vinga info` prints no link: it reports which deployment this is and
+issues nothing.
+
+A browser can also pair with a code, exactly as a board does: opened
+with no link, the page asks for the onboarding URL, checks in, and
+shows a six-digit code that nothing admits until you run
+`vinga device pending claim <code>`. Only a link binds a browser
+without a code, and only `vinga device invite` issues one.
 
 **The WebSocket URL** is derived from the address the device reached
 the OTA endpoint on, so a LAN deployment needs no extra configuration.
