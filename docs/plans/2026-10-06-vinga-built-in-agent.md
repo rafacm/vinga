@@ -1116,7 +1116,7 @@ through their generators.
   assertion. No behavior change and no runtime caller yet. Design
   footprint: one new package, whose callers (M3 to M5) stop knowing
   where the pages are and how they are cut.
-- [ ] **M3: vinga, the built-in default agent** (PR TBD). The name, the
+- [x] **[M3: vinga, the built-in default agent](2026-10-06-vinga-built-in-agent-implementation.md#m3-vinga-the-built-in-default-agent)** (PR TBD). The name, the
   synthesis and `builtin_status`, `is_builtin`, the reference rule, the
   `builtin_agent` key (table, migration `3005`, store, document key,
   `vinga builtin-agent` noun), the refusal to create `agents.vinga`,

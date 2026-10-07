@@ -796,3 +796,336 @@ rerun; another server on the host network answering the lane's port is
 the likely cause (two implementers were running lanes at once), not
 confirmed. Generators without diff, ruff, link, Run and Use page and
 fragment checks clean.
+
+## M3: vinga, the built-in default agent
+
+**Attribution:** anthropic/claude-opus-5-5, thinking high; Claude Code 2.1.291; 2026-10-07.
+
+### What landed
+
+| Plan item | Where | Commit |
+| --- | --- | --- |
+| D1, the persona | `knowledge/persona.md`, `knowledge/persona.py` (`persona()` is the persona, a blank line, then the summary verbatim) | `Write vinga's persona in front of the summary` |
+| Q1, the table and migration `3005` | `db/schema.py` (`builtin_agent`, `SINGLETON_ID`), `db/migrations/versions/3005_builtin_agent.py`, the four head pins and the CI wheel check | `Add the builtin_agent table and migration 3005` |
+| Q1, the name, the synthesis, `builtin_status`, `is_builtin`, the reference rule, the `mcp` pin, Q10's persona through `prompt_for_agent` | `config/models.py` (`BUILTIN_AGENT`, `BuiltinAgentConfig`, `builtin_agent` in `DOMAIN_KEYS`, `DomainConfig` and `DomainSnapshot`, `resolvable_agents`, `BuiltinStatus`, `BuiltinState`, `builtin_status`, `builtin_entry`, `Config.builtin_state`, `Config.is_builtin`), `config/__init__.py` | `Serve vinga as a built-in agent of the served whole`, `Import the persona only when one is assembled` |
+| Q1, the descriptor and the `vinga builtin-agent` noun | `config/entities.py`, `examples/builtin-agent.yaml`, `examples/README.md`, `config.example.yaml` | `Describe builtin_agent as an entity kind` |
+| Q1, the store, and the refusal to create `agents.vinga` | `config/store.py` (`read_builtin_agent`, `set_builtin_agent`, the singletons read and staged from the registry, `BUILTIN_NAME_RESERVED` in `_stage_entity` and `rename_agent`) | `Store builtin_agent and refuse a new agents.vinga` |
+| Q1, the remaining surfaces | `config/views.py`, `config/responses.py`, `config/api.py`, `config/cli/entities.py`, `config/cli/deployment.py`, `config/docgen.py`, `config/diff.py` (`builtin_agent` field), `config/reload.py` (`builtin_changed`) | `Carry builtin_agent through the API, diff and apply` |
+| Pin before reshaping | `tests/unit/test_session_prompt.py` (`OPERATOR_PROMPT`) | `Pin an operator agent's assembled prompt` |
+| Q5, memory | `memory/store.py` (`read_for_prompt` and `recall` take `agent_scope`) | `Let a memory read leave the agent scope out` |
+| Q5, threads | `conversations/threads.py` (`candidates(..., device)`, `Backlog.device`, `Reads.candidates`), `runtime/resumption.py` (built with the session's MAC; `described(..., on_device)`; the backlog's device check) | `Hold a thread search to the device it runs on` |
+| Q5, the predicate handed to the tools | `tools/builtin.py` (device-only `remember` schema and scope, `_reachable`, `recall`), `tools/source.py` (`BuiltinTools(..., is_builtin, ...)`), `runtime/pipeline.py` (`_builtin` resolved on the memory policy's line, in the snapshot key, the prompt read, the `Resumption`), `app.py` (the preview) | `Give vinga its device's memory and threads` |
+| D6, the event | `events/values.py` (`ProviderStages`, `BuiltinNotServed`), `events/catalog.py` (`GENERATION_CHANNEL`, two variants, `builtin_agent_not_served`), `generation.py` (`said_what_it_serves`), the event baseline, `docs/run/logs-and-traces.md`, `docs/reference/events.md` | `Say when an installed world does not serve vinga` |
+| D6, `vinga info` | `config/responses.py` (`BuiltinAgentStatus`, `RuntimeInfo.builtin_agent`), `config/api.py` (`builtin_state` read per request), `app.py`, `config/cli/deployment.py` (`_builtin_line`) | `Report vinga's status live in vinga info` |
+| Generated references | `docs/reference/domain-config.md`, `api-openapi.json`, `cli.md`, `events.md`, through their generators | `Regenerate the references for builtin_agent` and the two commits above |
+| The suites that hold the domain document's shape | see the commit body | `Follow builtin_agent through the configuration suites` |
+| The documentation footprint before the deferred part | `docs/concepts.md` (Agent, Memory, Meta capabilities), `docs/glossary.md` (vinga), `docs/run/configuration.md` (Overriding vinga), `docs/run/security.md`, `docs/run/configuration-api.md`, `docs/architecture/cli-guide.md` (the noun list), the packaged copy | `Document vinga, the built-in agent`, `Regenerate the packaged Use pages`, `Name builtin-agent among the CLI guide's nouns` |
+| The fragment | `changelog.d/612-built-in-agent.md` | `Add the changelog fragment for the built-in agent`, `Add the default and invite entries to the fragment` |
+| Q4's claim and enrolment arms, D7 (after M1b) | `config/models.py` (`effective_default_agent`), `config/store.py` (`NOTHING_TO_ENROLL_ONTO` gone), `config/api.py` (the clear's notice and acknowledgement), `config/entities.py`, `config/responses.py`, `config/cli/grammar.py`, `config/cli/deployment.py` (`vinga (built in)`) | `Bind a claim naming no agent to vinga by default` |
+| D5 (after M1b) | `onboarding/invites.py` (`DEFAULT_AGENT_NOT_SERVED`), `config/responses.py` (the renamed member), `config/cli/reach.py` (its remedy), the API descriptions | `Refuse an invite only when the default is unserved`, `Regenerate the references for D5 and D7` |
+| The browser lane's vinga case | `tests/browser/test_browser_client.py` | `Drive vinga as the default through the browser lane` |
+| The documentation the deferred part touches | concepts.md, glossary.md, configuration.md, onboarding-a-device.md, the coding-agent guide, the browser guide, `config.example.yaml`, the presets, the packaged copy | `Document vinga as the default and the invite refusal`, `Regenerate the packaged Use pages again` |
+| The suites M1b brought | `test_invite_redeem.py`, `test_mint_failure.py` | `Follow the effective default through M1b's suites` |
+
+Design footprint as planned: `config/models.py` holds the name, the
+synthesis, the status and the predicate; `config/store.py`,
+`tools/builtin.py`, `tools/source.py`, `memory/store.py`,
+`conversations/threads.py` and `runtime/resumption.py` are deepened. No
+new module, and no new seam: nothing at the device edge knows vinga is
+built in.
+
+### The registration inventory
+
+`git grep -c "agent_defaults\|agent-defaults\|AgentDefaults" -- 'vinga-server/src/*.py'`
+at `e7a65246`, the commit M3 starts from, untruncated: 15 files, the
+same 15 the plan counted at `7e7caa5d`. What each became:
+
+- `config/__init__.py` (2): exports `BuiltinAgentConfig`.
+- `config/api.py` (10): `GET` and `PUT /builtin-agent`, and the reload docstring names the overrides.
+- `config/cli/deployment.py` (3): the tree's `builtin_agent` line, the apply's `builtin_agent changed` label. `list`, `show` and `export` read the document generically, so export carries the key with no line of its own.
+- `config/cli/entities.py` (2): the tree summary for `builtin-agent`. The `vinga builtin-agent show` and `set` commands are generated from the registry, so the noun needs no line here.
+- `config/diff.py` (7): `APPLIES["builtin_agent"]` and the `builtin_agent` field of the comparison.
+- `config/docgen.py` (1): the reference's sentence on what an apply installs.
+- `config/entities.py` (14): the `builtin-agent` descriptor, and the nested shapes' locations.
+- `config/models.py` (41): `BuiltinAgentConfig`, `DOMAIN_DESCRIPTIONS`, `DomainConfig`, `DomainSnapshot`, `check_references`.
+- `config/reload.py` (3): `builtin_changed`.
+- `config/responses.py` (12): the document's description, `ConfigDiff.builtin_agent`, `AgentsReload.builtin_changed`, the apply outcome's section token.
+- `config/store.py` (7): read, set, the singletons read and staged from the registry.
+- `config/views.py` (5): the masked read and the whole-document view.
+- `db/migrations/versions/3001_postgres_domain.py` (4): untouched; its counterpart is the new `3005_builtin_agent.py`.
+- `db/schema.py` (3): the `builtin_agent` table and `SINGLETON_ID`.
+- `providers/world.py` (2): nothing, as the plan says: it reads the synthesized `config.agents`.
+
+### Deviations from the plan
+
+1. **The synthesis runs after `_check_domain`, not before it.** Q1 orders
+   it before. Over the synthesized entry the reference check would
+   report a misspelled override twice, under `builtin_agent.<field>` and
+   under `agents.vinga.<field>`; after it, the check judges the stored
+   half alone and the synthesis builds on references already resolved.
+   `test_a_misspelled_override_is_reported_once_at_boot` holds it.
+2. **`builtin_status` answers a `BuiltinState(status, stages)`**, not a
+   bare token, so `unprovided` carries the stages the event names
+   without a second function that would have to agree with the first.
+   `Config` asks it once, before it adds the built-in to its own
+   `agents`, and keeps the answer (`Config.builtin_state`), because after
+   that `agents` holds the synthesized entry and the function would read
+   it as a displacing row.
+3. **The persona is imported where it is assembled.** Q8 says
+   `config/models.py` may reach `knowledge` without breaking #143's
+   weight pin, which is true of its weight and not of the pin: the pin
+   names every module the configuration client loads, so a top-level
+   import moved it by four names. `prompt_for_agent` imports the package
+   inside the built-in's branch, and the pin does not move.
+4. **The agent scope is left out with `agent_scope=False`**, a keyword,
+   rather than said with `None` as the plan phrases it. The first
+   argument is still the acting agent, which a lost read is reported for
+   (`memory_unreadable` names it), so it cannot become the optional
+   owner.
+5. **The event is two variants on a channel of its own.**
+   `builtin_agent_not_served` is declared once with
+   `BuiltinAgentDisplaced` and `BuiltinAgentUnprovided`, one per reason,
+   each carrying its reason as a fixed token, on
+   `vinga_server.generation`, the logger of the module that installs
+   worlds. The stages are a field and not part of the sentence: the
+   catalog renders no list into a sentence.
+6. **`BuiltinAgentConfig` re-declares its fields** rather than
+   subclassing a layer: `AgentDefaults` carries `mcp`, and a subclass
+   cannot take a field away. The include check moved into one function,
+   `check_prompt_includes`, that both layers call, and a test holds the
+   field set to `AgentConfig`'s minus `prompt` and `mcp`.
+7. **The refusal to create `agents.vinga` is a sentence and no
+   `RefusalReason` token.** Its next step is choosing another name, a
+   correction, which is not what that vocabulary is for.
+8. **`Resumption` holds the session's MAC** and a search says
+   `on_device`, rather than `described` taking the MAC: the pick has to
+   be checked against the same board, and the session's board is fixed
+   for the life of the object. `Backlog.device` defaults to `None` so
+   the existing test doubles build one unchanged.
+9. **`AgentsReload.builtin_changed` defaults to `False`**, the
+   "absent from an older server" reading `Acknowledgement.applies`
+   already takes; `RuntimeInfo.builtin_agent` is nullable for the same
+   reason.
+
+### Resolutions
+
+- **The index measurement (Q5): no index.** A temporary, uncommitted
+  case seeded the lane's database with 50 devices of 200 vinga threads
+  each (10,000 threads, a turn each) and timed
+  `threads.candidates(connection, "vinga", "the kettle on this board",
+  device)` 20 times after three warm-ups, on this Raspberry Pi 5:
+  **median 8.3 ms, max 8.6 ms** held to one device, against the 50 ms
+  bar. The plan for the device-filtered scan is a sequential scan over
+  the 10,000 rows, 1.9 ms of execution; the rest is the correlated
+  opening-turn subquery and the scoring for 200 rows. So there is no
+  conversations migration. `.logs/m3-index-measure.log`.
+- **`unprovided` and the boot.** An empty deployment boots with the
+  built-in unprovided for all four stages, and says so once.
+- **The base pin.** `OPERATOR_PROMPT` was captured with the operator
+  agent's every block filled and then run, in a throwaway worktree, at
+  `e7a65246`: it passed there, so the pin is the prompt as it was before
+  M3 touched anything.
+- **Two seeding helpers wrote every served agent to the store**
+  (`tests/integration/conftest.py`, `test_config_api_runtime.py`), which
+  after the synthesis tried to create `agents.vinga` and was refused.
+  They write the stored agents and the override; no production code
+  path did the same (an inventory of `config.agents` reads in `src/`
+  found only consumers of the served agents).
+
+### Discoveries
+
+1. **The lane's `config_with` world serves the built-in agent**, since
+   its defaults name every stage, while `base_config` and
+   `config_with_agent` do not. Six reload cases that report which agents
+   inherit a default layer now name vinga beside the agent they are
+   about, which is the inheritance working rather than noise.
+2. **An unheld search over one agent's 10,000 threads took a median
+   272 ms** in the same measurement. No vinga search is unheld, so it is
+   outside M3, but it is what an operator agent with that many threads
+   pays today.
+3. **Most of the lane's worlds now log `builtin_agent_not_served`** at
+   WARNING when their first generation is built, since they leave a
+   stage unprovided. No suite asserted the absence of warnings on that
+   channel.
+4. **The respelling transcript moved by one line**, `builtin_agent: {}`
+   in the store dump, edited in place: it is a pre-rename capture, and
+   regenerating it would prove nothing.
+5. **The CLI reads a reload answer's flags by key**, so a CLI newer than
+   its server would refuse an answer with no `builtin_changed`; the
+   model's default covers the server side only. Left as it is under the
+   pre-release stance.
+
+### Tests first, and the mutations
+
+The model and store tests were written after the code they drive and
+held to mutations instead; the session, thread, resumption, event and
+info tests were written against code that already existed for the same
+reason. Every mutation below was applied once, run, and restored by copy
+and `touch`; the log is `.logs/m3-mutations.log`.
+
+| Mutation | Killed by |
+| --- | --- |
+| The `mcp` pin dropped (the entry inherits `agent_defaults.mcp`) | `test_the_built_in_takes_no_grants_from_the_defaults` |
+| `served` answered for a legacy row (the displacement check removed) | `test_a_stored_agent_named_vinga_displaces_the_built_in`, `test_a_blank_legacy_vinga_stays_the_operator_s_agent_with_its_inherited_grants` |
+| Both fact scopes passed for vinga's prompt read | `test_vinga_reads_no_agent_memory_of_its_own` |
+| The tools never told vinga is built in (`lambda: False` for the predicate) | `test_vinga_s_remember_has_no_scope_to_choose`, `test_a_fact_told_to_vinga_on_one_board_stays_on_that_board`, `test_vinga_reads_no_agent_memory_of_its_own`, `test_vinga_s_search_is_held_to_the_board_it_talks_through` |
+| `remember` ignores the device pin | `test_a_fact_told_to_vinga_on_one_board_stays_on_that_board` |
+| The numbered tools reach the agent scope | `test_vinga_cannot_reach_an_agent_fact_by_its_number` |
+| The recall tool reads the agent scope | `test_vinga_reads_no_agent_memory_of_its_own` |
+| The store's prompt read ignores `agent_scope` | `test_a_prompt_read_with_no_agent_scope_reads_the_device_alone` |
+| The store's recall ignores `agent_scope` | `test_a_lookup_with_no_agent_scope_finds_the_device_s_facts_alone` |
+| The thread filter dropped (a thread on A offered on B) | `test_a_search_held_to_a_device_finds_only_the_threads_begun_there`, `test_a_search_held_to_a_device_with_none_offers_nothing` |
+| `Resumption` does not pass the device | `test_a_search_held_to_the_device_asks_the_store_for_that_board`, `test_a_thread_begun_on_this_board_is_resumed` |
+| The backlog's device check dropped (driven by an offer a second device's search forged) | `test_an_offer_of_another_board_s_thread_is_refused_at_the_pick` |
+| The store's creation refusal dropped | `test_an_agent_cannot_be_created_under_the_built_in_s_name`, `test_a_document_creating_it_is_refused_whole` |
+| The creation refusal ignoring the stored state | `test_an_operator_s_legacy_vinga_may_still_be_edited`, `test_a_displaced_deployment_s_export_applies_back_unchanged` |
+| The rename refusal dropped | `test_an_agent_cannot_be_renamed_to_it` |
+| The comparison never reporting the override | `test_a_pending_built_in_override_is_visible_until_the_apply` |
+| No event at a later install | `test_every_installed_world_says_it_again_and_a_served_one_does_not` |
+| `info` reading the status once at startup | `test_info_follows_the_built_in_agent_across_applies` |
+| The built-in's name no longer always resolving | `test_the_default_and_a_binding_may_name_the_built_in_whether_or_not_it_is_served`, `test_the_names_a_refusal_lists_include_the_built_in` |
+| The override's references left unchecked | `test_an_override_naming_no_provider_is_refused_under_its_own_key`, `test_an_override_naming_no_fragment_is_refused_under_its_own_key`, `test_a_misspelled_override_is_reported_once_at_boot` |
+| The built-in answered with the stored prompt | `test_the_built_in_is_answered_with_the_build_s_persona`, `test_vinga_replies_under_the_build_s_persona` |
+| D5: issuance asking whether a default is stored rather than whether it is served | `test_with_no_default_agent_a_served_built_in_agent_is_the_default`, `test_a_default_agent_written_since_the_boot_is_not_served_until_applied` |
+| D5: issuance ignoring the built-in default (comparing the stored default alone) | `test_with_no_default_agent_a_served_built_in_agent_is_the_default` |
+| The claim's and the enrolment's effective default answering nothing when unset | `test_a_claim_naming_no_agent_with_no_default_binds_the_built_in_agent` (store and API), `test_with_no_default_agent_the_browser_is_bound_to_the_built_in_agent` |
+
+One mutation was invalid as written and is not counted: replacing the
+live read in the route with a literal `served` state raised a
+`NameError` (the enum is not imported there), which fails the test for
+the wrong reason. The startup-capture mutation above is the valid form
+of the same question.
+
+No survivor among the counted mutations. The plan's M3 targets are the
+first rows: the `mcp` pin, `served` for a legacy row, both fact scopes
+for vinga (killed at the prompt read, at `remember`, at `recall` and at
+the numbered tools), the thread filter, and the backlog's device check
+driven through `Resumption` with a forged offer.
+
+### Verification
+
+All on the Raspberry Pi 5, logs in this worktree's `.logs/`. Every
+lane ran with `-n auto --dist loadfile` (four cores, four workers),
+never the `-n 2` fallback: the hottest start was 54.6 °C. M1b's
+implementer shared the machine for part of the run, so the timings
+are not idle timings.
+
+- `uv run ruff check .`: all checks passed.
+- Unit lane, before the rebase, first run (`.logs/unit-2.log`): `14
+  failed, 8516 passed, 19 skipped in 1336.68s`; the fourteen were the
+  boot announcement in suites that capture every warning and the live
+  status in two whole-answer literals, fixed in `Follow the boot
+  announcement and live status in suites`.
+- Integration lane, before the rebase (`.logs/integration-1.log`): `7
+  failed, 351 passed in 331.57s`, fixed in `Drive builtin-agent through
+  both CLI lanes`.
+- After the rebase and the deferred part, unit (`.logs/final-unit.log`,
+  start 46.9 °C): `4 failed, 8584 passed, 19 skipped in 1045.74s`, the
+  four being M1b's suites, fixed in `Follow the effective default
+  through M1b's suites`; integration (`.logs/final-integration.log`):
+  `1 failed, 362 passed in 247.99s`, the stale build cache above.
+- **The final tree**, unit (`.logs/final-unit-2.log`, start 51.3 °C):
+  `8588 passed, 19 skipped in 1052.20s (0:17:32)`; integration
+  (`.logs/final-integration-2.log`, start 53.5 °C): `363 passed in
+  229.17s (0:03:49)`.
+- The browser lane, `tests/browser/run.sh` in
+  `mcr.microsoft.com/playwright/python:v1.63.0-noble` under Podman
+  (`--network host`), with the vinga case: `11 passed in 49.46s`
+  (`.logs/browser-lane.log`).
+- The drift checks, scripted from the workflow's steps (domain and
+  server references, events, OpenAPI, the CLI reference and its
+  recipes, the conversations schema and the metrics views): all current
+  on the final tree. The packaged copy regenerated with no change.
+- `scripts/check_doc_links.py`: `checked 337 files, 0 failures`;
+  `scripts/check_run_use_pages.py`: `checked 37 Run and Use pages, 0
+  findings`; `scripts/fold_changelog.py check`: `checked 1 fragments, 0
+  failures`.
+- `tests/census`: run last, after this section and the regenerated
+  manifests were committed, and reported in the hand-back.
+
+Not verified: the image was not built and the smoke lane was not run;
+no board was onboarded against this build, so the persona has been
+heard only through the mock model and the browser lane; and the local
+lane (a real model answering as vinga) was not run, since M3 adds no
+model behavior the local lane measures and M5 is where the gate's
+replay lives.
+
+### The rebase onto M1b, and the deferred part
+
+M1b (#633) merged into `main` while the rest of M3 was done, and the
+deferred part was done on the rebased branch, as the brief directed.
+
+**The rebase.** `git fetch origin && git rebase origin/main`: 21
+commits, all survived (21 before and after, every commit subject
+present). One commit conflicted, `Report vinga's status live in vinga
+info`, in four files: `app.py`, `config/api.py`,
+`config/cli/deployment.py` and `test_config_cli_info.py`. Each was
+resolved by keeping `main`'s invite code (the `invites` runtime field
+and dependency, the removed try-link renderers in `deployment.py`, the
+`onboarding.invites` imports) and adding this branch's lines beside it
+(`builtin_state`, `_builtin_state`, the built-in status constants and
+`_builtin_line`). No conflict markers were left (grep). The generated
+references and the packaged copy were regenerated on the rebased tree
+and did not move; the census manifests were regenerated after the last
+commit, below.
+
+**D5.** `onboarding/invites.py`'s issuance refusal for an invite
+naming no agent is now `DEFAULT_AGENT_NOT_SERVED`, decided by
+comparing the effective default (`store.read_default_agent() or
+BUILTIN_AGENT`) with the agents of the world installed now. The
+`RefusalReason` member is renamed, not added beside the old one:
+`NO_DEFAULT_AGENT` / `no-default-agent` became
+`DEFAULT_AGENT_NOT_SERVED` / `default-agent-not-served`, and the
+client's remedy for it names `vinga info`, the apply and `vinga device
+invite --agent <name>`. **The older-client claim was verified**:
+`test_an_older_client_quotes_the_server_s_sentence_for_the_new_token`
+takes the token out of this client's vocabulary
+(`reach._KNOWN_REASONS`, a deliberate reach-in, since what an older
+build lacks is exactly that set) and asserts the command prints the
+server's sentence and not the new remedy.
+
+**The claim and enrolment arms (Q4).** `models.effective_default_agent`
+answers the stored default or vinga. The store's shared device write
+binds a claim or an enrolment naming no agent to it, so
+`NOTHING_TO_ENROLL_ONTO` and its decision site went. D7 followed: unset
+and `default-agent set vinga` mean the same thing, so clearing the
+default carries the notice naming vinga would (waiting for the install
+while vinga is not served), and every sentence saying a claim then had
+to name its agents now says it binds vinga. `vinga info` prints the
+unset default as `vinga (built in)`.
+
+**The browser lane's vinga case.**
+`test_with_no_default_agent_an_invite_binds_the_browser_to_vinga`
+clears the lane's default, opens an invite naming no agent, and
+asserts the browser is bound to vinga and heard and answered.
+
+**The documentation those touch:** concepts.md (Binding), the
+glossary's default agent, configuration.md (the default, and the
+displaced edge: with no default stored, a claim binds to the
+operator's agent named vinga until it is renamed),
+onboarding-a-device.md (the claim, the invite's refusal), the
+coding-agent guide, the browser guide, `config.example.yaml` and the
+presets' comments; the references and the packaged copy regenerated;
+the fragment gained the two changed behaviors and the Upgrade line's
+edges.
+
+Discoveries in the deferred part:
+
+- **Clearing the default now waits for an install on a world that
+  does not serve vinga**, which most test worlds are; two notice tests
+  and the respelling table's clear entry moved with it, and a
+  parametrized test pins both answers.
+- **A remedy quoting `--agent` alone failed the guard** that holds
+  every backticked invocation in the remedy table to the grammar; it
+  quotes the whole `vinga device invite --agent <name>` instead.
+- **M1b's own suites assumed a cleared default refuses**: its
+  redemption race (D5a) now binds the browser to vinga, and its
+  no-second-draw case refuses through an agent the link names that is
+  gone by its opening, the remaining refusal that is not a collision.
+- **The stale `uv` build cache, as AGENTS.md describes it.** The first
+  integration lane after the rebase failed one tier-closure case,
+  `device invite` missing from the client install. Confirmed before
+  cleaning: the lane's built venvs held `onboarding/try_links.py` (and
+  this branch's `3005_builtin_agent.py`), a build cached before the
+  rebase. `uv cache clean vinga-server` and the tier-closure file passed
+  whole (43 passed).
