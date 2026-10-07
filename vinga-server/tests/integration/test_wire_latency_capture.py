@@ -74,6 +74,8 @@ async def test_the_script_measures_a_turn_of_a_session_it_recorded(
     config = Config(
         providers=MOCK_PROVIDERS,
         agents={"assistant": MOCK_AGENT},
+        # Bound by name: an unbound device only pairs (#612).
+        devices={DEVICE_MAC: ["assistant"]},
         default_agent="assistant",
         server=ServerConfig(capture=CaptureConfig(enabled=True, dir=captures)),
     )

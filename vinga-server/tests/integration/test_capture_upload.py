@@ -208,6 +208,8 @@ def attaching(captures: Path) -> Config:
     return Config(
         providers=MOCK_PROVIDERS,
         agents={"assistant": MOCK_AGENT},
+        # Bound by name: an unbound device only pairs (#612).
+        devices={DEVICE_MAC: ["assistant"]},
         default_agent="assistant",
         server=ServerConfig(
             capture=CaptureConfig(enabled=True, dir=captures),
@@ -447,6 +449,8 @@ def both_surfaces(captures: Path, *, audio: bool, transcripts: bool) -> Config:
             "asr": {"mock": {"type": "mock", "text": HEARD}},
         },
         agents={"assistant": MOCK_AGENT},
+        # Bound by name: an unbound device only pairs (#612).
+        devices={DEVICE_MAC: ["assistant"]},
         default_agent="assistant",
         server=ServerConfig(
             capture=CaptureConfig(enabled=True, dir=captures),

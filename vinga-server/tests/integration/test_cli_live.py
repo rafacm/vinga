@@ -86,6 +86,7 @@ from tests.support.deployment import (
     serving,
 )
 from tests.support.leaks import chain
+from tests.support.stores import dangling_default_agent
 from vinga_server.build_info import revision
 from vinga_server.config import ConfigError, cli, docgen, entities, server_reference
 from vinga_server.config.cli import deployment, grammar, input, local, output, reach
@@ -794,13 +795,11 @@ def test_a_board_is_onboarded_by_the_code_on_its_screen(
     """The whole onboarding ceremony against a running server: the
     default agent, the code, the listing and the claim.
 
-    The two check-ins are what make the settings' claim observable. A
-    binding and the default agent are read as a device asks for them
-    rather than at a restart, so a board checking in after
-    `default-agent set` is answered as a configured device and mints no
-    code at all, and the same board after `default-agent clear` is
-    unbound and gets one. Nothing in-process can show that: it is the
-    running server re-reading the database between two requests.
+    A default agent set on the running server admits nothing (#612): the
+    board checking in after `default-agent set` is unbound and is shown a
+    code, and the claim that names no agent binds it to that default,
+    read by the running server's store at the claim. Before #612 the
+    same check-in was answered as a configured device and minted no code.
 
     This case carries one more claim, for the leak checks elsewhere in
     the file rather than for itself: that the log capture reaches the
@@ -809,10 +808,6 @@ def test_a_board_is_onboarded_by_the_code_on_its_screen(
     shown to hold a record no code in this thread made.
     """
     assert run("default-agent", "set", "sam") == 0
-    assert capsys.readouterr().out.startswith("wrote ")
-    assert isinstance(check_in(deployed, WAITING_MAC), board.Unwelcome)
-
-    assert run("default-agent", "clear") == 0
     assert capsys.readouterr().out.startswith("wrote ")
     waiting = check_in(deployed, WAITING_MAC)
     assert isinstance(waiting, board.Activating)
@@ -825,9 +820,11 @@ def test_a_board_is_onboarded_by_the_code_on_its_screen(
     assert WAITING_MAC in waiting
     assert BOARD in waiting
 
-    assert run("device", "pending", "claim", code, "sam") == 0
+    # No agent named: the default agent is what the board starts with,
+    # and the line names it (#612, D8).
+    assert run("device", "pending", "claim", code) == 0
     claimed = capsys.readouterr()
-    assert claimed.out.startswith("wrote ")
+    assert claimed.out == f"wrote device {WAITING_MAC} bound to sam\n"
     assert claimed.err.strip()
 
     assert run("device", "show", WAITING_MAC) == 0
@@ -837,6 +834,11 @@ def test_a_board_is_onboarded_by_the_code_on_its_screen(
     # waiting is no longer waiting for anything.
     assert run("device", "pending", "list") == 0
     assert code not in capsys.readouterr().out
+
+    # Back to the lane's resting state, no default agent, which the
+    # refused-claim case below relies on and restates.
+    assert run("default-agent", "clear") == 0
+    capsys.readouterr()
 
     # The capture reaches the server: the warning a board with no agent
     # earns was made on the thread uvicorn runs on, and this thread made
@@ -866,9 +868,10 @@ def test_a_claim_naming_an_agent_that_is_not_there_is_refused_over_the_wire(
     The code stays claimable afterwards, because the board is still
     showing it.
     """
-    # Unset, so an unbound board is answered with a code rather than
-    # covered. Idempotent, and it is this lane's resting state: the
-    # onboarding case leaves it cleared.
+    # Unset, which is this lane's resting state: the onboarding case
+    # leaves it cleared. An unbound board is answered with a code either
+    # way since #612; what the cleared default keeps out of this case is
+    # a claim that could have fallen back to it.
     assert run("default-agent", "clear") == 0
     capsys.readouterr()
     waiting = check_in(deployed, REFUSED_MAC)
@@ -1848,16 +1851,21 @@ def test_the_check_reads_the_store_the_running_server_booted_on(
     assert printed.out == ""
     assert printed.err.strip() == local.COMPOSES
 
+    # A default agent naming no agent, written underneath the repository,
+    # since no write can leave it (the boot's completeness rule, which a
+    # lone agent used to break, went at #612).
     engine = open_database(DatabaseConfig())
     try:
-        ConfigStore(engine, load_keys()).set_agent("sam", {"prompt": "You are Sam."})
+        store = ConfigStore(engine, load_keys())
+        store.set_agent("sam", {"prompt": "You are Sam."})
+        dangling_default_agent(store)
     finally:
         engine.dispose()
 
     assert run("check") == 1
     refused = capsys.readouterr()
     assert refused.out == ""
-    assert "default_agent is required" in refused.err
+    assert "default_agent: names no agent that exists" in refused.err
     assert "the domain schema of the vinga database" in refused.err
 
 

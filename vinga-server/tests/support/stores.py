@@ -505,11 +505,11 @@ def dangling_default_agent(store: Any) -> None:
     rule's list was, for the suites that hold a refusal to quoting
     nothing but identities.
     """
+    settings = db_module.schema.domain_settings
     planted(
         store,
-        db_module.schema.domain_settings.insert().values(
-            key=db_module.schema.DEFAULT_AGENT_KEY, value=DANGLING_AGENT
-        ),
+        settings.delete().where(settings.c.key == db_module.schema.DEFAULT_AGENT_KEY),
+        settings.insert().values(key=db_module.schema.DEFAULT_AGENT_KEY, value=DANGLING_AGENT),
     )
 
 
