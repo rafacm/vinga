@@ -185,8 +185,9 @@ More: [cross-correlation](https://en.wikipedia.org/wiki/Cross-correlation).
 ### Default agent
 
 The agent a newly bound device starts with: what `default_agent`
-names, and what a claim by activation code binds a board to when it
-names no agent. It admits nothing. A device with no binding of its own
+names, [vinga](#vinga-the-built-in-agent) when it names none, and what
+a claim by activation code binds a board to when the claim names no
+agent. It admits nothing. A device with no binding of its own
 reaches no agent, default or otherwise, and is offered a code to be
 claimed by instead. Not to be confused with a device's own default,
 the first entry of its [binding](#binding), which answers its fresh

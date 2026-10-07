@@ -172,8 +172,9 @@ server:
   # A board typing that URL with no binding of its own is answered with a
   # six-digit code it shows and speaks; `config device pending list` lists what is
   # waiting and `config device pending claim <code> [<agent>]` binds it, with no
-  # restart and no MAC to look up. Left out, the agent is default_agent, which
-  # is what a claim binds to and nothing more: an unbound board never reaches it.
+  # restart and no MAC to look up. Left out, the agent is default_agent, or
+  # vinga, the built-in agent, when none is set, which is what a claim binds
+  # to and nothing more: an unbound board never reaches it.
   onboarding:
     enabled: true
     # The key, pinned. Its one use is a secret rotation: pinning the

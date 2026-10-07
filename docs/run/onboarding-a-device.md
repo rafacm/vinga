@@ -113,9 +113,9 @@ vinga-server config device pending claim 418293 assistant
 ```
 
 Name no agent and the board is bound to the deployment's default agent
-(`default_agent`), the agent a newly bound device starts with; the line
-says which agent that was. With no default agent set, a claim naming no agent is refused
-and the code still works. The device polls every three seconds while it
+(`default_agent`), the agent a newly bound device starts with, which is
+vinga, the built-in agent, when none is set; the line says which agent
+that was. The device polls every three seconds while it
 waits, so it connects seconds later with no restart and no power cycle.
 `device bind` is the same write for a MAC you already know, and it
 always names its agents; `device pending claim` is for the board in
@@ -218,8 +218,10 @@ The command fails, prints nothing on stdout and says why on stderr,
 when the server will not issue a link: a named agent this deployment
 does not have (`vinga list` shows the agents there are), a named agent
 the server is not serving yet (`vinga apply` installs one written
-since), no agent named and no default agent set (set one with
-`vinga default-agent set <name>`), `server.onboarding.enabled` off, and
+since), no agent named and the default agent not served (on a fresh
+server that is vinga, the built-in agent, before any provider is
+configured; `vinga info` says why it is not served),
+`server.onboarding.enabled` off, and
 while as many links are waiting to be opened as the server holds.
 `vinga info` prints no link: it reports which deployment this is and
 issues nothing.

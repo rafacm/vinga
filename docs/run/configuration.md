@@ -44,7 +44,8 @@ unless it says otherwise, `builtin_agent` holding what vinga, the
 built-in agent, uses instead, `agents` combining a prompt with provider,
 fragment and MCP references, `devices` holding a record per board by
 its MAC address (its name, where it stands, and the agents it is bound
-to), and `default_agent`, the agent a newly claimed board starts with.
+to), and `default_agent`, the agent a newly claimed board starts with,
+which is vinga, the built-in agent, when none is set.
 
 The CLI writes it through the configuration API on the running server,
 so these commands need one to be up, and an empty database is a valid
@@ -258,7 +259,9 @@ vinga apply
 
 The rename moves its device bindings, the default agent if it was one,
 its remembered facts and its conversation threads in one transaction,
-and the built-in agent appears at the apply. Deleting that agent
+and the built-in agent appears at the apply. Until then, with no
+`default_agent` stored, the default is the name vinga, which is that
+agent's, so a claim naming no agent binds a board to it. Deleting that agent
 instead leaves its remembered facts unread, since vinga keeps no
 memory of its own, and its threads findable by vinga only on the
 device each was held on.

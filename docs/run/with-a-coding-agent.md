@@ -512,10 +512,13 @@ turn has worked.
 
 First read whether a link can be issued, from what you already know:
 the filtered `vinga info` says whether onboarding is on, and its
-`configured:` line names the default agent. A link that names no agent
-binds the browser to the default agent, so with none set either the
-person names one with `--agent <name>` or sets a default, and which is
-the person's answer to section 6, not yours. A named agent has to be
+`configured:` line names the default agent, `vinga (built in)` when
+none is set. A link that names no agent binds the browser to the
+default agent, so it can be issued only while the server serves that
+agent: with vinga not served (`vinga info` says so, and why), either
+the person names an agent with `--agent <name>`, sets another default,
+or configures the providers vinga needs, and which is the person's
+answer to section 6, not yours. A named agent has to be
 one the server is serving, so one written since the last `vinga apply`
 waits for it.
 
