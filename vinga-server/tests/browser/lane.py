@@ -113,6 +113,31 @@ redact = Redactor()
 DIAGNOSTICS: list[Callable[[], str]] = []
 
 
+# What a page that would not load is reported as. Fixed, because the
+# failure it stands for quotes the address it was given, invite token
+# and all, and the token is a credential (#613, D7a).
+NOT_LOADED = "the page did not load from its invite link"
+
+
+def opened(goto: Callable[[str], object], address: str, failure: type[BaseException]) -> None:
+    """Open `address` with `goto`, or raise `NOT_LOADED` carrying nothing
+    of the `failure` that stopped it.
+
+    Raised after the handler has been left, not inside it: an exception
+    raised while another is being handled keeps that one on its
+    `__context__` whatever `from None` hides in a printed traceback, and
+    a chain walker or a test report would find the address there.
+    """
+    loaded = False
+    try:
+        goto(address)
+        loaded = True
+    except failure:
+        pass
+    if not loaded:
+        raise RuntimeError(NOT_LOADED)
+
+
 def free_port() -> int:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))

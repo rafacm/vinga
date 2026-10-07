@@ -24,7 +24,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import pytest
-from lane import DIAGNOSTICS, FAIL_WORKLETS, INSTRUMENT, LANE_AGENT, Server, redact
+from lane import DIAGNOSTICS, FAIL_WORKLETS, INSTRUMENT, LANE_AGENT, Server, opened, redact
 from lane import wait_for as poll
 from playwright.sync_api import Browser, Page, WebSocket
 from playwright.sync_api import Error as PlaywrightError
@@ -160,11 +160,10 @@ def open_link(
 
     DIAGNOSTICS.append(describe)
     query = f"?{switches}" if switches else ""
-    try:
-        page.goto(f"{server.base}{path}{query}" + (f"#{token}" if token else ""))
-    except PlaywrightError:
-        # Playwright's message quotes the address, fragment and all.
-        raise RuntimeError("the page did not load from its invite link") from None
+    # Playwright's message quotes the address, fragment and all, so what
+    # escapes is `lane.NOT_LOADED` with nothing chained behind it.
+    address = f"{server.base}{path}{query}" + (f"#{token}" if token else "")
+    opened(page.goto, address, PlaywrightError)
     ready = "#start" if link else "#pair"
     visit.wait_for("the page to be ready", lambda: page.locator(ready).is_visible())
     return visit
