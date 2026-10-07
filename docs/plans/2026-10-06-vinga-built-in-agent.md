@@ -195,7 +195,13 @@ marked and say which premise moved.
     its own, `vinga device invite`, which may name the agent the browser
     is bound to; `vinga info` reports and never issues; and the page
     moves from `/try/` to `/talk/`. Recorded on #612 in the same change
-    that commits this plan.
+    that commits this plan. What the command makes exclusive is issuing
+    a link that binds a browser *without* a code. A browser may still
+    pair by code exactly as a board does (decision 10): the page mints
+    an identity, shows the code, and nothing reaches an agent until the
+    operator runs `vinga device pending claim`. That is the operator's
+    consent, given per device, so M1 enabling it before M1b exists opens
+    no admission path the operator does not act on.
 
 ## Open questions, resolved
 
@@ -1186,6 +1192,15 @@ Reviewed 2026-10-07 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.1
    Evidence: Q4 (`docs/plans/2026-10-06-vinga-built-in-agent.md:373`) removes both `try_identity` refusals and makes it always mint, while decision 13 (`docs/plans/2026-10-06-vinga-built-in-agent.md:190`) says only `vinga device invite` may issue browser admission. M1b, which replaces try links with invites, comes later. Today those refusals are the branches in browser/router.py (`vinga-server/src/vinga_server/browser/router.py:201`).
 
    Plan should say: land the invite-only issuance and redemption path atomically with the pairing-rule change, or preserve a refusal until M1b is installed. A deployable M1 must not let a page mint a browser identity that can pair outside the invite command.
+
+   *Resolution:* rejected, with decision 13 clarified. Only *issuing a link
+   that binds without a code* is made exclusive to `vinga device
+   invite`; pairing by code stays open to a browser as to a board
+   (decision 10), and a code admits nothing until the operator claims
+   it. So M1's always-minting `try_identity` lets a browser *ask* to
+   join, never join, and M1 is deployable as cut. The M1 tests already
+   assert a minted browser is offered a code and refused a token until
+   it is claimed.
 
 3. **P1: The local-stack fallback contradicts the settled local-agent decision.**
 
