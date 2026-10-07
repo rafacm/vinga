@@ -436,8 +436,13 @@ beside `remembers`, answering for the current reply's world.
   `ThreadSearch` carry it; `Resumption.described` passes the session's
   MAC for the built-in. `Backlog` answers its device, and
   `Resumption._backlog` refuses a mismatch as it refuses another
-  agent's thread, defense behind the offer gate. No migration and no
-  index: the scan already narrows by agent. Rejected: an owner string
+  agent's thread, defense behind the offer gate. Whether the filter
+  needs an index is measured, not argued: for the built-in the agent's
+  threads are the whole deployment's, so M3 times the device-filtered
+  search on a seeded store of 50 devices with 200 vinga threads each
+  and adds a composite `(agent, device, last_active_at)` index by a
+  conversations migration if the search exceeds 50 ms on agentpi,
+  recording the number either way. Rejected: an owner string
   such as `vinga@<mac>` in the agent column, which breaks rename,
   listing and every query keyed on the agent's name.
 - **Memory, pinned to device scope.** For the built-in, `remember`
@@ -1310,5 +1315,11 @@ Reviewed 2026-10-07 by openai/gpt-5.6-terra, thinking high via codex CLI 0.160.1
    Evidence: the plan says filtering `conversations.device` needs no index because the scan already narrows by agent (Q5 (`docs/plans/2026-10-06-vinga-built-in-agent.md:400`)). The current search intentionally scans all threads for an agent (threads.py (`vinga-server/src/vinga_server/conversations/threads.py:712`)). For built-in `vinga`, that agent is precisely the deployment-wide population, so every device-scoped resume search can scan every device’s vinga thread.
 
    Plan should say: measure the filtered query at a stated deployment size and either add a composite `(agent, device, last_active_at)` index migration or document a justified bound and regression benchmark. The present argument relies on the old agent-per-device cardinality.
+
+   *Resolution:* accepted. The no-index argument assumed one agent per device's
+   population; for vinga it is the deployment. M3 measures the filtered
+   search on a seeded store (50 devices, 200 vinga threads each) and adds
+   the composite index by migration if it passes 50 ms, recording the
+   measurement either way (Q5).
 
 Verdict: **not ready.**
