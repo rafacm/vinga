@@ -184,7 +184,7 @@ def test_a_board_nobody_has_named_records_no_name(store: ConfigStore) -> None:
 
 
 def test_a_browser_nobody_has_named_records_no_name(store: ConfigStore) -> None:
-    """`Browser <mac>` is what a try link calls the browser it binds,
+    """`Browser <mac>` is what an invite link calls the browser it binds,
     the same placeholder as a board's `Device <mac>`, and the session
     row records null for it just the same."""
     config = recording_server(store)

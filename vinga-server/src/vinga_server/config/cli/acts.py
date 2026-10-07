@@ -133,7 +133,7 @@ class Act:
 
     # What this client adds to the answer before it is printed, from the
     # address this invocation reached, for the one act whose answer
-    # leaves part of itself to the client: a try link names no origin
+    # leaves part of itself to the client: an invite link names no origin
     # when the server has none a browser can use, and the client's own
     # API target can supply one (#613, D5c). The renderer stays a
     # function of what it is handed, which is the answer completed here.
@@ -143,7 +143,7 @@ class Act:
 
     # What is printed instead when the API refuses this act, for the one
     # act whose refusal is a line of the command's answer rather than
-    # its end: `info`'s try link, which a deployment with no default
+    # its end: `info`'s invite link, which a deployment with no default
     # agent yet cannot issue and which must not stop `info` saying the
     # rest. Handed the refusal's sentence, which is this API's own and
     # this client's remedy. Only a refusal this API wrote is taken here;

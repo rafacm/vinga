@@ -1,4 +1,4 @@
-"""Where the browser client is served, how a try link is redeemed, and
+"""Where the browser client is served, how an invite link is redeemed, and
 how an unbound browser starts.
 
 Four things, mounted together whenever onboarding is enabled, since a
@@ -6,7 +6,7 @@ browser needs the onboarding alias to check in at all (#613, D2):
 
 - `GET /try/`, the page, keyless and `no-store`;
 - `GET /try/static/<version>/<name>`, its modules, immutable;
-- `POST /try/redeem`, which spends a try link's token and binds the
+- `POST /try/redeem`, which spends an invite link's token and binds the
   browser presenting it (D5), keyless because the token is the
   credential, and refused from any origin but the page's own;
 - `POST /x/<key>/try-identity`, on the onboarding alias and behind its
@@ -14,7 +14,7 @@ browser needs the onboarding alias to check in at all (#613, D2):
   (D4). A wrong key meets the alias's stock 404, through the same
   guard every other alias route stands behind.
 
-The page is inert. A try link carries its token in the URL's fragment,
+The page is inert. An invite link carries its token in the URL's fragment,
 which no browser sends to any server, so `GET /try/` is the same page
 for a person, a link preview, a prefetch and a scanner, and spends
 nothing for any of them; only the page's own script, reading the
@@ -40,8 +40,8 @@ from vinga_server.composition import Composition
 from vinga_server.config.api import store_dependency
 from vinga_server.config.models import BROWSER_MOUNT_PATH, ONBOARDING_MOUNT_PATH
 from vinga_server.onboarding.browser import mint
+from vinga_server.onboarding.invites import redeem
 from vinga_server.onboarding.keys import _guarded, onboarding_path
-from vinga_server.onboarding.try_links import redeem
 from vinga_server.ota.router import spellings
 
 from .assets import (
@@ -56,7 +56,7 @@ from .assets import (
 # What a browser appends to the onboarding path to ask for an identity.
 TRY_IDENTITY_SEGMENT = "try-identity"
 
-# Where the page redeems a try link's token.
+# Where the page redeems an invite link's token.
 REDEEM_PATH = f"{BROWSER_MOUNT_PATH}/redeem"
 
 # What every way of not redeeming answers, byte for byte: a token never
@@ -64,7 +64,7 @@ REDEEM_PATH = f"{BROWSER_MOUNT_PATH}/redeem"
 # body that is not one. One sentence, so a guesser learns nothing from
 # which it got, and the page shows it as it stands.
 REDEEM_REFUSED = (
-    "This try link cannot be used: it has been opened already, it has expired, or "
+    "This invite link cannot be used: it has been opened already, it has expired, or "
     "the server has restarted since it was made. Ask the person who runs this server "
     "for a new one."
 )
@@ -116,7 +116,7 @@ def build_router(key: str | None, assets: Assets | None = None) -> APIRouter:
         router.get(spelling)(static)
 
     async def redeem_link(request: Request) -> Response:
-        """Spend a try link's token and bind the browser presenting it,
+        """Spend an invite link's token and bind the browser presenting it,
         or the one refusal.
 
         The origin is asked first and the body second, and both before
@@ -130,7 +130,7 @@ def build_router(key: str | None, assets: Assets | None = None) -> APIRouter:
         # lifespan opened: the store the bindings this browser is about
         # to check in against are read from.
         store = next(store_dependency(comp.api))
-        identity = await redeem(comp.try_links, token, store)
+        identity = await redeem(comp.invites, token, store)
         if identity is None:
             return _refused()
         return JSONResponse(

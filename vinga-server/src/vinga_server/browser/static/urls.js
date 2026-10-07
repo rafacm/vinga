@@ -58,7 +58,7 @@ export function onboarding(path, segment = "") {
   return new URL(`${path}${segment}`, ROOT);
 }
 
-// The redemption of a try link, beside the page.
+// The redemption of an invite link, beside the page.
 export function redeem() {
   return new URL("try/redeem", ROOT);
 }

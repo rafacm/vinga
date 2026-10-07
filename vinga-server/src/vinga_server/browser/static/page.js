@@ -1,6 +1,6 @@
 // What the person sees, and the order things happen in (#613, D3).
 //
-// The page is inert until its script runs. A try link is
+// The page is inert until its script runs. An invite link is
 // `<origin>/try/#<token>`; the token is in the fragment, which the
 // browser sends to no server, so this script is the only thing that
 // ever reads it: it takes it and clears it from the address bar and
@@ -228,7 +228,7 @@ async function main() {
   if (device === null) {
     show("pair", true);
     if (token === "") {
-      say("Paste the onboarding URL this server's operator gave you, or open a try link.");
+      say("Paste the onboarding URL this server's operator gave you, or open an invite link.");
     }
     return;
   }

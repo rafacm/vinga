@@ -1,6 +1,6 @@
-"""The try link's token store (#613, D5, D5d, D6, D6a).
+"""The invite link's token store (#613, D5, D5d, D6, D6a).
 
-A try link is a bearer token held in this process's memory: minted for
+An invite link is a bearer token held in this process's memory: minted for
 the operator, redeemed once by the browser that opens the link, and
 gone after ten minutes whether or not anybody opened it. What the store
 promises is four things, each pinned here by what a caller can see:
@@ -20,8 +20,8 @@ import time
 import pytest
 
 import vinga_server.onboarding as onboarding
-from vinga_server.config.loader import TryLinkRefusedError
-from vinga_server.onboarding.try_links import CAPACITY_REACHED, TryLinks
+from vinga_server.config.loader import InviteRefusedError
+from vinga_server.onboarding.invites import CAPACITY_REACHED, Invites
 
 
 class Clock:
@@ -49,7 +49,7 @@ def counting():
 
 def test_a_token_is_thirty_two_drawn_bytes_in_urlsafe_base64() -> None:
     draw = counting()
-    links = TryLinks(randomness=draw)
+    links = Invites(randomness=draw)
 
     token = links.issue()
 
@@ -60,7 +60,7 @@ def test_a_token_is_thirty_two_drawn_bytes_in_urlsafe_base64() -> None:
 
 
 def test_an_issued_token_is_claimed_exactly_once() -> None:
-    links = TryLinks(clock=Clock())
+    links = Invites(clock=Clock())
     token = links.issue()
 
     assert links.claim(token) is True
@@ -71,7 +71,7 @@ def test_an_issued_token_is_claimed_exactly_once() -> None:
 def test_a_spent_token_is_gone_from_the_store() -> None:
     """Spent is not a flag kept beside the token: the record leaves with
     the claim, so nothing of a used link stays in memory."""
-    links = TryLinks(clock=Clock())
+    links = Invites(clock=Clock())
     token = links.issue()
     links.issue()
 
@@ -85,7 +85,7 @@ def test_a_spent_token_is_gone_from_the_store() -> None:
     ["", "never-issued", "A" * 43, None, 42, ["a list"], {"a": "map"}, "x" * 10_000],
 )
 def test_anything_that_is_not_an_issued_token_is_refused(token: object) -> None:
-    links = TryLinks(clock=Clock())
+    links = Invites(clock=Clock())
     links.issue()
 
     assert links.claim(token) is False
@@ -94,10 +94,10 @@ def test_anything_that_is_not_an_issued_token_is_refused(token: object) -> None:
 
 def test_a_token_expires_after_ten_minutes() -> None:
     clock = Clock()
-    links = TryLinks(clock=clock)
+    links = Invites(clock=clock)
     early, late = links.issue(), links.issue()
 
-    clock.now += onboarding.TRY_LINK_TTL_S - 0.001
+    clock.now += onboarding.INVITE_TTL_S - 0.001
     assert links.claim(early) is True
 
     clock.now += 0.001
@@ -105,15 +105,15 @@ def test_a_token_expires_after_ten_minutes() -> None:
 
 
 def test_the_lifetime_is_ten_minutes() -> None:
-    assert onboarding.TRY_LINK_TTL_S == 600.0
+    assert onboarding.INVITE_TTL_S == 600.0
 
 
 def test_expired_records_are_removed_by_the_next_issue() -> None:
     clock = Clock()
-    links = TryLinks(clock=clock)
+    links = Invites(clock=clock)
     links.issue()
     links.issue()
-    clock.now += onboarding.TRY_LINK_TTL_S
+    clock.now += onboarding.INVITE_TTL_S
 
     # Nothing has asked yet, so nothing has been pruned: the count is
     # what is held, not what is live.
@@ -125,10 +125,10 @@ def test_expired_records_are_removed_by_the_next_issue() -> None:
 
 def test_expired_records_are_removed_by_the_next_claim() -> None:
     clock = Clock()
-    links = TryLinks(clock=clock)
+    links = Invites(clock=clock)
     links.issue()
     links.issue()
-    clock.now += onboarding.TRY_LINK_TTL_S
+    clock.now += onboarding.INVITE_TTL_S
 
     assert links.claim("never-issued") is False
 
@@ -138,13 +138,13 @@ def test_expired_records_are_removed_by_the_next_claim() -> None:
 def test_a_mint_past_the_capacity_is_refused_and_holds_nothing_more(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(onboarding, "TRY_LINK_CAPACITY", 3)
+    monkeypatch.setattr(onboarding, "INVITE_CAPACITY", 3)
     draw = counting()
-    links = TryLinks(clock=Clock(), randomness=draw)
+    links = Invites(clock=Clock(), randomness=draw)
     for _ in range(3):
         links.issue()
 
-    with pytest.raises(TryLinkRefusedError) as refused:
+    with pytest.raises(InviteRefusedError) as refused:
         links.issue()
 
     assert str(refused.value) == CAPACITY_REACHED
@@ -154,12 +154,12 @@ def test_a_mint_past_the_capacity_is_refused_and_holds_nothing_more(
 
 
 def test_expiry_frees_capacity(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(onboarding, "TRY_LINK_CAPACITY", 2)
+    monkeypatch.setattr(onboarding, "INVITE_CAPACITY", 2)
     clock = Clock()
-    links = TryLinks(clock=clock)
+    links = Invites(clock=clock)
     links.issue()
     links.issue()
-    clock.now += onboarding.TRY_LINK_TTL_S
+    clock.now += onboarding.INVITE_TTL_S
 
     links.issue()
 
@@ -167,8 +167,8 @@ def test_expiry_frees_capacity(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_a_claim_frees_capacity(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(onboarding, "TRY_LINK_CAPACITY", 1)
-    links = TryLinks(clock=Clock())
+    monkeypatch.setattr(onboarding, "INVITE_CAPACITY", 1)
+    links = Invites(clock=Clock())
     links.claim(links.issue())
 
     links.issue()
@@ -179,10 +179,10 @@ def test_a_claim_frees_capacity(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_a_new_store_knows_no_token_of_an_old_one() -> None:
     """A restart is a new store: every unredeemed link of the old
     process meets the same answer an unknown token does (D5e)."""
-    before = TryLinks(clock=Clock())
+    before = Invites(clock=Clock())
     token = before.issue()
 
-    after = TryLinks(clock=Clock())
+    after = Invites(clock=Clock())
 
     assert after.claim(token) is False
 
@@ -195,7 +195,7 @@ def test_the_default_randomness_is_the_operating_systems(
     draw = counting()
     monkeypatch.setattr(secrets, "token_bytes", draw)
 
-    TryLinks().issue()
+    Invites().issue()
 
     assert draw.asked == [32]  # type: ignore[attr-defined]
 
@@ -206,15 +206,15 @@ def test_the_default_clock_is_monotonic(monkeypatch: pytest.MonkeyPatch) -> None
     lengthen every live link's life."""
     clock = Clock()
     monkeypatch.setattr(time, "monotonic", clock)
-    links = TryLinks()
+    links = Invites()
     token = links.issue()
 
-    clock.now += onboarding.TRY_LINK_TTL_S
+    clock.now += onboarding.INVITE_TTL_S
 
     assert links.claim(token) is False
 
 
 def test_two_default_tokens_differ() -> None:
-    links = TryLinks()
+    links = Invites()
 
     assert links.issue() != links.issue()

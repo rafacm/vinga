@@ -1,4 +1,4 @@
-"""The try link: a short-lived, single-use token that binds a browser.
+"""The invite link: a short-lived, single-use token that binds a browser.
 
 `vinga info` prints `<origin>/try/#<token>`. The token travels in the
 URL's fragment, which a browser sends to no server and puts in no
@@ -14,7 +14,7 @@ What this module's callers stop having to know:
 - **Expiry, reuse and growth.** A token lives ten minutes and is spent
   by its first claim, which removes it; every issue and every claim
   first removes the records past their expiry, and the store holds at
-  most `TRY_LINK_CAPACITY` of them (D6, D6a). An unknown, an expired and
+  most `INVITE_CAPACITY` of them (D6, D6a). An unknown, an expired and
   a spent token are one answer, so a caller cannot tell them apart and
   neither can whoever is guessing.
 - **The one winner.** `claim` checks and removes in one step, under a
@@ -65,11 +65,11 @@ import vinga_server.onboarding as onboarding
 from vinga_server.class_names import failure_name
 from vinga_server.config.loader import (
     DeviceAlreadyBoundError,
+    InviteRefusedError,
     SnapshotOnlyError,
-    TryLinkRefusedError,
 )
 from vinga_server.config.models import BROWSER_MOUNT_PATH, ServerConfig, browser_device_name
-from vinga_server.config.responses import RefusalReason, TryLink
+from vinga_server.config.responses import Invite, RefusalReason
 
 from .browser import BrowserIdentity, Randomness, mint
 
@@ -92,19 +92,19 @@ ONBOARDING_OFF = (
 )
 
 NO_DEFAULT_AGENT = (
-    "no default agent is set, so a browser opening a try link would have no agent to be "
+    "no default agent is set, so a browser opening an invite link would have no agent to be "
     "bound to. Nothing was issued."
 )
 
 CAPACITY_REACHED = (
-    f"as many try links as this server holds are already waiting to be opened, so no "
+    f"as many invite links as this server holds are already waiting to be opened, so no "
     f"more are issued until one is opened or expires; each lasts "
-    f"{int(onboarding.TRY_LINK_TTL_S // 60)} minutes. Nothing was issued."
+    f"{int(onboarding.INVITE_TTL_S // 60)} minutes. Nothing was issued."
 )
 
 SNAPSHOT_ONLY = (
     "this server serves a configuration it was given rather than one it read from a "
-    "store, so a browser bound by a try link would be written to a store this server "
+    "store, so a browser bound by an invite link would be written to a store this server "
     "does not read its devices from. Nothing was issued, and making the request again "
     "will not help; a server started from a store issues them."
 )
@@ -119,24 +119,24 @@ logger = logging.getLogger(__name__)
 # failure's class, through `failure_name`, and never its message, the
 # token or the MAC that was drawn.
 SPENT_UNENROLLED = (
-    "a try link was spent, but the browser that opened it could not be enrolled "
+    "an invite link was spent, but the browser that opened it could not be enrolled "
     "(%s), so nothing was written; a new link can be printed for it"
 )
 
 SPENT_ALL_TAKEN = (
-    "a try link was spent, but every identity drawn for the browser that opened it "
+    "an invite link was spent, but every identity drawn for the browser that opened it "
     "was already taken, so nothing was written; a new link can be printed for it"
 )
 
 # What an issuance that minted a token and then could not answer with
 # it raises. Not a state of the deployment, so not a refusal: the API's
 # last-resort handler answers it as the failure it is.
-ISSUE_FAILED = "a try link was minted and could not be answered, so it was withdrawn"
+ISSUE_FAILED = "an invite link was minted and could not be answered, so it was withdrawn"
 
 Clock = Callable[[], float]
 
 
-class TryLinks:
+class Invites:
     """The links issued and not yet redeemed, in this process's memory.
 
     `clock` answers seconds on a monotonic scale and `randomness` a
@@ -178,15 +178,15 @@ class TryLinks:
             return len(self._live)
 
     def issue(self) -> str:
-        """A fresh token, live for `TRY_LINK_TTL_S`, or the capacity
+        """A fresh token, live for `INVITE_TTL_S`, or the capacity
         refusal with nothing drawn and nothing held."""
         with self._lock:
             now = self._now()
             self._prune(now)
-            if len(self._live) >= onboarding.TRY_LINK_CAPACITY:
-                raise TryLinkRefusedError(CAPACITY_REACHED)
+            if len(self._live) >= onboarding.INVITE_CAPACITY:
+                raise InviteRefusedError(CAPACITY_REACHED)
             token = base64.urlsafe_b64encode(self._draw()).rstrip(b"=").decode("ascii")
-            self._live[token] = now + onboarding.TRY_LINK_TTL_S
+            self._live[token] = now + onboarding.INVITE_TTL_S
             return token
 
     def claim(self, token: object) -> bool:
@@ -209,7 +209,7 @@ class TryLinks:
 
 
 def link_origin(server: ServerConfig) -> str | None:
-    """The origin a try link names, when this server's configuration
+    """The origin an invite link names, when this server's configuration
     states one that opens a secure context, and None otherwise.
 
     `server.public_url` and nothing else: it is the name a deployment
@@ -247,11 +247,11 @@ class Issuer:
     serves. Composed by the composition root, so the API learns none of
     it."""
 
-    links: TryLinks
+    links: Invites
     server: ServerConfig
     snapshot_only: bool
 
-    def issue(self, default_agent: str | None) -> TryLink:
+    def issue(self, default_agent: str | None) -> Invite:
         """A link, or the refusal of the first state that rules one out.
 
         `default_agent` is what the store says now, read by the caller in
@@ -259,19 +259,19 @@ class Issuer:
         process runs.
         """
         if not self.server.onboarding.enabled:
-            raise TryLinkRefusedError(ONBOARDING_OFF)
+            raise InviteRefusedError(ONBOARDING_OFF)
         if self.snapshot_only:
             raise SnapshotOnlyError(SNAPSHOT_ONLY)
         if default_agent is None:
-            raise TryLinkRefusedError(NO_DEFAULT_AGENT, reason=RefusalReason.NO_DEFAULT_AGENT)
+            raise InviteRefusedError(NO_DEFAULT_AGENT, reason=RefusalReason.NO_DEFAULT_AGENT)
         origin = link_origin(self.server)
         token = self.links.issue()
-        answer: TryLink | None = None
+        answer: Invite | None = None
         try:
-            answer = TryLink(
+            answer = Invite(
                 origin=origin,
                 page=f"{BROWSER_MOUNT_PATH}/#{token}",
-                lifetime_s=int(onboarding.TRY_LINK_TTL_S),
+                lifetime_s=int(onboarding.INVITE_TTL_S),
             )
         except Exception:
             # Building the one answer that carries the token failed, and
@@ -288,7 +288,7 @@ class Issuer:
 
 
 async def redeem(
-    links: TryLinks,
+    links: Invites,
     token: object,
     store: "ConfigStore",
     randomness: Randomness | None = None,
@@ -299,7 +299,7 @@ async def redeem(
     it awaits nothing and writes nothing (D5d). The winner mints an
     identity and has the store create the device, bound to the default
     agent and named, in one transaction (D5b); a MAC that already has a
-    row is minted again, `TRY_LINK_MINTS` times at most, and every other
+    row is minted again, `INVITE_MINTS` times at most, and every other
     failure (the default agent cleared since the link was issued, a
     database that will not answer, anything a layer under the store
     raises) is None with nothing written and nothing raised. The
@@ -310,7 +310,7 @@ async def redeem(
     """
     if not links.claim(token):
         return None
-    for _ in range(onboarding.TRY_LINK_MINTS):
+    for _ in range(onboarding.INVITE_MINTS):
         identity = mint(randomness)
         failed: str | None = None
         try:

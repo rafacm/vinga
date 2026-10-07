@@ -1021,8 +1021,8 @@ class RuntimeInfo(BaseModel):
         return self
 
 
-class TryLink(BaseModel):
-    """A try link: what a browser opens to join this deployment as a
+class Invite(BaseModel):
+    """An invite link: what a browser opens to join this deployment as a
     device bound to its default agent.
 
     It carries a credential, a token that binds whichever browser
@@ -1176,7 +1176,7 @@ class RefusalReason(StrEnum):
     `provider-missing` and `mcp-server-missing` are a stored secret
     written to a holder that is not there, and they are two states
     rather than one because the remedy names the holder's own noun.
-    `no-default-agent` is a try link asked of a deployment with no
+    `no-default-agent` is an invite link asked of a deployment with no
     default agent, which a browser opening it could not be bound to.
 
     How to read one: map a token you know to a sentence of your own

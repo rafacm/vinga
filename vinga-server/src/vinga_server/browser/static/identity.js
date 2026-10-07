@@ -1,7 +1,7 @@
 // Who this browser is, as a device: kept in its own storage, and only
 // ever handed to it by the server (#613, D1, D4, D5).
 //
-// Two requests hand an identity over. A try link's token, read from the
+// Two requests hand an identity over. An invite link's token, read from the
 // page's fragment, is redeemed with one same-origin POST, which answers
 // the identity and the onboarding path to check in at. A browser that
 // holds no identity and no link starts from the onboarding URL instead,
@@ -40,7 +40,7 @@ export function stored() {
 
 // Kept as the path the onboarding path resolves to on this origin,
 // prefix included, which is the shape the page has stored it in since
-// the try link first did; read back through `urls.onboardingPath`, which
+// the invite link first did; read back through `urls.onboardingPath`, which
 // takes either shape.
 function keep(answer, onboardingPath) {
   try {
@@ -79,7 +79,7 @@ async function answered(request, fallback) {
   return body;
 }
 
-// Spend a try link's token. What comes back is this browser's identity
+// Spend an invite link's token. What comes back is this browser's identity
 // and the onboarding path it checks in at.
 export async function redeem(token) {
   const body = await answered(
@@ -91,11 +91,11 @@ export async function redeem(token) {
       credentials: "omit",
       referrerPolicy: "no-referrer",
     }),
-    "This try link cannot be used.",
+    "This invite link cannot be used.",
   );
   const onboardingPath = urls.onboardingPath(body.onboarding_path);
   if (onboardingPath === null) {
-    throw new Refused("This try link cannot be used.");
+    throw new Refused("This invite link cannot be used.");
   }
   return keep(body, onboardingPath);
 }

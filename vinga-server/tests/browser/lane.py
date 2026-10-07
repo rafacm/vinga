@@ -1,7 +1,7 @@
 """What the browser lane knows about the server it drives (#613).
 
 The lane talks to the server under test only as an operator and a
-device would: the configuration API to seed it and issue try links,
+device would: the configuration API to seed it and issue invite links,
 its event stream to watch what it says, its log, and the page. This
 module is that reach, and the timing the cases depend on. It imports
 the standard library and nothing of the server: the runner's
@@ -69,7 +69,7 @@ LANE_AGENT = "assistant"
 REDACTED = "[redacted]"
 
 # The two token shapes this server issues, found whether or not the
-# lane ever saw the value: a try token is 32 random bytes in unpadded
+# lane ever saw the value: an invite token is 32 random bytes in unpadded
 # urlsafe base64, 43 characters; a device token is a signature of the
 # same shape, a dot, and the second it was issued. Bounded on both
 # sides, so a longer run (a hex digest) is not mistaken for one.

@@ -72,7 +72,7 @@ OTHER_MAC = "11:22:33:44:55:66"
 # shares them.
 DEFAULT_NAME = f"Device {MAC}"
 
-# The name a try link gives the browser it binds, the second spelling
+# The name an invite link gives the browser it binds, the second spelling
 # the server mints and so the second one it reserves.
 BROWSER_NAME = f"Browser {MAC}"
 
@@ -702,7 +702,7 @@ def test_binding_a_board_still_mints_the_reserved_name(store: ConfigStore) -> No
     assert _record(store).name == DEFAULT_NAME
 
 
-# A browser a try link binds is called `Browser <mac>` for the same
+# A browser an invite link binds is called `Browser <mac>` for the same
 # reason a board is called `Device <mac>`, and an agent told that name
 # reads a MAC aloud just the same, so the shape is reserved alongside
 # the board's: the same refusal, the same fold, the same exemption.

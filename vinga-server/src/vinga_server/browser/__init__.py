@@ -5,7 +5,7 @@ websocket edge a board does (#613); nothing behind the edge knows it is
 a browser. What is the browser's own is in this package: the static
 client under `static/` and what serves it (`assets`), and the routes the
 application mounts as one router (`router`): the keyless page, its
-versioned modules, the redemption of a try link, and the identity an
+versioned modules, the redemption of an invite link, and the identity an
 unbound browser starts from.
 """
 

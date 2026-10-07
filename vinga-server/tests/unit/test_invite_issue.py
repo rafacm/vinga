@@ -1,4 +1,4 @@
-"""Issuing a try link from the configuration API (#613, D5, D5a, D5c, D6b).
+"""Issuing an invite link from the configuration API (#613, D5, D5a, D5c, D6b).
 
 `POST /api/runtime/try-links` mints a token behind the operator's bearer
 token and answers it inside the page's path, `/try/#<token>`, with the
@@ -25,7 +25,7 @@ from tests.support.registry import booted, store_at
 from vinga_server.config.api import build_api, document
 from vinga_server.config.models import DatabaseConfig, ServerConfig
 from vinga_server.config.responses import PROBLEM_MEDIA_TYPE
-from vinga_server.onboarding.try_links import (
+from vinga_server.onboarding.invites import (
     CAPACITY_REACHED,
     NO_DEFAULT_AGENT,
     ONBOARDING_OFF,
@@ -41,7 +41,7 @@ PAGE = re.compile(r"^/try/#([A-Za-z0-9_-]{43})$")
 
 
 def held(app) -> int:
-    return app.state.composition.try_links.held
+    return app.state.composition.invites.held
 
 
 def test_a_link_is_issued_into_the_page_s_fragment() -> None:
@@ -126,7 +126,7 @@ def test_a_server_with_no_store_behind_it_issues_nothing() -> None:
 
 
 def test_a_full_store_refuses_until_one_is_spent(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(onboarding, "TRY_LINK_CAPACITY", 1)
+    monkeypatch.setattr(onboarding, "INVITE_CAPACITY", 1)
     with entered_app(booted(default_agent="assistant"), from_store=True) as (app, client):
         assert client.post(ISSUE, headers=BEARER).status_code == 200
         refused = client.post(ISSUE, headers=BEARER)
@@ -169,7 +169,7 @@ def test_the_document_states_the_route_and_its_refusals() -> None:
     assert "server.onboarding.enabled" in responses["409"]["description"]
     assert "credential" in operation["description"]
     assert responses["200"]["content"]["application/json"]["schema"] == {
-        "$ref": "#/components/schemas/TryLink"
+        "$ref": "#/components/schemas/Invite"
     }
 
 

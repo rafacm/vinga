@@ -1,4 +1,4 @@
-"""What a try link's token may reach (#613, D7a).
+"""What an invite link's token may reach (#613, D7a).
 
 The token is a secret. It appears in exactly two places this server
 handles: the issuance response to the operator's authenticated request,
@@ -39,9 +39,9 @@ from vinga_server.browser import REDEEM_PATH
 from vinga_server.config.loader import StorageError
 from vinga_server.config.store import ConfigStore
 from vinga_server.events import Emission, attach_server_tap, detach_server_tap
-from vinga_server.onboarding import try_links
+from vinga_server.onboarding import invites
 
-PLANTED = b"try-sentinel-never-a-real-token!"
+PLANTED = b"inv-sentinel-never-a-real-token!"
 assert len(PLANTED) == 32
 SENTINEL = base64.urlsafe_b64encode(PLANTED).rstrip(b"=").decode()
 
@@ -193,7 +193,7 @@ def test_a_refused_issuance_mints_nothing_to_leak(
     with caplog.at_level(logging.DEBUG):
         with entered_app(booted(), from_store=True) as (app, client):
             refused = client.post(ISSUE, headers=BEARER)
-            held = app.state.composition.try_links.held
+            held = app.state.composition.invites.held
 
     assert refused.status_code == 409
     assert held == 0
@@ -316,14 +316,14 @@ def test_an_issuance_failing_with_the_token_in_its_message_carries_it_nowhere(
     nothing escapes, and the link nobody was told about is withdrawn
     rather than left live."""
     escaped: list[BaseException] = []
-    monkeypatch.setattr(try_links, "TryLink", answering_with(kind))
+    monkeypatch.setattr(invites, "Invite", answering_with(kind))
     with caplog.at_level(logging.DEBUG), deployment() as (app, client):
         try:
             answer = client.post(ISSUE, headers=BEARER)
         except Exception as failure:
             escaped.append(failure)
             answer = None
-        held = app.state.composition.try_links.held
+        held = app.state.composition.invites.held
 
     assert not escaped, [chain(failure) for failure in escaped]
     assert answer is not None and answer.status_code == 500

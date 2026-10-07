@@ -13,8 +13,8 @@ import secrets
 
 from lane import REDACTED, Redactor
 
-# What a try token is: 32 random bytes, urlsafe base64, unpadded.
-TRY_TOKEN = secrets.token_urlsafe(32)
+# What an invite token is: 32 random bytes, urlsafe base64, unpadded.
+INVITE_TOKEN = secrets.token_urlsafe(32)
 
 # What a device token is: a 43-character urlsafe signature, a dot, and
 # the second it was issued.
@@ -34,14 +34,14 @@ def test_a_registered_value_is_redacted_wherever_it_appears() -> None:
 def test_both_token_shapes_are_redacted_unregistered() -> None:
     redact = Redactor()
     text = (
-        f'{{"page": "/try/#{TRY_TOKEN}"}} '
+        f'{{"page": "/try/#{INVITE_TOKEN}"}} '
         f"Authorization: Bearer {DEVICE_TOKEN} "
         f"offered vinga.token.{DEVICE_TOKEN}"
     )
 
     said = redact(text)
 
-    assert TRY_TOKEN not in said
+    assert INVITE_TOKEN not in said
     assert DEVICE_TOKEN not in said
     assert DEVICE_TOKEN.split(".")[0] not in said
 

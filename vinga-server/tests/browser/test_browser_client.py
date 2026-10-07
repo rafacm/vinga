@@ -1,7 +1,7 @@
 """The browser client, driven end to end (#613, Q5, Q5a, Q5b, D3a, D4, D9).
 
 Five cases, one Chromium. Each is a fresh browser profile, so each is a
-new device: four are bound by a fresh try link, and one starts from the
+new device: four are bound by a fresh invite link, and one starts from the
 onboarding URL and pairs by its code. All of them speak through the
 same fake microphone loop (`lane.py` says what it is and why its timing
 is what it is), and every page runs `instrument.js` first, which
@@ -59,7 +59,7 @@ class Visit:
     """One page, with what Chromium saw it say and send."""
 
     page: Page
-    try_token: str
+    invite_token: str
     console: list[str] = field(default_factory=list)
     # The websocket as Chromium saw it, in order: ("sent", "audio") for a
     # microphone frame, ("received", <type>, <state>) for a message.
@@ -110,7 +110,7 @@ class Visit:
 def open_link(
     browser: Browser, server: Server, switches: str, link: bool = True, init: str = ""
 ) -> Visit:
-    """A fresh try link, opened in a fresh browser profile; or, with
+    """A fresh invite link, opened in a fresh browser profile; or, with
     `link` false, the page alone, as a person who was given only the
     onboarding URL opens it."""
     if link:
@@ -164,7 +164,7 @@ def open_link(
         page.goto(f"{server.base}{path}{query}" + (f"#{token}" if token else ""))
     except PlaywrightError:
         # Playwright's message quotes the address, fragment and all.
-        raise RuntimeError("the page did not load from its try link") from None
+        raise RuntimeError("the page did not load from its invite link") from None
     ready = "#start" if link else "#pair"
     visit.wait_for("the page to be ready", lambda: page.locator(ready).is_visible())
     return visit
@@ -172,7 +172,7 @@ def open_link(
 
 @pytest.fixture
 def visits(browser: Browser, server: Server) -> Iterator[Callable[..., Visit]]:
-    """Opens fresh try links, and closes every profile they opened, and
+    """Opens fresh invite links, and closes every profile they opened, and
     with it that profile's microphone and socket, when the case ends."""
     opened: list[Visit] = []
 
@@ -241,11 +241,11 @@ def flushed_after_abort(page: Page) -> bool:
 
 
 def assert_no_leak(server: Server, visit: Visit) -> None:
-    """D7a: neither the try token nor the device token reaches the
+    """D7a: neither the invite token nor the device token reaches the
     server's log, the page's console, its document, its storage, its
     address, the URL of any request it made or of any socket it opened.
     The device token goes in a subprotocol, which is not a URL."""
-    secrets = [secret for secret in (visit.try_token, *visit.device_tokens) if secret]
+    secrets = [secret for secret in (visit.invite_token, *visit.device_tokens) if secret]
     assert visit.device_tokens, "the lane saw no device token to look for"
     assert visit.requests and visit.sockets, "the lane saw no request or socket to look at"
     log = server.log_text()
@@ -278,7 +278,7 @@ def test_a_realtime_conversation_with_barge_in_and_an_ending(
     page = visit.page
     mac = visit.identity()["mac"]
 
-    # The try link bound it: a device record, named for a browser, bound
+    # The invite link bound it: a device record, named for a browser, bound
     # to the default agent before it said anything.
     record = server.api("GET", f"/devices/{mac}")["entity"]
     assert record["name"] == f"Browser {mac}"
