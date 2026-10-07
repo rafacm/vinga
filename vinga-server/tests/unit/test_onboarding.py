@@ -21,6 +21,7 @@ from tests.support.checkin import SYSTEM_INFO
 from tests.support.configs import DEVICE_MAC, DEVICE_UUID
 from vinga_server import logs
 from vinga_server.config import Config
+from vinga_server.events.catalog import GENERATION_CHANNEL
 from vinga_server.onboarding import KEY_LENGTH, derive_key, onboarding_key
 from vinga_server.ota import OTA_PATH
 
@@ -163,7 +164,7 @@ def test_a_wrong_key_says_nothing_about_the_right_one(
             response = client.post("/x/2EOWIW3M/", json=SYSTEM_INFO, headers=HEADERS)
             described = client.get("/x/2EOWIW3M/")
 
-        ours = [r for r in caplog.records if r.name.startswith("vinga_server")]
+        ours = _probed(caplog)
         text, objects = _rendered(ours)
         assert "2EOWIW3M" not in text
         assert KEY not in text
@@ -179,6 +180,18 @@ def test_a_wrong_key_says_nothing_about_the_right_one(
             assert answered.status_code == 404
             assert KEY not in answered.text
             assert KEY not in str(answered.headers)
+
+
+def _probed(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    """What this server said about the probes: every record of its own
+    but the announcement its boot makes about the world it installed,
+    which an empty configuration makes (#612) and which is about no
+    request."""
+    return [
+        record
+        for record in caplog.records
+        if record.name.startswith("vinga_server") and record.name != GENERATION_CHANNEL
+    ]
 
 
 def _rendered(records: list[logging.LogRecord]) -> tuple[str, list[dict]]:
@@ -203,7 +216,7 @@ def test_an_over_typed_key_is_still_the_typo_kind_of_miss(
     with caplog.at_level(logging.WARNING):
         with client_for() as client:
             client.get(f"/x/{KEY}X/")
-    ours = [r for r in caplog.records if r.name.startswith("vinga_server")]
+    ours = _probed(caplog)
     text, objects = _rendered(ours)
     assert f"{KEY}X" not in text
     assert KEY not in text
@@ -236,7 +249,7 @@ def test_an_unshaped_key_is_counted_rather_than_repeated(
             response = client.get(f"/x/{segment}/")
     assert response.status_code == 404
 
-    text, objects = _rendered(caplog.records)
+    text, objects = _rendered(_probed(caplog))
     assert objects, "the mismatch went unlogged"
     # Nothing of the attempt in either format, in the message or in the
     # structured fields.
@@ -245,7 +258,7 @@ def test_an_unshaped_key_is_counted_rather_than_repeated(
     # And nothing forged: one object per record, each a single line.
     assert all(payload["event"] == "onboarding_key_unshaped" for payload in objects)
     assert all("attempted" not in payload for payload in objects)
-    assert len(text.splitlines()) == len(caplog.records)
+    assert len(text.splitlines()) == len(_probed(caplog))
 
 
 def test_the_correct_key_is_not_broadcast_at_unshaped_probes(
@@ -257,7 +270,7 @@ def test_the_correct_key_is_not_broadcast_at_unshaped_probes(
     with caplog.at_level(logging.WARNING):
         with client_for() as client:
             client.get("/x/" + "A" * 500 + "/")
-    text, objects = _rendered(caplog.records)
+    text, objects = _rendered(_probed(caplog))
     assert KEY not in text
     assert all(KEY not in json.dumps(payload) for payload in objects)
     assert objects[0]["attempted_length"] == 500

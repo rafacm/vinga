@@ -463,6 +463,9 @@ def test_a_failed_read_repeats_nothing_the_failure_carried(
         devices={DEVICE_MAC: ["assistant"]},
     )
     bindings = DeviceBindings(world(config), _FailingEngine())
+    # What the world said when it was installed is about the world, and
+    # this world does not serve the built-in agent (#612).
+    caplog.clear()
 
     with caplog.at_level(logging.WARNING):
         # The snapshot answered, which is the other half of the rule.
@@ -593,6 +596,9 @@ def test_a_composed_configuration_is_the_snapshot_without_a_warning(
         devices={DEVICE_MAC: ["assistant"]},
     )
     bindings = DeviceBindings.snapshot_only(world(config))
+    # The world's own announcement that it does not serve the built-in
+    # agent (#612) is about the world, not about the view.
+    caplog.clear()
     try:
         with caplog.at_level(logging.WARNING):
             assert bindings.names_for(DEVICE_MAC).names == ("assistant",)
@@ -882,6 +888,9 @@ def test_a_failed_record_read_falls_back_to_the_served_world(
         },
     )
     bindings = DeviceBindings(world(config), _FailingEngine())
+    # As above: the world's announcement about the built-in agent is not
+    # what this is about (#612).
+    caplog.clear()
 
     with caplog.at_level(logging.WARNING):
         attachment = bindings.attachment_for(DEVICE_MAC)
