@@ -25,8 +25,12 @@ says so.
 
 ## Getting a browser onto your server
 
-A browser becomes a device in one of two ways, and either works on
-every server. The browser lane joins both ways.
+A browser becomes a device in one of two ways. Both need the server's
+onboarding switched on, which is the default, since the page is not
+served without it; a try link also needs the server to have a default
+agent, which the link binds the browser to. Pairing needs no default
+agent when the person claiming the code names the agent. The browser
+lane joins both ways.
 
 **With a try link.** Whoever runs the server runs `vinga info`, which
 prints a new try link each time, an address ending in `/try/#`
@@ -64,8 +68,9 @@ code with the words "Tell the person who runs this server this code,
 so they can connect this browser"; once they claim it
 (`vinga device pending claim <code>`, which binds this browser to the
 server's default agent, or to the agent the command names), the
-conversation starts by itself. This works on every server: a browser
-with no identity pairs, as every new device does.
+conversation starts by itself. With onboarding on, this works whether
+or not the server has a default agent: a browser with no identity
+pairs, as every new device does.
 
 Either way the browser remembers that it is a device, and opening the
 page at `/try/` again, without a link, offers Start straight away.
