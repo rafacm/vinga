@@ -12,6 +12,7 @@ unbound browser starts from.
 from .assets import ALLOWLIST, PAGE_PATH, STATIC_PATH, Assets
 from .router import (
     IDENTITY_SEGMENT,
+    IDENTITY_UNAVAILABLE,
     REDEEM_PATH,
     REDEEM_REFUSED,
     browser_identity,
@@ -26,6 +27,7 @@ __all__ = [
     "REDEEM_REFUSED",
     "STATIC_PATH",
     "IDENTITY_SEGMENT",
+    "IDENTITY_UNAVAILABLE",
     "Assets",
     "build_router",
     "same_origin",
