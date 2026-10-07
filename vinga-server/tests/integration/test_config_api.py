@@ -263,7 +263,9 @@ def test_the_diff_reports_what_this_server_has_not_picked_up(
                 "tts.voice",
                 "vad.gate",
             ]
-            assert configured["agents"]["added"] == ["assistant"]
+            # And the built-in agent, which the defaults now provide for
+            # every stage, so the apply will serve it too (#612).
+            assert configured["agents"]["added"] == ["assistant", "vinga"]
             assert configured["agent_defaults"]["changed"] is True
             # The device the pipeline bound is the claim this read must
             # not make: a binding is read as the device asks for it, so

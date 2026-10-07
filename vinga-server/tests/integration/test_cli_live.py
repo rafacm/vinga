@@ -615,6 +615,16 @@ CYCLE: tuple[tuple[str, tuple[str, ...], dict[str, object], tuple[str, ...], boo
         ("llm=brain", "asr=ears", "tts=voice", "vad=gate"),
         False,
     ),
+    # The other singleton, the built-in agent's overrides (#612), written
+    # with a voice the deployment already has, which leaves what it
+    # serves as it was.
+    (
+        "builtin-agent",
+        (),
+        {"tts": "voice"},
+        ("tts=voice",),
+        False,
+    ),
 )
 
 
@@ -2069,12 +2079,19 @@ def test_a_deployment_is_rebuilt_from_its_export_on_an_empty_database(
         path = tmp_path / "exported.yaml"
         path.write_text(exported, encoding="utf-8")
         assert run(*rebuilt, "import", "-f", str(path)) == 0
-        outcomes = [line.split(": ")[-1] for line in capsys.readouterr().out.splitlines()]
+        listed = capsys.readouterr().out.splitlines()
+        outcomes = [line.split(": ")[-1] for line in listed]
         # Every entry the document names was written, the default agent
         # included, because the store it landed in was empty: an
         # `unchanged` anywhere here would be a section the rebuild did
-        # not actually put back.
-        assert outcomes and set(outcomes) == {"wrote"}
+        # not actually put back. The one exception is the built-in
+        # agent's overrides, which this deployment never set (#612): the
+        # export carries them as the empty entry an empty store already
+        # holds, so they are the one entry with nothing to write.
+        assert [line for line in listed if line.endswith(": unchanged")] == [
+            "builtin_agent: unchanged"
+        ]
+        assert outcomes.count("wrote") == len(outcomes) - 1
 
         # The half a document cannot carry: a credential never travels in
         # a read, so the export named the command that enters it and this
@@ -2169,7 +2186,12 @@ def test_a_pre_cutover_export_imports_into_an_empty_postgres_database(
         assert stored_plaintext(database, RECOVERED_SLOT) == SECRET
 
         assert run("--api-url", after.api_url, "export") == 0
-        assert _configuration_body(capsys.readouterr().out) == _configuration_body(kept)
+        # Byte for byte, but for the one section the kept export could
+        # not carry: it predates the built-in agent (#612), so this build
+        # exports its overrides as the empty entry, once.
+        body = _configuration_body(capsys.readouterr().out)
+        assert body.count("builtin_agent: {}\n") == 1
+        assert body.replace("builtin_agent: {}\n", "") == _configuration_body(kept)
 
 
 def _configuration_body(exported: str) -> str:
@@ -2308,6 +2330,7 @@ REFUSALS: tuple[Refusal, ...] = (
         True,
     ),
     Refusal(("agent-defaults",), ("agent-defaults", "show", "extra"), USAGE, False),
+    Refusal(("builtin-agent",), ("builtin-agent", "show", "extra"), USAGE, False),
     Refusal(("device",), ("device", "bind", "not-a-mac", "sam"), NOT_A_MAC, True),
     # The one row whose sentence is composed by both ends: the server
     # states which of a handful of states it refused in, as a token, and
@@ -2341,7 +2364,7 @@ REFUSALS: tuple[Refusal, ...] = (
         ("default-agent", "set", "no-such-agent"),
         UNRESOLVED
         + "\n  - default_agent: names no agent that exists, and the name is not quoted "
-        "back (defined: sam)",
+        "back (defined: sam, vinga)",
         True,
     ),
     Refusal(
