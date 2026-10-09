@@ -21,8 +21,10 @@ them, plus the board's own volume tool. The request goes through the
 server's own provider (`OpenAiCompatibleLlm`) at temperature 0 and a fixed seed,
 with thinking off, round after round as the runtime's tool loop runs
 them (`MAX_TOOL_ROUNDS`, the last with no tools allowed). The lookup is
-the real one; every other tool answers a fixed line, since what is
-measured is whether the model looks up and answers from what it found.
+the real one; every other tool offered answers a fixed line, since
+what is measured is whether the model looks up and answers from what
+it found. A call to a tool that was not offered is answered as a
+session answers it (`answer_unoffered`), never as if it ran.
 
 The device block's introduction and memory section are left out (a
 fresh device with no name and nothing remembered), which is the one
@@ -50,10 +52,10 @@ from vinga_server.class_names import failure_name
 from vinga_server.providers import StreamStarted, TextDelta, ToolCall, ToolResult, Turn, Usage
 from vinga_server.providers.base import ToolDef
 from vinga_server.providers.openai_llm import OpenAiCompatibleLlm
-from vinga_server.runtime.pipeline import MAX_TOOL_ROUNDS
+from vinga_server.runtime.pipeline import MAX_TOOL_ROUNDS, handover_refusal
 from vinga_server.runtime.tool_execution import UNPARSEABLE_ARGUMENTS
-from vinga_server.tools import builtin
-from vinga_server.tools.source import BuiltinTools
+from vinga_server.tools import builtin, names
+from vinga_server.tools.source import BuiltinTools, no_such_tool
 
 BOARD = "esp32-s3-touch-lcd-1.54"
 
@@ -87,6 +89,10 @@ VOLUME = ToolDef(
 
 STUBBED = "Done."
 
+# The device the gate stands in for is bound to vinga alone, and vinga
+# is the agent speaking.
+AGENTS = ("vinga",)
+
 
 def offered() -> list[ToolDef]:
     """vinga's tools on a device bound to it alone, the lookup among
@@ -95,7 +101,7 @@ def offered() -> list[ToolDef]:
     one tool twice and Anthropic's API refuses it, and the first gate
     runs of M5 sent the lookup twice before that refusal showed it."""
     source = BuiltinTools(
-        agents=["vinga"],
+        agents=list(AGENTS),
         memory=None,  # type: ignore[arg-type]
         timeout_s=10.0,
         context=None,  # type: ignore[arg-type]
@@ -113,6 +119,23 @@ def system() -> str:
     return f"{knowledge.persona()}\n\n{knowledge.board_facts(BOARD)}"
 
 
+def answer_unoffered(call: ToolCall, again: bool) -> str:
+    """What a session answers a call to a tool it did not offer, in the
+    runtime's own words. `switch_agent` is resolved by the tool loop
+    before any dispatch, offered or not, and refused there
+    (`handover_refusal`; `again` when an earlier switch_agent of this
+    round was refused first); any other name reaches the dispatch,
+    which answers unparseable arguments first and then that there is
+    no such tool."""
+    if call.name == names.SWITCH_AGENT:
+        refusal = handover_refusal(call.arguments, AGENTS, AGENTS[0], again=again)
+        assert refusal is not None, "a device bound to one agent cannot hand over"
+        return refusal
+    if call.malformed_arguments is not None:
+        return UNPARSEABLE_ARGUMENTS
+    return no_such_tool(call.name)[0]
+
+
 def answer_lookup(call: ToolCall, guide: str | None) -> str:
     """What a deployment answers this lookup call with: the runtime's
     sentence for arguments that never parsed as an object, and
@@ -127,6 +150,7 @@ def answer_lookup(call: ToolCall, guide: str | None) -> str:
 async def ask(llm, prompt, tools, history, text, lookup_name, guide):
     """One question, through every round it takes."""
     turns = [*history, Turn("user", text)]
+    offered_names = {tool.name for tool in tools}
     calls: list[scoring.Call] = []
     rounds = []
     answer = ""
@@ -176,17 +200,23 @@ async def ask(llm, prompt, tools, history, text, lookup_name, guide):
                 break
             results = []
             after_lookup = False
+            switched = False
             for call in made:
                 malformed = call.malformed_arguments is not None
                 calls.append(scoring.Call(call.name, dict(call.arguments), malformed))
-                if call.name == lookup_name:
+                is_error = False
+                if call.name not in offered_names:
+                    content = answer_unoffered(call, switched)
+                    switched = switched or call.name == names.SWITCH_AGENT
+                    is_error = True
+                elif call.name == lookup_name:
                     after_lookup = True
                     content = answer_lookup(call, guide)
                 elif call.name == scoring.VOLUME_TOOL:
                     content = "true"
                 else:
                     content = STUBBED
-                results.append(ToolResult(tool_call_id=call.id, content=content))
+                results.append(ToolResult(tool_call_id=call.id, content=content, is_error=is_error))
             turns.append(Turn("assistant", "".join(text_out), tool_calls=tuple(made)))
             turns.append(Turn("tool", "", tool_results=tuple(results)))
     except TimeoutError:
