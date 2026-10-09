@@ -38,6 +38,7 @@ from typing import Any
 
 from tests.local.lookup_gate import scoring
 from vinga_server import knowledge
+from vinga_server.class_names import failure_name
 from vinga_server.providers import StreamStarted, TextDelta, ToolCall, ToolResult, Turn, Usage
 from vinga_server.providers.base import ToolDef
 from vinga_server.providers.openai_llm import OpenAiCompatibleLlm
@@ -279,11 +280,34 @@ async def run(which: str, out: Path, lookup: ToolDef, guide: str | None):
     await llm.close()
 
 
-def main() -> None:
-    which, out = sys.argv[1], Path(sys.argv[2])
-    guide = knowledge.board_guide(BOARD)
-    asyncio.run(run(which, out, builtin.search_docs_tool(), guide))
+# What the harness says when a run stops, with the failure's class name
+# and nothing else: a provider's error can carry the URL it was given or
+# the bytes a server answered, and a traceback renders the whole chain.
+STOPPED = "the lookup gate stopped: {failure}"
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run one question set, and answer an exit status.
+
+    Every failure, building the provider included, is contained here:
+    the report is built in the except arm from the class name alone
+    (`failure_name`, which gives a fixed phrase for a name it will not
+    print) and said after the block, so neither the exception, its
+    message, nor the chain behind it outlives the arm or reaches stdout
+    or stderr."""
+    args = sys.argv[1:] if argv is None else argv
+    report: str | None = None
+    try:
+        which, out = args[0], Path(args[1])
+        guide = knowledge.board_guide(BOARD)
+        asyncio.run(run(which, out, builtin.search_docs_tool(), guide))
+    except Exception as exc:
+        report = STOPPED.format(failure=failure_name(exc))
+    if report is not None:
+        print(report, file=sys.stderr, flush=True)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
