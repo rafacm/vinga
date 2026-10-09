@@ -9,8 +9,8 @@
 #
 # The reviewer, its model and its reasoning effort come from
 # REVIEW_BACKEND, REVIEW_MODEL and REVIEW_EFFORT, read by
-# review-backend.sh beside this script; the tiering rule (sol for
-# plans and behavior-changing milestone PRs, terra for low-stakes
+# review-backend.sh beside this script; the tiering rule (high effort
+# for plans and behavior-changing milestone PRs, medium for low-stakes
 # rounds) lives in SKILL.md. The provenance header records the run as
 # `<provider>/<model>, thinking <level>`, the attribution string the
 # implement-issue skill defines.

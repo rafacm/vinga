@@ -1,6 +1,6 @@
 ---
 name: external-review
-description: Run an adversarial external review (codex with sol or terra by stakes; claude CLI as the fallback when the codex quota is exhausted) of a committed plan or a PR diff, record the findings, and drive per-finding amendments. Use before implementing a plan and before merging any milestone PR.
+description: Run an adversarial external review (codex gpt-6.1-sol, reasoning effort by stakes; claude CLI as the fallback when the codex quota is exhausted) of a committed plan or a PR diff, record the findings, and drive per-finding amendments. Use before implementing a plan and before merging any milestone PR.
 ---
 
 # External review
@@ -11,22 +11,23 @@ review of a milestone's diff before it merges. Both use an external
 reviewer CLI (codex by default, claude as the quota fallback) with
 the prompts in this skill's directory.
 
-## Which model, by stakes
+## Which effort, by stakes
 
-Two tiers, decided per round (maintainer decision, 2026-08-19; the
-default moved from `gpt-5.6-sol` to `gpt-6-sol` on 2026-10-02, and
-to `gpt-6.1-sol` on 2026-10-09):
+One model, two effort tiers, decided per round (maintainer decision,
+2026-08-19; the default model moved from `gpt-5.6-sol` to `gpt-6-sol`
+on 2026-10-02 and to `gpt-6.1-sol` on 2026-10-09, when the separate
+`gpt-5.6-terra` tier was dropped because 6.1 Sol is no dearer per
+token and the stronger reviewer):
 
-- `gpt-6.1-sol`, the default: every plan review, and every PR whose
-  diff changes behavior. Sol's record here is P1s that need
-  whole-repo rule synthesis or concurrency reasoning; do not trade
-  those away for speed.
-- `gpt-5.6-terra`, the fast tier: low-stakes rounds only, meaning a
+- `high`, the default: every plan review, and every PR whose diff
+  changes behavior. Sol's record here is P1s that need whole-repo
+  rule synthesis or concurrency reasoning; do not trade those away
+  for speed.
+- `medium`, the fast tier: low-stakes rounds only, meaning a
   documentation-only diff, a mechanical follow-up (renames, moves,
   pin updates with no logic change), or a re-review of fixes whose
-  original round was Sol's. When in doubt, it is not low-stakes.
-  Neither GPT-6 nor GPT-6.1 has a terra model, so this tier stays on 5.6
-  and is selected explicitly with `REVIEW_MODEL=gpt-5.6-terra`.
+  original round ran at `high`. When in doubt, it is not
+  low-stakes. Selected explicitly with `REVIEW_EFFORT=medium`.
 
 `run-pr-review.sh` reads the backend from `REVIEW_BACKEND` (default
 codex) and the model from `REVIEW_MODEL` (default sol under codex,
