@@ -1873,3 +1873,56 @@ Not verified: no image was built and no board or browser was
 onboarded against this build; Getting Started was not walked with
 Gemma 4 e4b on any machine; the cold-start numbers are M6's, not
 re-measured, since the runner is M5's for this milestone.
+
+### PR review round
+
+Reviewed 2026-10-09 by openai/gpt-6.1-sol, thinking high via codex CLI 0.162.0, read-only sandbox, runtime 4m59s, at commit 4c892e92 ([the round](https://github.com/rafacm/vinga/pull/637)). The fixes are by anthropic/claude-opus-5-5, thinking medium, M7's own implementer.
+
+1. **P2: the security recipe turned Gemma's thinking back on.**
+   `docs/run/security.md`'s data-boundary recipe wrote the `local`
+   entry with `gemma4:e4b` and no `reasoning_effort: none`, and a
+   provider write replaces the entry rather than merging it.
+   *Resolution:* verified in `ConfigStore.set_provider` ("create or
+   replace" the model-shaped half); the recipe now carries the key
+   (`7baf32b7`). Inventory: `git grep -n -e "provider set llm local"
+   -e "gemma4:e4b"` over tracked files outside history, untruncated,
+   29 lines (`.logs/r1-local-recipes.log`): every other recipe that
+   writes a Gemma 4 e4b `local` entry (the local preset, the
+   `openai_compatible` example, Getting Started's step 3, llm.md's
+   Ollama recipe) already carried it; the rest are bodiless grammar
+   examples, generated references, census lines and pull, pin and stop
+   commands.
+2. **P2: the cold-turn warning named the wrong timeout.** Getting
+   Started and llm.md said the server gives a reply up after 30 s,
+   while with the defaults the 10 s first-token watchdog
+   (`config/models.py`) cancels the request, `runtime/provider_watch.py`
+   sends it once more, and the second stall raises `FirstTokenTimeout`;
+   the 30 s in `providers/kit.py` is a per-operation transport read
+   timeout. *Resolution:* both pages now say what an operator meets
+   with the defaults (two 10 s waits, then the fallback phrase about
+   20 s in), and that raising the watchdog stops helping at the 30 s
+   transport bound, where M6's run at 30 s gave up after two 30 s
+   stalls. Every number was re-checked against M6's logs: "about 13
+   tokens per second" sat beside a request read at 18, so the rate is
+   gone and the two measured times stay; "trying again did not get
+   through" is stated as the seven cold conversations M6 logged (five at
+   10 s, two at 30 s, each with its retry, all `FirstTokenTimeout`),
+   with no cause, since the Ollama log M6 read it in was not kept. The
+   Resolutions entry above and the fragment are corrected to match
+   (`7c670d8c`).
+3. **P2: Getting Started promised command help vinga cannot ground.**
+   Step 5 suggested asking vinga how to make an agent, naming the
+   command; vinga's prompt holds its persona, the concept summary and
+   the board's facts, none of which names one, and M5's lookup is not
+   shipped. *Resolution:* the example questions are now ones those
+   answer (the LCD-1.54 guide's volume buttons and screen-off gesture,
+   the summary's agent and device), the page says vinga is told to say
+   so beyond those, and the feature list and both presets' headers drop
+   "which command does the rest" (`3e0d5a97`). concepts.md, the
+   glossary and `configuration.md` still describe the persona's
+   instruction to name a command, which is M3's description of the
+   design rather than a promise about an answer, and were left alone.
+4. **P3: "fastest" contradicted the gate's table**, where Gemma 4 e2b
+   has the lower median. *Resolution:* step 0 says most accurate, and
+   substantially faster than the two 8B models it replaced
+   (`f7366de0`).
