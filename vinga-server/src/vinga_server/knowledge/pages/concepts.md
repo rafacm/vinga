@@ -248,8 +248,9 @@ reaches. Its prompt carries its persona, the summary, and the facts of
 the board it speaks through: the opening and the controls section of
 that board's [guide](devices/README.md), chosen by the board model the
 device reported at its check-in, or, for a board with no guide or one
-the server has not heard from since it started, a note saying so,
-which sends a device question to the common page. No other agent's
+the server has not heard from since it started, a note saying so, on
+which vinga declines a device question rather than guessing and points
+to the device's guide. No other agent's
 prompt carries them. An operator chooses its
 providers, its voice and the shared fragments its prompt carries
 (which is how its reply language is set) in its `builtin_agent` entry,
