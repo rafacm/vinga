@@ -2199,3 +2199,59 @@ Not verified: a lookup turn through a running server end to end (the
 observed in a session); a board; the image; the smoke and browser
 lanes; the opt-in local-lane wrapper `tests/local/test_lookup_gate.py`
 as a pytest run (the harness it calls produced every number above).
+
+### PR review round
+
+Reviewed 2026-10-09 by openai/gpt-6.1-sol, thinking high via codex CLI 0.162.0, read-only sandbox, runtime 3m51s, at commit 8026ed25 ([the round](https://github.com/rafacm/vinga/pull/638)). The fixes are by anthropic/claude-opus-5-5, thinking medium, M5's own implementer. All four findings were adopted.
+
+1. **P1: the gate harness leaked rejected input and tracebacks.** Run
+   as documented with `VINGA_LOCAL_OLLAMA` naming a malformed address,
+   it printed the address, httpx's words about it and the traceback.
+   *Resolution:* `main()` contains every failure, building the
+   provider included, builds its one-line report in the except arm
+   from `failure_name(exc)` and says it after the block, exiting 1
+   ("the lookup gate stopped: InvalidURL"). Two sentinel tests (the
+   documented command in a subprocess against
+   `http://localhost:<sentinel>/v1`, and an exception class whose name
+   carries the sentinel and a newline, raised from a cause carrying it)
+   hold stdout and stderr free of the sentinel and of any traceback;
+   each failed with the except arm removed, the message reported, the
+   raw class name reported and a re-raise from the arm
+   (`e28432fa`).
+2. **P2: the gate bypassed production's query validation.** The
+   harness searched `str()` of any query, where `search_docs` refuses a
+   missing, blank or non-string one. *Resolution:* the harness answers
+   a lookup through the shipped builtin, and an unparseable call with
+   the runtime's own sentence, now the named constant
+   `UNPARSEABLE_ARGUMENTS`; a unit test drives the harness's round loop
+   over a missing, empty, blank, numeric and list query and a mangled
+   call, and failed with the old line back (`bb592433`). **The audit:**
+   every `search_docs` call in the four recorded runs' raw files was
+   read for a missing, blank or non-string query or unparseable
+   arguments: 55 calls (6 and 4 for Gemma 4 e4b, 22 and 23 for
+   `claude-sonnet-5`), 0 that production would have refused
+   (`.logs/m5-audit-queries.log`). The published numbers stand, and no
+   run was repeated.
+3. **P2: `docs/run/llm.md` gave the wrong default outcome for a slow
+   lookup round.** It said the turn is given up as a
+   `ProviderCallTimeout`. *Resolution:* with the defaults the 10 s
+   watchdog cancels the round, retries it once and gives the turn up
+   with a `FirstTokenTimeout` and the fallback phrase;
+   `ProviderCallTimeout` is reached only with the watchdog raised past
+   30 s; and since the harness waits as long as the model takes, the
+   running server's outcome is labelled inferred, not observed. The
+   same correction is made in this section's "What Gemma 4 e4b does",
+   the baseline item, the fragment and the plan's Gate paragraph
+   (`fe695d61`).
+4. **P2: the measurements were described as board playback.**
+   *Resolution:* llm.md says the timings come from a model harness
+   given the LCD-1.54 board's facts, with no board, speech or device
+   output, and calls 1.8 s the time to first text; this section's
+   figure says the same. An untruncated `git grep` of `docs/`,
+   `changelog.d/` and `README.md` found no other claim of the kind
+   (`4435df62`).
+
+Verification after the round: see the hand-back, which quotes ruff,
+the unit tests touching the knowledge package, the builtin tools and
+the harness, the drift checks, links, Run and Use pages, fragments and
+`tests/census`, run last.
