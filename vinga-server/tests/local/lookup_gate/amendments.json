@@ -4,17 +4,50 @@
   "B4": {
    "reason": "M1b (#612) replaced the try link `vinga info` printed with `vinga device invite`, which prints an invite link, and moved the page to /talk/.",
    "facts": [
-    {"phrase": "Whoever runs the server runs\n`vinga device invite`, which prints a new invite link each time", "doc": "docs/devices/browser.md", "match": "device invite"},
-    {"phrase": "Whoever runs the server runs\n`vinga device invite`, which prints a new invite link each time", "doc": "docs/devices/browser.md", "match": "\\blink\\b|/talk"}
+    {
+     "phrase": "Whoever runs the server runs\n`vinga device invite`, which prints a new invite link each time",
+     "doc": "docs/devices/browser.md",
+     "match": "device invite"
+    },
+    {
+     "phrase": "Whoever runs the server runs\n`vinga device invite`, which prints a new invite link each time",
+     "doc": "docs/devices/browser.md",
+     "match": "\\blink\\b|/talk"
+    }
    ],
-   "contradicts": ["install (the |an )?(app|extension|plugin)", "/try\\b|try link", "vinga info[^.]{0,40}(link|invite)"]
+   "contradicts": [
+    "install (the |an )?(app|extension|plugin)",
+    "/try\\b|try link",
+    "vinga info[^.]{0,40}(link|invite)"
+   ]
   },
   "S5": {
    "reason": "M1b (#612) took the try link out of `vinga info`, which now reports and issues nothing; what it prints that the Use pages name is the onboarding address a board is pointed at.",
    "facts": [
-    {"phrase": "The address to write is the one `vinga info` prints", "doc": "docs/devices/README.md", "match": "onboarding|address|URL|ota"}
+    {
+     "phrase": "The address to write is the one `vinga info` prints",
+     "doc": "docs/devices/README.md",
+     "match": "onboarding|address|URL|ota"
+    }
    ],
-   "contradicts": ["(shows|prints|lists) (the )?(cpu|memory usage|disk|version number only)", "(prints|gives|issues|makes) (you )?(a|an|the) (new )?(try|invite) link"]
+   "contradicts": [
+    "(shows|prints|lists) (the )?(cpu|memory usage|disk|version number only)",
+    "(prints|gives|issues|makes) (you )?(a|an|the) (new )?(try|invite) link"
+   ]
+  },
+  "S2": {
+   "reason": "M6 (#612) reworded the concepts page: a fresh wake opens on the first agent the device reaches, which is the first agent of its binding, the one the frozen fact called the default agent.",
+   "facts": [
+    {
+     "phrase": "A fresh wake always opens on the first agent the device reaches",
+     "doc": "docs/concepts.md",
+     "match": "default|first agent|first (one|entry)|first of"
+    }
+   ],
+   "contradicts": [
+    "wake word (decides|picks|chooses|selects)",
+    "(last|previous) (one|agent) you (talked|spoke)"
+   ]
   }
  }
 }
