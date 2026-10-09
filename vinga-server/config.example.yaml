@@ -21,10 +21,14 @@
 #
 #   vinga-server config import -f examples/presets/local-stack.yaml
 #   vinga-server config apply
-#   vinga-server config default-agent set assistant
 #   vinga-server config list
 #
-# and one entity at a time is what editing it afterwards looks like:
+# A preset names providers and agent_defaults and no agent: the first
+# agent a new deployment has is vinga, the built-in agent described
+# below, and a board claimed by the code it shows, with no agent named,
+# is bound to it.
+#
+# One entity at a time is what editing it afterwards looks like:
 #
 #   vinga-server config provider set llm claude -f examples/llm-anthropic.yaml
 #   vinga-server config builtin-agent set -f examples/builtin-agent.yaml

@@ -114,3 +114,11 @@ by the code it shows with `config device pending claim`. A preset
 carries neither, because which board reaches which agent is the one
 thing a preset cannot know; a default agent names only the agent a
 claim that names none binds a board to.
+
+A preset carries no agent either. The first agent a deployment has is
+vinga, the agent built into the server, which runs on the providers
+and the `agent_defaults` a preset writes; with no default agent
+stored, a board claimed by its code with no agent named is bound to
+vinga. Your own agents come after, from `agent.yaml` or a document of
+your own, and importing a preset into a deployment that already has
+agents leaves them as they are, since importing never deletes.
