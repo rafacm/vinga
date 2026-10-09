@@ -30,13 +30,13 @@
 # There are deliberately no agents, no devices and no default agent
 # below. The first agent a deployment has is vinga, the agent built
 # into the server: it runs on the providers and defaults this document
-# writes, and it answers what vinga is, what the board in front of you
-# can do, and which command does the rest. Which board talks to which
-# agent is the one thing a preset cannot know. A board nobody has bound
-# shows a six-digit code, and `vinga device pending claim` with that
-# code binds it to the default agent, which is vinga until you set
-# another with `vinga default-agent set`. Or bind a board by the MAC on
-# its sticker:
+# writes, and it answers what the board in front of you can do and how
+# vinga's parts fit together. Which board talks to which agent is the
+# one thing a preset cannot know. A board nobody has bound shows a
+# six-digit code, and `vinga device pending claim` with that code
+# binds it to the default agent, which is vinga until you set another
+# with `vinga default-agent set`. Or bind a board by the MAC on its
+# sticker:
 #
 #   vinga device bind aa:bb:cc:dd:ee:ff vinga
 #
