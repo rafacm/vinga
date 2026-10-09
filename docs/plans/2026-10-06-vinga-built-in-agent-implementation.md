@@ -1381,3 +1381,232 @@ Reviewed 2026-10-09 by openai/gpt-6.1-sol, thinking high via codex CLI 0.162.0, 
 
 Verification after the round: the link, Run and Use page and fragment
 checks, and `tests/census` last, in the hand-back.
+
+## M6: vinga reachable from every bound device
+
+**Attribution:** anthropic/claude-opus-5-5, thinking medium; Claude Code 2.1.295; 2026-10-09.
+
+### What landed
+
+| Plan item | Where | Commit |
+| --- | --- | --- |
+| Pin before reshaping: what the three callers answer in the two worlds that do not serve vinga (unprovided, displaced), both homes | `tests/unit/test_reachable_agents.py` (first half) | `Pin what a bound device reaches at all three edges` |
+| `Config.reachable_from` (the served filter alone), `BoundNames.against(config)`, its three callers, `agents_for_device` derived | `config/models.py`, `device/bindings.py`, `ota/reply.py`, `ota/poll.py`, `device/session.py` | `Classify a binding against one world's Config` |
+| Q3, the append; both homes, one test; the displaced falsification; `switch_agent` offered where vinga is reached | `config/models.py` (`reachable_from`), `tests/unit/test_reachable_agents.py` (second half), `tests/unit/test_session_builtin_agent.py` | `Make vinga reachable from every bound device` |
+| The documentation footprint | `docs/concepts.md` (Binding, Meta capabilities), `docs/devices/README.md` ("Talking to the device itself": asking for vinga), `docs/glossary.md` (Handover, Meta capability), `docs/run/tools-and-mcp.md`, `docs/run/memory.md`, `docs/run/security.md`, the packaged copy | `Document vinga on every bound device` |
+| The local tool-calling rerun | `tests/local/test_tool_calling_for_real.py` | `Rerun the local tool lane beside vinga` |
+| The suites the behavior change moved | `tests/unit/test_generation_binding.py`, `tests/integration/test_tools.py`, `tests/integration/test_config_api.py` | `Hold the deletion race to a world without vinga`, `Expect vinga beside the integration lane's agents` |
+| The fragment | `changelog.d/612-vinga-reachable.md` | with this section |
+
+Design footprint as planned: `config/models.py` holds the rule
+(`reachable_from`, asking `is_builtin` whether the world serves the
+built-in) and `device/bindings.py`'s `against` classifies a live
+binding by it. No new module.
+
+**The three callers, by tooling.** `rg -n "\.against\(" vinga-server/src
+vinga-server/tests` on the final tree, untruncated
+(`.logs/against-callers.log`): `device/session.py:528`,
+`ota/poll.py:81`, `ota/reply.py:400` in `src`, and two test sites
+(`test_device_bindings.py:299`, the both-homes helper in
+`test_reachable_agents.py`). `agents_for_device` has no caller in
+`src`, as at the plan's commit.
+
+### Deviations from the plan
+
+1. **The reshape and the behavior change are two commits.** The plan
+   names one milestone item; `reachable_from` landed first as the
+   served filter `against` already applied, so the three callers were
+   rerouted with no answer moving and the pins passing unchanged, and
+   the append landed alone after it. The one answer the reshape moved
+   is `agents_for_device` for a device bound to vinga while the
+   built-in is not served: it named vinga before and now answers
+   nothing, which is what `DeviceBindings` already answered. Nothing in
+   `src` calls it.
+2. **The local lane test changed beyond the extra tool.** It could not
+   have connected since M1 (its device was unbound, reaching the agent
+   only through the default), so it binds the device by name, and two
+   settings make it runnable on the Pi: `reasoning_effort: none` (the
+   `docs/run/llm.md` recipe; Gemma 4 e4b otherwise streams its thinking
+   first, 39 to 137 s for a one-tool question, `.logs/ollama-probe.log`)
+   and `llm_first_token_timeout_s: 30`. It also asserts the device
+   reaches `["assistant", "vinga"]`, which is what puts `switch_agent`
+   in the list the model meets.
+3. **Three suites outside the plan's list moved.** Each failed on the
+   intended behavior, never on a defect: a deletion race whose
+   installed world serves vinga (the device now talks to vinga instead
+   of being turned away; the race's installed world is now one that
+   does not serve vinga, and the test was falsified again against a
+   `reachable_from` that keeps unserved names), an integration offer
+   comparison whose due builtins said `switch_agent` is absent, and an
+   empty start configured over HTTP whose bound device now reaches the
+   assistant and then vinga.
+4. **Run pages beyond the plan's footprint.** `docs/run/tools-and-mcp.md`
+   and `docs/run/memory.md` stated `switch_agent`'s condition as "bound
+   to more than one agent", false after M6, and now say "reaches";
+   `docs/run/security.md` says why appending vinga grants nothing (it
+   has no MCP tool). The glossary's Handover and Meta capability entries
+   follow concepts.md.
+
+### Resolutions
+
+- **Q3's "any binding at all", taken literally.** A device bound only
+  to agents the running world does not serve yet now reaches vinga
+  while it waits, and the agents it waits for are still named as
+  unloaded on the `ota_check` line
+  (`test_a_device_bound_only_to_an_agent_not_yet_served_reaches_vinga`).
+  Before M6 such a device was refused a token until the apply. The plan
+  states the rule this way and the fragment says so, but it is a
+  visible change for an operator who binds a board to an agent before
+  applying it, so it is flagged for the PR review.
+- **Order.** vinga goes after the bound names the world serves; a
+  binding that names vinga keeps it where the operator put it, once.
+  A fresh wake opens on the first bound agent, never on an appended
+  vinga.
+- **The displaced case is decided by `is_builtin`**, never by the name
+  being in `agents`, and that is the access boundary the plan names.
+
+### The displaced falsification
+
+The pins committed before the reshape include
+`test_an_operator_s_agent_named_vinga_is_reached_only_where_it_is_bound`:
+an operator's agent named vinga stored under the repository (displacing
+the built-in, with every stage under the defaults), a device bound to
+`kids` and a second bound to `vinga`, driven through the check-in, the
+activation poll and the websocket session in both homes. The device
+bound to `kids` reaches `["kids"]` at all three edges. Mutated to append
+by name (`BUILTIN_AGENT not in self.agents` in place of `not
+self.is_builtin(BUILTIN_AGENT)`), that device reaches the operator's
+agent it was never bound to, and the run fails at all three edges in
+both homes, in the configuration home, and in the session test
+(`test_a_displaced_world_offers_no_way_to_its_vinga`, which then offers
+`switch_agent` to the operator's agent): seven failures,
+`.logs/m6-mutations.log`.
+
+### Tests first, and the mutations
+
+The eight new behavior tests (six in `test_reachable_agents.py`, two in
+`test_session_builtin_agent.py`) were run red before the append existed,
+each failing for want of vinga (`.logs/behavior-red.log`,
+`.logs/behavior-red-session.log`); the pins and the displaced and
+unprovided cases passed throughout, as they must. Each mutation was
+applied once, run against `test_reachable_agents.py`,
+`test_session_builtin_agent.py` and `test_device_bindings.py`, and
+restored by copy and `touch` (`.logs/m6-mutations.log`):
+
+| Mutation | Killed by |
+| --- | --- |
+| Appending by name regardless of whether the world serves the built-in (the plan's target) | 7: the displaced pins (both homes), the displaced configuration case, `test_no_home_of_the_rule_appends_a_displacing_agent` (three homes), `test_a_displaced_world_offers_no_way_to_its_vinga` |
+| Appending to an unbound device | 5: `test_an_unbound_device_still_reaches_nothing_where_vinga_is_served` (both homes), the both-homes test (three homes) |
+| Appending when the binding already names vinga | 3: the both-homes test (three homes) |
+| vinga first instead of last | 10, the three-edge and both-homes tests and five session tests |
+| Appending while the built-in is unprovided | 18, among them the unprovided pins and five `test_device_bindings.py` cases on unloaded agents |
+| The live home bypassing `reachable_from` (`against` filtering on its own) | 5: the three-edge tests in both homes, the unloaded case, the both-homes test's `database` and `snapshot` arms |
+| The configuration home bypassing it (`agents_for_device` filtering on its own) | 3: the both-homes test's `config` arm and both session tests |
+
+No survivor. The last two rows are the "both homes, one test" pin:
+breaking either home fails it, in the arms that read that home.
+
+### The local tool-calling rerun
+
+Gemma 4 e4b (`gemma4:e4b`) through Ollama on `127.0.0.1:11434`, on the
+Raspberry Pi 5, against the variant this milestone ships (the assistant
+and vinga, 17 tools offered, `switch_agent` first) and a baseline that
+differs only in a displaced vinga (the assistant alone, 16 tools; an
+uncommitted copy of the test, deleted after). The two first-round
+requests the server sent were captured through a recording proxy and
+differ exactly by `switch_agent` (`.logs/requests-capture.jsonl`): 1,990
+prompt tokens against 1,875.
+
+- **Cold, the lane cannot pass on this machine, with or without the
+  tool.** Every cold run of both variants ended `FirstTokenTimeout`:
+  with thinking on and the default 10 s watchdog, two with
+  `switch_agent` and two without
+  (`.logs/local-rerun-attempt1-thinking-on.log`); with thinking off at
+  10 s, three and two (`.logs/attempt2/local-rerun.log`); with thinking
+  off at 30 s, one and one (`.logs/local-rerun-attempt3-30s.log`).
+  Ollama's log shows why: the runner reads the whole prompt afresh,
+  about 13 tokens per second cold (a 2,363-token probe took 179.8 s to
+  its first byte, `.logs/ollama-probe-long.log`), and the watchdog
+  cancels it before the first 512-token batch completes. The baseline's
+  1,875 tokens fail the same way, so this is the hardware and the
+  prompt, not `switch_agent`.
+- **Replayed with no watchdog**, the captured first-round request five
+  times per variant (`.logs/replay-m6.log`, `.logs/replay-baseline.log`):
+  with `switch_agent`, 5 of 5 called `tools__secret_word` and none
+  called `switch_agent`, the first in 107.6 s cold and the rest in 2.4
+  to 3.4 s; without it, 5 of 5 called `tools__secret_word`, the first in
+  15.2 s (sharing the cached prefix) and the rest in 2.3 to 2.7 s.
+- **The lane, after the replay warmed the runner's prompt cache**
+  (`.logs/local-rerun-warm.log`): with `switch_agent`, 5 of 5 passed,
+  each reply "The secret word is rhubarb.", in 36.4, 199.1, 48.9, 27.6
+  and 28.9 s; without it, 5 of 5 passed with the same reply, in 43.6,
+  29.3, 27.5, 29.8 and 31.0 s.
+
+So `switch_agent` did not break tool calling for the confirmed local
+model: the right tool in all twenty measured rounds that answered, and
+the extra tool never chosen. What it costs is about 115 prompt tokens
+(6%), which matters on this machine only when the prompt cache is cold,
+where the lane fails without it too. That cold-prompt limit is a
+finding about the local stack on a Pi, not about M6, and M7 (which
+names the local model in the presets and Getting Started) is where it
+bites first. Peak temperature logged during the model work was 70.5 °C
+(`.logs/local-rerun-attempt3-temps.log`, during the replays); no pause
+was needed. A 180 s probe ran without the logger; it started at 60.6 °C.
+
+### Discoveries
+
+1. **The local lane had not run since M1.** Its device was unbound, so
+   it would have been offered a code and never a token; nothing in CI
+   runs it. `test_real_conversation.py` has the same shape (a default
+   agent and no binding) and was not changed or run here.
+2. **Gemma 4 e4b thinks by default over Ollama's OpenAI endpoint**, and
+   its thinking arrives as a `reasoning` delta before any content: the
+   local preset that M7 writes needs `reasoning_effort: none` for it as
+   it does for `qwen3:8b`.
+3. **A cold two-thousand-token prompt does not fit the 30 s ceiling on a
+   Pi 5** with Gemma 4 e4b (about 110 s to read), and the ceiling is a
+   fixed bound (`docs/run/llm.md`). A deployment on that hardware
+   answers its first turn only once the runner holds the prompt, which
+   the gate's numbers (taken with a warm runner) do not show.
+4. **`ruff format` reformats unrelated lines** in
+   `test_session_builtin_agent.py`; the edit was rebuilt from the
+   committed file so the diff holds only this milestone's lines.
+
+### Verification
+
+On the Raspberry Pi 5, logs in this worktree's `.logs/`, every lane with
+`-n auto --dist loadfile`. The M4 implementer shared the machine and the
+database during this milestone.
+
+- `uv run ruff check .`: `All checks passed!` (`.logs/ruff.log`).
+- First full unit lane, before the two lane-driven fixes
+  (`.logs/unit-1.log`, start 56.8 °C): `1 failed, 8617 passed, 19
+  skipped in 1202.53s (0:20:02)`, the deletion race above.
+- First full integration lane (`.logs/integration-1.log`): `2 failed,
+  361 passed in 393.23s (0:06:33)`, the two cases above.
+- **The final tree.** Unit (`.logs/final-unit.log`, start 64.5 °C):
+  `8618 passed, 19 skipped in 1484.50s (0:24:44)`; integration
+  (`.logs/final-integration.log`, start 59.0 °C): `363 passed in
+  351.02s (0:05:51)`.
+- The browser lane, `tests/browser/run.sh` in
+  `mcr.microsoft.com/playwright/python:v1.63.0-noble` under Podman
+  (`--network host`): `11 passed in 53.78s` (`.logs/browser-lane.log`).
+  Its sessions now reach the lane's agent and vinga; the tool case is
+  unaffected, as the plan expected.
+- The drift checks, scripted from the workflow's steps (domain and
+  server references, the conversations schema and metrics views,
+  events, OpenAPI, the CLI reference with its markers): all current
+  (`.logs/drift.log`).
+- `scripts/check_run_use_pages.py`: `checked 37 Run and Use pages, 0
+  findings`.
+  `scripts/check_doc_links.py`, `scripts/fold_changelog.py check`:
+  recorded with the census in the hand-back, since both read this
+  section and the fragment.
+- `tests/census`: run last, after this section, and reported in the
+  hand-back.
+
+Not verified: the image was not built and the smoke lane was not run;
+no board was onboarded against this build, so asking a board for vinga
+has been exercised only through the session tests and the local lane's
+real model; and the cold-cache local run passes nowhere on this
+machine, with or without this milestone.
