@@ -2036,7 +2036,8 @@ tool loop runs them, every answer read by hand
   hallucination on each side that counts is Gemma's rephrased S8 ("the
   conversation history is carried over" to the next agent).
 - **What Gemma 4 e4b does.** Answers from its prompt are right and
-  fast (median 1.8 s to the first spoken word); the misses are lookup
+  fast (median 1.8 s to the first text: the harness has no speech);
+  the misses are lookup
   questions answered "I do not have information" without a search
   (most of its nine tool errors on the frozen set). When it does
   search, the round after reached its first byte after 34 to 53 s:
