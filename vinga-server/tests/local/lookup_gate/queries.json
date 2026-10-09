@@ -1,0 +1,200 @@
+{
+ "source": "the search() calls the models made on lookup questions in the original gate's shape-A runs, 2026-10-06",
+ "queries": [
+  {
+   "model": "gemma4:e2b",
+   "question": "D5",
+   "query": "why is the screen in chinese"
+  },
+  {
+   "model": "gemma4:e2b",
+   "question": "D6",
+   "query": "how to change wifi network"
+  },
+  {
+   "model": "gemma4:e2b",
+   "question": "D9",
+   "query": "change wake word"
+  },
+  {
+   "model": "gemma4:e2b",
+   "question": "B2",
+   "query": "browser page compatibility"
+  },
+  {
+   "model": "gemma4:e2b",
+   "question": "B3",
+   "query": "browser page lacks secure connection"
+  },
+  {
+   "model": "gemma4:e2b",
+   "question": "B4",
+   "query": "how to get laptop browser talking to vinga"
+  },
+  {
+   "model": "gemma4:e2b",
+   "question": "S4",
+   "query": "connect a new board to the server"
+  },
+  {
+   "model": "gemma4:e2b",
+   "question": "S6",
+   "query": "bind a board to an agent"
+  },
+  {
+   "model": "gemma4:e2b",
+   "question": "S9",
+   "query": "swap hardware and keep settings"
+  },
+  {
+   "model": "gemma4:e2b",
+   "question": "S10",
+   "query": "how many tokens used this week"
+  },
+  {
+   "model": "gemma4:e4b",
+   "question": "D5",
+   "query": "screen language"
+  },
+  {
+   "model": "gemma4:e4b",
+   "question": "D6",
+   "query": "change wifi network"
+  },
+  {
+   "model": "gemma4:e4b",
+   "question": "D8",
+   "query": "device automatic shutdown"
+  },
+  {
+   "model": "gemma4:e4b",
+   "question": "D9",
+   "query": "change wake word"
+  },
+  {
+   "model": "gemma4:e4b",
+   "question": "B2",
+   "query": "browser page on phone"
+  },
+  {
+   "model": "gemma4:e4b",
+   "question": "B3",
+   "query": "secure connection browser page"
+  },
+  {
+   "model": "gemma4:e4b",
+   "question": "S5",
+   "query": "vinga info"
+  },
+  {
+   "model": "gemma4:e4b",
+   "question": "S6",
+   "query": "bind board to agent"
+  },
+  {
+   "model": "gemma4:e4b",
+   "question": "S9",
+   "query": "replace device settings"
+  },
+  {
+   "model": "gemma4:e4b",
+   "question": "S10",
+   "query": "token usage this week"
+  },
+  {
+   "model": "gemma4:e4b",
+   "question": "S11",
+   "query": "voice recognition speaker identification"
+  },
+  {
+   "model": "llama3.1:8b",
+   "question": "D5",
+   "query": "language"
+  },
+  {
+   "model": "llama3.1:8b",
+   "question": "D6",
+   "query": "change wifi network"
+  },
+  {
+   "model": "llama3.1:8b",
+   "question": "D8",
+   "query": "power off"
+  },
+  {
+   "model": "llama3.1:8b",
+   "question": "D9",
+   "query": "change wake word"
+  },
+  {
+   "model": "llama3.1:8b",
+   "question": "B1",
+   "query": "stop conversation browser page"
+  },
+  {
+   "model": "llama3.1:8b",
+   "question": "B2",
+   "query": "browser page on phone"
+  },
+  {
+   "model": "llama3.1:8b",
+   "question": "B3",
+   "query": "secure connection"
+  },
+  {
+   "model": "llama3.1:8b",
+   "question": "B4",
+   "query": "self-hosted vinga server"
+  },
+  {
+   "model": "llama3.1:8b",
+   "question": "B4",
+   "query": "browser onboarding vinga"
+  },
+  {
+   "model": "llama3.1:8b",
+   "question": "S4",
+   "query": "connect new board to server"
+  },
+  {
+   "model": "llama3.1:8b",
+   "question": "S5",
+   "query": "vinga info"
+  },
+  {
+   "model": "llama3.1:8b",
+   "question": "S6",
+   "query": "bind board to agent"
+  },
+  {
+   "model": "llama3.1:8b",
+   "question": "S9",
+   "query": "replace board, keep settings"
+  },
+  {
+   "model": "llama3.1:8b",
+   "question": "S10",
+   "query": "tokens used this week"
+  },
+  {
+   "model": "llama3.1:8b",
+   "question": "S11",
+   "query": "user identification"
+  },
+  {
+   "model": "qwen3:8b",
+   "question": "D5",
+   "query": "default language"
+  },
+  {
+   "model": "qwen3:8b",
+   "question": "D6",
+   "query": "change Wi-Fi network"
+  },
+  {
+   "model": "qwen3:8b",
+   "question": "S5",
+   "query": "vinga info"
+  }
+ ]
+}

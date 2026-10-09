@@ -1,0 +1,134 @@
+{
+ "rephrases": "frozen.json",
+ "written": "2026-10-09",
+ "questions": [
+  {
+   "id": "D1",
+   "text": "What do I press to begin a conversation with you?"
+  },
+  {
+   "id": "D2",
+   "text": "How do I power this thing down?"
+  },
+  {
+   "id": "D3",
+   "text": "What does the display show during our conversation?"
+  },
+  {
+   "id": "D4",
+   "text": "Is there a way to stop you from hearing me, like turning the mic off?"
+  },
+  {
+   "id": "D5",
+   "text": "The text on the display is in Chinese. How come?"
+  },
+  {
+   "id": "D6",
+   "text": "We got a new router. How do I move this device to the new wifi?"
+  },
+  {
+   "id": "D7",
+   "text": "After I pressed volume down twice quickly, talking over you stopped working. Why?"
+  },
+  {
+   "id": "D8",
+   "text": "If nobody uses it for a while, does it shut down by itself?"
+  },
+  {
+   "id": "D9",
+   "text": "Could I wake you with a different phrase instead of ni hao xiao zhi?"
+  },
+  {
+   "id": "B1",
+   "text": "On the web page version, how do I cut you off while you're talking?"
+  },
+  {
+   "id": "B2",
+   "text": "Can I use the browser client from my iPhone?"
+  },
+  {
+   "id": "B3",
+   "text": "The page in my browser complains the connection isn't secure. What's going on?"
+  },
+  {
+   "id": "B4",
+   "text": "I'd like to talk to vinga from a web browser on my computer. How do I set that up?"
+  },
+  {
+   "id": "S1",
+   "text": "What exactly is an agent in vinga?"
+  },
+  {
+   "id": "S2",
+   "text": "When I wake the device, who answers?"
+  },
+  {
+   "id": "S3",
+   "text": "If I tell you something today, will you still know it next week?"
+  },
+  {
+   "id": "S4",
+   "text": "I just got another board. How do I hook it up to my vinga server?"
+  },
+  {
+   "id": "S5",
+   "text": "What is the vinga info command for?"
+  },
+  {
+   "id": "S6",
+   "text": "How do I make a board talk to a particular agent?"
+  },
+  {
+   "id": "S7",
+   "text": "Is there a way to speak with one of the other agents?"
+  },
+  {
+   "id": "S8",
+   "text": "When you hand me over to another agent, does it know what we talked about?"
+  },
+  {
+   "id": "S9",
+   "text": "My board died. How do I move its setup onto a replacement?"
+  },
+  {
+   "id": "S10",
+   "text": "How can I see how many tokens we've used lately?"
+  },
+  {
+   "id": "S11",
+   "text": "Can you recognize which person in the family is speaking?"
+  },
+  {
+   "id": "C1",
+   "text": "Make it louder."
+  },
+  {
+   "id": "C2",
+   "text": "Put the volume at 30."
+  },
+  {
+   "id": "U1",
+   "text": "How many hours will it run on battery?"
+  },
+  {
+   "id": "U2",
+   "text": "Can I call my mom with this?"
+  },
+  {
+   "id": "U3",
+   "text": "Could you put on some music from Spotify?"
+  },
+  {
+   "id": "F1",
+   "text": "What happens if I click the volume up button?"
+  },
+  {
+   "id": "F2",
+   "text": "What if I keep it pressed?"
+  },
+  {
+   "id": "F3",
+   "text": "And the volume down one?"
+  }
+ ]
+}
