@@ -1,0 +1,601 @@
+{
+ "frozen": "2026-10-06",
+ "repo_head": "c5b592e2",
+ "questions": [
+  {
+   "id": "D1",
+   "kind": "device",
+   "text": "How do I start talking to you?",
+   "expected": "prompt",
+   "facts": [
+    {
+     "phrase": "Short press PWR",
+     "doc": "docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md",
+     "line": 26,
+     "match": "\\bPWR\\b|power button"
+    },
+    {
+     "phrase": "Starts a conversation",
+     "doc": "docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md",
+     "line": 26,
+     "match": "press|click|tap|push"
+    }
+   ],
+   "contradicts": [
+    "long[- ]press",
+    "hold (down )?(the )?(PWR|power)"
+   ]
+  },
+  {
+   "id": "D2",
+   "kind": "device",
+   "text": "How do I switch you off?",
+   "expected": "prompt",
+   "facts": [
+    {
+     "phrase": "Long press PWR (about 2 s)",
+     "doc": "docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md",
+     "line": 27,
+     "match": "\\bPWR\\b|power button"
+    },
+    {
+     "phrase": "Long press PWR (about 2 s)",
+     "doc": "docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md",
+     "line": 27,
+     "match": "\\b(2|two)\\s*(s\\b|sec|second)"
+    }
+   ],
+   "contradicts": [
+    "\\b(3|4|5|6|8|10|three|four|five|ten)\\s*(s\\b|sec|second)"
+   ]
+  },
+  {
+   "id": "D3",
+   "kind": "device",
+   "text": "What's the screen showing while we talk?",
+   "expected": "prompt",
+   "facts": [
+    {
+     "phrase": "Recognized speech and the assistant's replies render on the screen",
+     "doc": "docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md",
+     "line": 121,
+     "match": "what you (said|say)|you say|your (words|speech)|heard|recogni|transcri|speech"
+    },
+    {
+     "phrase": "Recognized speech and the assistant's replies render on the screen",
+     "doc": "docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md",
+     "line": 121,
+     "match": "repl|my (answers|responses)|what I say|response"
+    }
+   ],
+   "contradicts": [
+    "\\b(clock|weather|time of day)\\b"
+   ]
+  },
+  {
+   "id": "D4",
+   "kind": "device",
+   "text": "Can I mute the microphone?",
+   "expected": "prompt",
+   "facts": [
+    {
+     "phrase": "there is no microphone mute on this board",
+     "doc": "docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md",
+     "line": 32,
+     "match": "no (microphone|mic) mute|(can't|cannot|can not|no way to|not able to) mute the (microphone|mic)|doesn't have a (microphone|mic) mute|does not have a (microphone|mic) mute|never mutes the (microphone|mic)|there(?:'s| is) no (way to mute|microphone mute|mic mute)|\\bno\\b,"
+    }
+   ],
+   "contradicts": [
+    "hold(ing)? (the )?volume down (will |to )?mutes? the (microphone|mic)",
+    "(press|hold|double[- ]click)[^.]{0,40}to mute the (microphone|mic)"
+   ]
+  },
+  {
+   "id": "D5",
+   "kind": "device",
+   "text": "Why is the screen in Chinese?",
+   "expected": "lookup",
+   "facts": [
+    {
+     "phrase": "the language is compiled in rather than configured",
+     "doc": "docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md",
+     "line": 127,
+     "match": "firmware"
+    },
+    {
+     "phrase": "the language is compiled in rather than configured",
+     "doc": "docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md",
+     "line": 127,
+     "match": "compiled|built in|built into|build|baked|flash"
+    }
+   ],
+   "contradicts": [
+    "(change|switch|set) (it|the language|the interface)[^.]{0,30}(in|from) (the )?settings"
+   ]
+  },
+  {
+   "id": "D6",
+   "kind": "device",
+   "text": "How do I put it on a different wifi network?",
+   "expected": "lookup",
+   "facts": [
+    {
+     "phrase": "Triple-click PWR",
+     "doc": "docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md",
+     "line": 29,
+     "match": "triple[- ]?(click|press|tap)|reconfigure the wi-?fi|press (the )?PWR (button )?three times|click (the )?PWR (button )?three times"
+    },
+    {
+     "phrase": "raises its own access point, and serves the captive portal",
+     "doc": "docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md",
+     "line": 29,
+     "match": "access point|captive portal|portal|hotspot|its own (wi-?fi|network)"
+    }
+   ],
+   "contradicts": [
+    "(open|go to) (the )?settings (app|menu)"
+   ]
+  },
+  {
+   "id": "D7",
+   "kind": "device",
+   "text": "I double-clicked volume down and now I can't interrupt you anymore. What happened?",
+   "expected": "lookup",
+   "facts": [
+    {
+     "phrase": "Toggles echo cancellation",
+     "doc": "docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md",
+     "line": 33,
+     "match": "echo[- ]cancel|\\bAEC\\b"
+    },
+    {
+     "phrase": "Double-click volume down, while idle only",
+     "doc": "docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md",
+     "line": 33,
+     "match": "again|back on|toggle|switch it back|turn it back|double[- ]click"
+    }
+   ],
+   "contradicts": []
+  },
+  {
+   "id": "D8",
+   "kind": "device",
+   "text": "Does it turn itself off if I leave it alone?",
+   "expected": "lookup",
+   "facts": [
+    {
+     "phrase": "powers itself off after 300 seconds",
+     "doc": "docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md",
+     "line": 136,
+     "match": "\\b(5|five) min|\\b300\\s*(s\\b|sec|second)"
+    }
+   ],
+   "contradicts": [
+    "\\bno\\b,? it (doesn't|does not|won't)",
+    "\\b(10|15|20|30|ten|fifteen|twenty|thirty) min"
+   ]
+  },
+  {
+   "id": "D9",
+   "kind": "device",
+   "text": "Can I change the wake word?",
+   "expected": "lookup",
+   "facts": [
+    {
+     "phrase": "reaching it means building the firmware with it",
+     "doc": "docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md",
+     "line": 56,
+     "match": "firmware"
+    },
+    {
+     "phrase": "reaching it means building the firmware with it",
+     "doc": "docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md",
+     "line": 56,
+     "match": "build|compil|flash|rebuild|custom"
+    }
+   ],
+   "contradicts": [
+    "(you can|just) (say|tell me|ask me) (to change|a new)",
+    "(change|set) it (in|from|through) (the )?(settings|app|server config)"
+   ]
+  },
+  {
+   "id": "B1",
+   "kind": "device",
+   "text": "If I use the browser page instead, how do I stop you mid-sentence?",
+   "expected": "lookup",
+   "facts": [
+    {
+     "phrase": "Interrupt | Shown only while a reply is playing",
+     "doc": "docs/devices/browser.md",
+     "line": 80,
+     "match": "\\binterrupt\\b"
+    }
+   ],
+   "contradicts": [
+    "\\bPWR\\b",
+    "(press|hit) (the )?(escape|esc|space ?bar)"
+   ]
+  },
+  {
+   "id": "B2",
+   "kind": "device",
+   "text": "Will the browser page work on my phone?",
+   "expected": "lookup",
+   "facts": [
+    {
+     "phrase": "no browser on a phone or tablet",
+     "doc": "docs/devices/browser.md",
+     "line": 235,
+     "match": "not (been )?(checked|tested|verified)|hasn't been (checked|tested)|haven't been (checked|tested)|untested|unknown|not known|don't know|do not know|isn't known|no one has (checked|tested)|nobody has|not sure|unclear|can't (say|confirm|promise)|cannot (say|confirm)"
+    }
+   ],
+   "contradicts": [
+    "^\\s*yes\\b",
+    "\\bit (will|should) work (fine|on your phone)",
+    "works (fine|well) on (phones|mobile|your phone)"
+   ]
+  },
+  {
+   "id": "B3",
+   "kind": "device",
+   "text": "The browser page says it lacks a secure connection. Why?",
+   "expected": "lookup",
+   "facts": [
+    {
+     "phrase": "page opened over `https://`, or on `localhost`",
+     "doc": "docs/devices/browser.md",
+     "line": 179,
+     "match": "https"
+    },
+    {
+     "phrase": "page opened over `https://`, or on `localhost`",
+     "doc": "docs/devices/browser.md",
+     "line": 179,
+     "match": "localhost"
+    }
+   ],
+   "contradicts": []
+  },
+  {
+   "id": "B4",
+   "kind": "device",
+   "text": "How do I get my laptop's browser talking to vinga?",
+   "expected": "lookup",
+   "facts": [
+    {
+     "phrase": "Whoever runs the server runs `vinga info`, which",
+     "doc": "docs/devices/browser.md",
+     "line": 31,
+     "match": "vinga info"
+    },
+    {
+     "phrase": "prints a new try link each time",
+     "doc": "docs/devices/browser.md",
+     "line": 32,
+     "match": "try link|/try|link"
+    }
+   ],
+   "contradicts": [
+    "install (the |an )?(app|extension|plugin)"
+   ]
+  },
+  {
+   "id": "S1",
+   "kind": "system",
+   "text": "What's an agent?",
+   "expected": "prompt",
+   "facts": [
+    {
+     "phrase": "A named configuration of prompt, providers, voice, and MCP tools",
+     "doc": "docs/glossary.md",
+     "line": 29,
+     "match": "prompt"
+    },
+    {
+     "phrase": "A named configuration of prompt, providers, voice, and MCP tools",
+     "doc": "docs/glossary.md",
+     "line": 29,
+     "match": "voice"
+    },
+    {
+     "phrase": "A named configuration of prompt, providers, voice, and MCP tools",
+     "doc": "docs/glossary.md",
+     "line": 29,
+     "match": "tool"
+    }
+   ],
+   "contradicts": [
+    "\\bpersona\\b(?! is)"
+   ]
+  },
+  {
+   "id": "S2",
+   "kind": "system",
+   "text": "Which agent answers when I wake it up?",
+   "expected": "prompt",
+   "facts": [
+    {
+     "phrase": "A fresh wake always gets the default agent",
+     "doc": "docs/concepts.md",
+     "line": 249,
+     "match": "default"
+    }
+   ],
+   "contradicts": [
+    "wake word (decides|picks|chooses|selects)",
+    "(last|previous) (one|agent) you (talked|spoke)"
+   ]
+  },
+  {
+   "id": "S3",
+   "kind": "system",
+   "text": "Will you remember what I tell you tomorrow?",
+   "expected": "prompt",
+   "facts": [
+    {
+     "phrase": "`remember` tool writes it",
+     "doc": "docs/concepts.md",
+     "line": 459,
+     "match": "\\byes\\b|\\bI can\\b|\\bI will\\b|\\bI'll\\b|can remember|I do\\b"
+    }
+   ],
+   "contradicts": [
+    "I (can't|cannot|don't|do not|won't) remember",
+    "no memory",
+    "forget everything"
+   ]
+  },
+  {
+   "id": "S4",
+   "kind": "system",
+   "text": "How do I connect a new board to the server?",
+   "expected": "lookup",
+   "facts": [
+    {
+     "phrase": "device's NVS `wifi` namespace under the key `ota_url` over USB",
+     "doc": "docs/devices/README.md",
+     "line": 111,
+     "match": "\\bUSB\\b|\\bNVS\\b|ota_url|ota url"
+    }
+   ],
+   "contradicts": [
+    "(scan|scanning) (a|the) QR",
+    "bluetooth"
+   ]
+  },
+  {
+   "id": "S5",
+   "kind": "system",
+   "text": "What does vinga info do?",
+   "expected": "lookup",
+   "facts": [
+    {
+     "phrase": "prints a new try link each time",
+     "doc": "docs/devices/browser.md",
+     "line": 32,
+     "match": "try link|/try"
+    },
+    {
+     "phrase": "The address to write is the one `vinga info` prints",
+     "doc": "docs/devices/README.md",
+     "line": 139,
+     "match": "onboarding|address|URL|ota"
+    }
+   ],
+   "contradicts": [
+    "(shows|prints|lists) (the )?(cpu|memory usage|disk|version number only)"
+   ]
+  },
+  {
+   "id": "S6",
+   "kind": "system",
+   "text": "How do I bind a board to an agent?",
+   "expected": "lookup",
+   "facts": [
+    {
+     "phrase": "the binding is the `agents` list on the\ndevice's own record, and the first entry is the default",
+     "doc": "docs/concepts.md",
+     "line": 243,
+     "match": "pending claim|device bind|agents? list|list of agents|first (entry|one|agent)|six[- ]digit|6[- ]digit"
+    }
+   ],
+   "contradicts": [
+    "(press|hold) (the )?(PWR|power|volume)[^.]{0,40}(to|and) bind"
+   ],
+   "note": "The Use door never names `vinga device bind` (it appears in the preset's comments); the true command is accepted, not counted as hallucination."
+  },
+  {
+   "id": "S7",
+   "kind": "system",
+   "text": "Can I talk to a different agent?",
+   "expected": "prompt",
+   "facts": [
+    {
+     "phrase": "requested by name in conversation and executed by the LLM's `switch_agent` tool",
+     "doc": "docs/glossary.md",
+     "line": 298,
+     "match": "by (its )?name|ask (for|to talk)|let me talk to|say|just tell me|switch"
+    }
+   ],
+   "contradicts": [
+    "(press|hold|double[- ]click) (the )?(PWR|power|volume)"
+   ]
+  },
+  {
+   "id": "S8",
+   "kind": "system",
+   "text": "If I switch agents, does the new one hear what we said?",
+   "expected": "prompt",
+   "facts": [
+    {
+     "phrase": "The incoming agent does not read what was said",
+     "doc": "docs/concepts.md",
+     "line": 378,
+     "match": "\\bno\\b|doesn't|does not|won't|will not|starts? (clean|fresh|from scratch)|can't hear|cannot hear"
+    }
+   ],
+   "contradicts": [
+    "^\\s*yes\\b",
+    "(it|they) (will|can) (hear|see|read) (everything|what we said)"
+   ]
+  },
+  {
+   "id": "S9",
+   "kind": "system",
+   "text": "A board broke. How do I swap in a new one and keep its settings?",
+   "expected": "lookup",
+   "facts": [
+    {
+     "phrase": "`vinga device replace <mac> <new mac>`",
+     "doc": "docs/concepts.md",
+     "line": 139,
+     "match": "device replace"
+    }
+   ],
+   "contradicts": [
+    "factory reset",
+    "(re)?bind (it|the new one) (from scratch|again)"
+   ]
+  },
+  {
+   "id": "S10",
+   "kind": "system",
+   "text": "How many tokens did we use this week?",
+   "expected": "lookup",
+   "facts": [
+    {
+     "phrase": "`vinga metric show\n  tokens`",
+     "doc": "docs/concepts.md",
+     "line": 332,
+     "match": "metric show tokens|vinga metric"
+    }
+   ],
+   "contradicts": [
+    "\\b(you|we) (used|spent) (about |around |roughly )?[\\d,]+ tokens"
+   ]
+  },
+  {
+   "id": "S11",
+   "kind": "system",
+   "text": "Do you know who's talking? Like, can you tell me apart from my kids?",
+   "expected": "lookup",
+   "facts": [
+    {
+     "phrase": "There is no user entity. \"The user\" is implicitly whoever is talking",
+     "doc": "docs/concepts.md",
+     "line": 568,
+     "match": "\\bno\\b|can't|cannot|don't|do not|not able|unable"
+    }
+   ],
+   "contradicts": [
+    "\\byes\\b,? I (can|do) (tell|recogni)",
+    "voice ?print",
+    "recogni[sz]e (your|each) voice"
+   ]
+  },
+  {
+   "id": "C1",
+   "kind": "command",
+   "text": "Turn it up.",
+   "expected": "device_tool",
+   "tool": {
+    "name": "self_audio_speaker_set_volume",
+    "volume_min": 0,
+    "volume_max": 100
+   }
+  },
+  {
+   "id": "C2",
+   "kind": "command",
+   "text": "Set the volume to 30.",
+   "expected": "device_tool",
+   "tool": {
+    "name": "self_audio_speaker_set_volume",
+    "volume_exact": 30
+   }
+  },
+  {
+   "id": "U1",
+   "kind": "unanswerable",
+   "text": "How long does the battery last on a full charge?",
+   "expected": "decline",
+   "confident": "\\b\\d+(\\.\\d+)?\\s*(to|-|–)?\\s*\\d*\\s*(hours?|hrs?|days?)\\b|\\b(a few|several|one|two|three|four|five|six|eight|ten|twelve) (hours|days)\\b"
+  },
+  {
+   "id": "U2",
+   "kind": "unanswerable",
+   "text": "Can I make phone calls with this?",
+   "expected": "decline",
+   "confident": "^\\s*yes\\b|you can (make|place) (phone )?calls|I can call"
+  },
+  {
+   "id": "U3",
+   "kind": "unanswerable",
+   "text": "Can you play my Spotify playlists?",
+   "expected": "decline",
+   "confident": "^\\s*(yes|sure|ok(ay)?)\\b|playing (your )?(spotify|playlist)|I'll play|I will play|here'?s your playlist|connect(ing)? to spotify"
+  },
+  {
+   "id": "F1",
+   "kind": "device",
+   "exchange": "F",
+   "text": "What does the volume up button do?",
+   "expected": "prompt",
+   "facts": [
+    {
+     "phrase": "Changes the volume by 10",
+     "doc": "docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md",
+     "line": 30,
+     "match": "\\b(10|ten)\\b"
+    }
+   ],
+   "contradicts": [
+    "\\b(5|20|25|five|twenty)\\b (steps?|percent|%)"
+   ]
+  },
+  {
+   "id": "F2",
+   "kind": "device",
+   "exchange": "F",
+   "text": "And if I hold it?",
+   "expected": "prompt",
+   "facts": [
+    {
+     "phrase": "Hold volume up | Maximum volume.",
+     "doc": "docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md",
+     "line": 31,
+     "match": "max|full volume|all the way up|100|loudest"
+    }
+   ],
+   "contradicts": [
+    "power(s)? (it|the board) off",
+    "\\bmute"
+   ]
+  },
+  {
+   "id": "F3",
+   "kind": "device",
+   "exchange": "F",
+   "text": "What about the other one?",
+   "expected": "prompt",
+   "facts": [
+    {
+     "phrase": "Click volume up or volume down | Changes the volume by 10",
+     "doc": "docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md",
+     "line": 30,
+     "match": "down|lower|quieter|decrease|reduce"
+    },
+    {
+     "phrase": "Hold volume down | Mutes the speaker.",
+     "doc": "docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md",
+     "line": 32,
+     "match": "\\bmute"
+    }
+   ],
+   "contradicts": [
+    "mutes? the (microphone|mic)\\b(?! *(never|isn't|is not))"
+   ]
+  }
+ ]
+}
