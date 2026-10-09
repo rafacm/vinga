@@ -53,17 +53,20 @@ _CONTROLS = "Controls"
 
 # What a device with no guide gets: an absent type, `unknown`, or a
 # type no board guide is named for. Fixed text, so nothing the device
-# reported can reach a prompt through it. It names where the guides
-# are and never asks the model to answer from them: until a lookup
-# exists the model cannot read a page, and an instruction to answer
-# from one invites the invention the gate counted.
+# reported can reach a prompt through it. Plan D3's "a lookup away",
+# made true in M5: the built-in agent is offered `search_docs` on every
+# stack, so the text sends a device question to the common device guide
+# through it, and says not to guess which board this is, since a
+# search answers about every board and only one of them is this one.
 VAGUE_BOARD_FACTS = (
     "The server has not been told which board this device is, so you have no facts "
-    "about its buttons, screen or controls. When asked about them, say plainly that "
-    "you do not know which board this is rather than guessing, and point the person "
-    "to the guide for their board, among the device guides in vinga's documentation "
-    "(docs/devices/). Restarting the device lets the server learn which board it is: "
-    "a board reports its type when it checks in at boot."
+    "here about its buttons, screen or controls. For a question about them, search "
+    "the documentation with the search_docs tool for what the common device guide "
+    "(Device guides) says, and never guess which board this is: a guide for one "
+    "board is not the answer for another, so when the common guide does not cover "
+    "the question, say so plainly rather than guessing. Restarting the device lets "
+    "the server learn which board it is: a board reports its type when it checks in "
+    "at boot."
 )
 
 
