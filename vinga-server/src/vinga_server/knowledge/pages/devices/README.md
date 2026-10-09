@@ -295,8 +295,18 @@ does a board with no guide here. Checking in again is what teaches it:
 switch the board off and on, or, in the browser, press Start (or Start
 again), which checks in before every conversation. Until
 then vinga is told nothing about the device itself: asked about it, it
-says it does not know which board this is and points you to the guide
-for your board, which is the place to look.
+looks in this page, says so when this page does not cover the
+question, and does not guess which board this is.
+
+Beyond the opening and the Controls section, vinga can search these
+guides, the [concepts page](../concepts.md) and the
+[glossary](../glossary.md), so a question about the screen, the wake
+word or WiFi can be answered from the rest of the guide. Whether it
+searches is the model's choice: a vendor's model searched on almost
+every question that needed it, and Gemma 4 e4b, the local preset's
+model, on a minority, answering the rest from what it was told or
+saying it did not know ([the concepts page](../concepts.md#agent) has
+the numbers).
 
 Only vinga is told this. Every other agent on the device answers about
 it from its own prompt, whatever the operator wrote there.
