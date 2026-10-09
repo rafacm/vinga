@@ -27,6 +27,7 @@ import pytest
 from xiaozhi_sdk import XiaoZhiWebsocket
 
 from vinga_server.config import Config
+from vinga_server.config.models import BUILTIN_AGENT
 
 DEVICE_MAC = "aa:bb:cc:dd:ee:04"
 SAMPLE_RATE = 16000
@@ -90,12 +91,24 @@ def tool_model(local_lane) -> str:
 @pytest.fixture
 async def server_port(local_lane, tool_model: str, serve):
     config = Config(
+        # The first round's prompt is about two thousand tokens, the
+        # tools included, and a small model on modest hardware takes
+        # longer than the ten-second default to read it; 30 s is as far
+        # as the watchdog can usefully go (docs/run/llm.md). On a
+        # Raspberry Pi 5 even that needs the runner's prompt cache warm:
+        # Gemma 4 e4b read it cold in about 110 s.
+        server={"llm_first_token_timeout_s": 30},
         providers={
             "llm": {
                 "local": {
                     "type": "openai_compatible",
                     "base_url": local_lane.base_url,
                     "model": tool_model,
+                    # A thinking model streams its thinking first, which on
+                    # this lane's hardware outlasts the first-token watchdog
+                    # before the answer starts; the guide's recipe turns it
+                    # off, and a model with no thinking ignores it.
+                    "reasoning_effort": "none",
                 }
             },
             "asr": {"whisper": {"type": "faster_whisper", "model": "small", "language": "en"}},
@@ -112,8 +125,15 @@ async def server_port(local_lane, tool_model: str, serve):
         },
         agent_defaults={"llm": "local", "asr": "whisper", "tts": "piper", "vad": "silero"},
         agents={"assistant": {"prompt": PROMPT, "mcp": ["tools"]}},
+        # Bound by name: an unbound device only pairs (#612).
+        devices={DEVICE_MAC: ["assistant"]},
         default_agent="assistant",
     )
+    # The defaults name every stage, so vinga, the built-in agent, is
+    # served and reached beside the assistant, and the assistant is
+    # offered `switch_agent` with the MCP tool: the longer tool list a
+    # small local model meets on every bound device (#612, M6).
+    assert config.agents_for_device(DEVICE_MAC) == ["assistant", BUILTIN_AGENT]
     async with serve(config) as port:
         yield port
 
