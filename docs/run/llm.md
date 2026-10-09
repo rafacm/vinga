@@ -161,6 +161,41 @@ one request that loads a model and pins it
 ([Getting Started](../../README.md#getting-started)); name your model
 in it.
 
+## The built-in agent's lookup
+
+vinga, the built-in agent, is offered one tool no other agent has,
+`search_docs`, a search over the concepts page, the glossary and the
+device guides packaged with the build, for the questions its prompt
+does not answer. Whether a model calls it is the model's own choice,
+and it is where models differ most. Both measurements below asked the
+same 32 questions, each in two wordings (the questions are in
+`vinga-server/tests/local/lookup_gate/`), on 2026-10-09, with vinga's
+real prompt and tools on an ESP32-S3-Touch-LCD-1.54, every answer read
+by hand. A correct answer holds every key fact the pages give for it;
+of the 32, 15 need the lookup, 12 are answered by the prompt, 3 cannot
+be answered and should be declined, and 2 are volume commands.
+
+| Model | Correct | Invented a claim | Searched when needed (of 15) | Declined (of 3) | Volume commands (of 2) | Median s per question |
+| --- | --- | --- | --- | --- | --- | --- |
+| `claude-sonnet-5` | 78%, 81% reworded | 0 | 13, 13 reworded | 3 | 2 | 2.9, 3.1 reworded |
+| `gemma4:e4b`, Pi 5 | 50%, 41% reworded | 0, 1 reworded | 5, 2 reworded | 3 | 1 | 6.3, 7.4 reworded |
+
+On Gemma 4 e4b the misses are mostly questions it answered "I do not
+have information" to without searching; the prompt's twelve questions
+it answers well, in a median 1.8 s to the first spoken word. When it
+does search, the round after the search is slow on a Pi: the runner
+reads the passages found before it says anything, and the first byte
+of that round came after 34 to 53 s, every time past the 30 s at which
+a request ends without a byte (see
+[What the model has to do](#what-the-model-has-to-do)), so on that
+hardware a turn that searches is given up as a `ProviderCallTimeout`
+today. Raising `llm_first_token_timeout_s` cannot help, for the same
+reason. What vinga does say during that wait is its filler: a
+`builtin_agent.filler` section ([Overriding vinga](configuration.md#overriding-vinga-the-built-in-agent))
+plays one of its phrases the moment vinga searches. `claude-sonnet-5`
+reached the first byte after a search in under 3 s, and spent about
+8,400 input tokens and 130 to 150 output tokens per question, uncached.
+
 ## Pointing an agent at an entry
 
 A model is a provider entry, and an agent answers through the entry
