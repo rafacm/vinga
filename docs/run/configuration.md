@@ -76,16 +76,21 @@ the one you want first (from a checkout, `cd vinga-server` and name
 curl -fsSLO https://raw.githubusercontent.com/rafacm/vinga/main/vinga-server/examples/presets/cloud-stack.yaml
 vinga import -f cloud-stack.yaml
 vinga apply
-vinga device bind aa:bb:cc:dd:ee:ff assistant
+vinga device pending claim 418293
 vinga list
 ```
+
+A preset names providers and the defaults every agent inherits, and no
+agent: the first agent the deployment has is vinga, the built-in one,
+and the claim on the third line, naming no agent, binds the board
+showing that code to it. Your own agents come after.
 
 Importing orders the writes for you. A write whose references do not
 resolve is refused, which is what forces the creation order when
 entities are written one at a time; a document is validated against the
-state it would leave and written in one transaction, so the providers,
-the defaults naming them and the agent inheriting them all arrive
-together and nothing is ever half written. Importing is additive and
+state it would leave and written in one transaction, so the providers
+and the defaults naming them arrive together and nothing is ever half
+written. Importing is additive and
 never deletes, and the same document twice changes nothing. What it
 does not do is touch the running server: that is the `apply` on the
 second line, which is

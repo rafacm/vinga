@@ -329,11 +329,13 @@ Then ask, one question at a time and in this order:
    [Giving an agent a voice](voices.md), and for hearing,
    [Choosing how an agent hears](speech-recognition.md).
 3. **Keep the agents that are stored, or add their own.** Getting
-   Started creates one called `assistant`. Their own needs a name and a
-   prompt, and a board reaches it only by a binding: claimed by its code
-   naming the agent, or claimed naming none once it is the
-   `default_agent`, the agent a newly claimed board starts with. Which
-   of the two is their choice, not yours.
+   Started creates none: its board is claimed naming no agent, so it
+   reaches vinga, the agent built into the server, which needs no
+   entry. Their own needs a name and a prompt, and a board reaches it
+   only by a binding: claimed by its code naming the agent, or claimed
+   naming none once it is the `default_agent`, the agent a newly
+   claimed board starts with. Which of the two is their choice, not
+   yours. A bound board reaches vinga beside its agents either way.
 
 Four conventions hold for every answer:
 
@@ -345,9 +347,9 @@ Four conventions hold for every answer:
   field you leave out included, so export it, edit it and set it back:
 
   ```bash
-  vinga agent export assistant > assistant.yaml
-  "${EDITOR:-vi}" assistant.yaml    # change only what was asked
-  vinga agent set assistant -f - < assistant.yaml
+  vinga agent export sam > sam.yaml
+  "${EDITOR:-vi}" sam.yaml    # change only what was asked
+  vinga agent set sam -f - < sam.yaml
   ```
 
   A deployment written from nothing is one document, `vinga import -f`,
