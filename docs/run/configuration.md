@@ -218,7 +218,12 @@ board it speaks through, the opening and the controls of that board's
 [device guide](../devices/README.md#what-vinga-knows-about-the-device),
 chosen by the board model the device reported when it checked in; a
 board with no guide, or one that has not checked in since the server
-started, gets a note saying the board is not known instead. A device
+started, gets a note saying the board is not known instead. What those
+do not answer it looks up: it alone is offered `search_docs`, a search
+over the concepts page, the glossary and the device guides packaged
+with the build, and a call is recorded like any builtin tool's. A
+small local model often answers without searching; the measurements
+are in [the LLM guide](llm.md#the-built-in-agents-lookup). A device
 bound to vinga reaches it like any other agent.
 
 It inherits `agent_defaults` like any agent, and it is served whenever
