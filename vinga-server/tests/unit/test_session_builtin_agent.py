@@ -12,7 +12,7 @@ from typing import Any
 
 from tests.support.configs import BOTH_MAC, POET_MAC, STDIO_SERVER, base_config, world
 from tests.support.providers import RecordingLlm, ScriptedLlm, results_of
-from tests.support.sessions import agent_providers, call, run_reply, session_for
+from tests.support.sessions import agent_providers, call, run_reply, session_for, talking
 from tests.support.stores import StoredThreads, a_backlog, a_candidate, memory_rows
 from tests.support.stores import memory as lane_memory
 from vinga_server import knowledge
@@ -262,3 +262,51 @@ async def test_an_offer_held_by_a_legacy_vinga_is_not_honoured_once_the_built_in
     assert results_of(script)[-1] == builtin.NO_SUCH_CANDIDATE
     assert store.read == []
     assert all(HISTORY[0][0] not in system for system in script.systems)
+
+
+# Reachable from every bound device (M6)
+
+
+async def test_a_board_bound_to_one_agent_is_offered_the_way_to_vinga() -> None:
+    """The poet's board is bound to the poet alone, and the world serves
+    vinga, so the handover the rule already offers where there is
+    somewhere to go is offered here, naming both."""
+    poet = ScriptedLlm(["Hello."])
+    session = session_for(vinga_world(), POET_MAC, {"poet": poet})
+
+    await run_reply(session, "hi")
+
+    assert talking(session) == "poet"
+    (offered,) = [tool for tool in poet.seen[0][1] if tool.name == names.SWITCH_AGENT]
+    assert offered.input_schema["properties"]["agent"]["enum"] == ["poet", BUILTIN_AGENT]
+
+
+async def test_the_poet_hands_over_to_vinga_and_vinga_answers() -> None:
+    poet = ScriptedLlm([[call(names.SWITCH_AGENT, agent=BUILTIN_AGENT)]])
+    vinga = RecordingLlm()
+    session = session_for(vinga_world(), POET_MAC, {"poet": poet, BUILTIN_AGENT: vinga})
+
+    await run_reply(session, "who else can I talk to?")
+
+    assert talking(session) == BUILTIN_AGENT
+    (system,) = vinga.systems
+    assert system.startswith(knowledge.persona())
+
+
+async def test_a_displaced_world_offers_no_way_to_its_vinga() -> None:
+    """An operator's agent named vinga is reached where it is bound and
+    nowhere else, so the poet's board, bound to the poet alone, has
+    nowhere to go and is offered no handover."""
+    config = vinga_world(
+        agents={
+            "poet": {"prompt": "POET", "tts": "tenor"},
+            "tutor": {"prompt": "TUTOR", "tts": "alto"},
+            BUILTIN_AGENT: {"prompt": "OLD", "tts": "alto"},
+        }
+    )
+    assert config.builtin_state.status is BuiltinStatus.DISPLACED
+    poet = ScriptedLlm(["Hello."])
+
+    await run_reply(session_for(config, POET_MAC, {"poet": poet}), "hi")
+
+    assert names.SWITCH_AGENT not in {tool.name for tool in poet.seen[0][1]}
