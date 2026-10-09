@@ -621,6 +621,62 @@ def set_device_location_tool() -> ToolDef:
     )
 
 
+
+def search_docs_tool() -> ToolDef:
+    """Search the pages the built-in agent knows, which is the only
+    agent it is offered to (#612).
+
+    The shape the gate chose, one query and the best passages back,
+    rather than a table of contents and a read: no model measured
+    called the contents once. The description says when to use it as
+    well as what it does, since a small model that is not told reaches
+    for its own guess first.
+    """
+    return ToolDef(
+        name=names.SEARCH_DOCS,
+        description=(
+            "Search vinga's documentation: the guide to the device you are speaking "
+            "through and the other device guides, what vinga is and how its parts fit "
+            "together, and its glossary. Answers with the best-matching passages. Use "
+            "it before answering any question about this device or about vinga that "
+            "the facts you were given do not answer."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "What to look for, in a few words.",
+                }
+            },
+            "required": ["query"],
+        },
+    )
+
+
+SEARCH_NEEDS_A_QUERY = (
+    'search_docs needs a "query" argument holding what to look for, in a few words'
+)
+
+
+def search_docs(arguments: dict[str, object], guide: str | None) -> str:
+    """One lookup, answered with the passages found or a sentence
+    saying why there are none. `guide` is the session's board guide,
+    or None, as `knowledge.search` takes it.
+
+    The query is conversation content (plan, Standing lenses): it goes
+    to the search and nowhere else, and no sentence here repeats it.
+    The knowledge package is imported here rather than at the top, so
+    a process that never runs the built-in agent never reads its pages
+    or pays for their import.
+    """
+    query = arguments.get("query")
+    if not isinstance(query, str) or not query.strip():
+        return SEARCH_NEEDS_A_QUERY
+    from vinga_server import knowledge
+
+    return knowledge.search(query, guide)
+
 # What a selection answers with, as fixed sentences. No value from a
 # room reaches any of them, and each says what happened and what the
 # agent should do next, because what the model does with a result is

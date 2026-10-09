@@ -355,7 +355,11 @@ class ToolExecution:
     can replace the MCP registry between two calls, so an answer taken
     at construction would be the wrong answer by the second reply.
     `remembering` is the reply's memory policy, asked before a call to a
-    memory tool is answered at all. `stage_content` is where a call's
+    memory tool is answered at all, and `builtin` whether the agent
+    speaking is the built-in one, asked before a call to its lookup is
+    answered (#612); a runtime that never serves the built-in agent may
+    leave it out, and the lookup is then withheld from every caller.
+    `stage_content` is where a call's
     arguments and result go for its tool span when the content export
     is on, and `None` when it is off, compared `is not None` at the one
     call site so the flag off renders nothing at all (#533).
@@ -370,6 +374,7 @@ class ToolExecution:
         conversations: SessionConversations,
         remembering: Callable[[], bool],
         stage_content: StageToolContent | None = None,
+        builtin: Callable[[], bool] = lambda: False,
     ) -> None:
         self._sources = sources
         self._device_tools = device_tools
@@ -378,6 +383,7 @@ class ToolExecution:
         self._conversations = conversations
         self._remembering = remembering
         self._stage_content = stage_content
+        self._builtin = builtin
 
     @property
     def _agent(self) -> str | None:
@@ -733,7 +739,7 @@ class ToolExecution:
         describes it exactly as its `tool_call` event does, two
         classifications of one call could disagree, and a source that
         resolved the name again could route around the reservation."""
-        if withheld(classified.name, self._remembering):
+        if withheld(classified.name, self._remembering, self._builtin):
             return no_such_tool(classified.name)
         if call.malformed_arguments is not None:
             # A plain line and not an event, and it obeys the same rule

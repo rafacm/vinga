@@ -626,6 +626,11 @@ class PipelineRuntime:
         # chosen from the packaged pages alone. Every other agent is
         # sent none of it (`_system_prompt`).
         self._board_facts = knowledge.board_facts(board)
+        # And the guide itself, by its path in the packaged copy, which
+        # the built-in agent's lookup weighs up (#612, M5): a path the
+        # package chose, never the reported string, and None for a
+        # board with no guide.
+        board_guide = knowledge.board_guide(board)
         # The conversation's content channel, beside the event tap and
         # separate from it on purpose: tool arguments and results never
         # rode the events, and the events are losing their text (#120).
@@ -800,6 +805,7 @@ class PipelineRuntime:
                 # board with no record, whose conversation is told it
                 # has nowhere to write a place to.
                 None if device is None else device.id,
+                board_guide,
             ),
             DeviceTools(output, DEFAULT_TOOL_TIMEOUT_S),
             McpTools(mcp_servers, DEFAULT_TOOL_TIMEOUT_S),
@@ -826,6 +832,10 @@ class PipelineRuntime:
                 if llm_input is None
                 else functools.partial(llm_input.stage_tool, self.session_id)
             ),
+            # Whether the agent speaking is the built-in one, asked about
+            # its lookup alone, for the reason `remembering` is asked
+            # about the memory tools.
+            builtin=self._builtin_now,
         )
         # The activation the connect used to do by hand, and the MCP
         # revive that followed it, in that order. No task is spawned

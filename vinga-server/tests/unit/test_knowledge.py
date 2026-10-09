@@ -17,6 +17,7 @@ import pytest
 from tests.support.packaged_pages import sources
 from vinga_server import knowledge
 from vinga_server.knowledge.library import sections_of
+from vinga_server.tools import names
 
 # What importing it costs
 
@@ -197,8 +198,7 @@ def test_the_persona_opens_with_who_vinga_is_and_how_it_speaks() -> None:
     """D1: the hand-written text comes first, says it is vinga, names
     commands rather than running them, speaks briefly and without
     markdown, says when it does not know, and does not configure by
-    voice. M3's persona says nothing about a lookup tool, which M5
-    adds."""
+    voice."""
     opening = " ".join(knowledge.persona().split("## The model in one paragraph")[0].split())
 
     assert opening.startswith("You are vinga")
@@ -212,18 +212,24 @@ def test_the_persona_opens_with_who_vinga_is_and_how_it_speaks() -> None:
         "switching agents",
     ):
         assert promise in opening
-    assert "look" not in opening.casefold()
 
 
 def test_the_persona_answers_the_device_from_the_facts_it_is_given() -> None:
     """Since M4 the prompt carries the facts of the board's guide, or a
     fixed text saying the board is not known, so the persona sends a
-    device question to those facts alone. The gate measured small
-    models inventing what a prompt does not hold, so it still says what
-    to do when the facts do not cover a question, and it no longer says
-    vinga does not know the board."""
+    question about the buttons and controls to those facts. Since M5
+    anything else about the device or about vinga is looked up with the
+    lookup tool before it is answered, and only what neither covers is
+    declined: a first run of the gate with the facts called the only
+    source ("from those facts alone") had the model decline three of
+    the first six questions that needed the lookup without making it.
+    The gate measured small models inventing what a prompt does not
+    hold, so it still says what to do when nothing covers a question."""
     opening = " ".join(knowledge.persona().split("## The model in one paragraph")[0].split())
 
     assert "you do not know this particular board yet" not in opening
-    assert "from those facts alone" in opening
+    assert "from those facts alone" not in opening
+    assert "buttons and controls from those facts" in opening
+    assert opening.count(names.SEARCH_DOCS) == 1
+    assert "neither what you were told nor the documentation covers" in opening
     assert "device guide" in opening

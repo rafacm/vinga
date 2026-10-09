@@ -125,9 +125,12 @@ def no_such_tool(name: str | None) -> tuple[str, bool]:
     return f'there is no tool called "{name}"', True
 
 
-def withheld(name: str | None, remembers: Callable[[], bool]) -> bool:
+def withheld(
+    name: str | None, remembers: Callable[[], bool], builtin: Callable[[], bool]
+) -> bool:
     """Whether this name is one of the memory tools an agent that may not
-    remember was never offered.
+    remember was never offered, or the built-in agent's lookup asked for
+    by an agent that is not the built-in one (#612, M5).
 
     One home for the rule because two callers ask it at two moments and
     the whole point is that they answer identically. The builtins ask it
@@ -143,8 +146,11 @@ def withheld(name: str | None, remembers: Callable[[], bool]) -> bool:
     than as its answer, so that a name that is not a memory tool never
     asks for one. That is what keeps this question answerable about any
     call at all: the policy belongs to a reply, and a device tool or an
-    MCP tool is a name this rule has nothing to say about.
+    MCP tool is a name this rule has nothing to say about. `builtin` is
+    the same kind of callable, asked only about the lookup's name.
     """
+    if name == names.SEARCH_DOCS:
+        return not builtin()
     return name in names.MEMORY_TOOL_NAMES and not remembers()
 
 
@@ -205,6 +211,12 @@ class BuiltinTools:
     offers and the memory they reach cannot come from two halves of a
     reload.
 
+    The built-in agent is also offered `search_docs`, its lookup over
+    the pages it knows, and no other agent is: a call from one is
+    answered as a name nobody publishes. `guide` is the session's board
+    guide, by its path in the packaged copy, which that lookup weighs
+    up, and None for a board with no guide.
+
     `threads` is the search half of the resumption flow, absent in every
     deployment that has not switched resumption on and compared
     `is not None` for that reason.
@@ -238,6 +250,7 @@ class BuiltinTools:
         threads: ThreadSearch | None = None,
         relocations: builtin.DeviceRelocations | None = None,
         record: str | None = None,
+        guide: str | None = None,
     ) -> None:
         self._agents = agents
         self._memory = memory
@@ -248,6 +261,7 @@ class BuiltinTools:
         self._threads = threads
         self._relocations = relocations
         self._record = record
+        self._guide = guide
 
     def snapshot(self, agent: str) -> Sequence[ToolDef]:
         tools: list[ToolDef] = []
@@ -274,6 +288,11 @@ class BuiltinTools:
         # the office" with "all right" and changes nothing, which is
         # worse than a refusal somebody hears.
         tools.append(builtin.set_device_location_tool())
+        # The lookup over the pages the built-in agent knows, offered to
+        # it alone, by the predicate its memory and threads are held to
+        # its device by (#612, M5).
+        if self._builtin():
+            tools.append(builtin.search_docs_tool())
         return tools
 
     def owns(self, claim: "records.ToolInvocation") -> bool:
@@ -287,7 +306,7 @@ class BuiltinTools:
         # answers is this source saying there is no such tool. The
         # runtime asks the same question earlier, about calls this
         # source is never handed; this is the answer for the calls it is.
-        if withheld(claim.name, self._remembers):
+        if withheld(claim.name, self._remembers, self._builtin):
             return no_such_tool(claim.name)
         if claim.name == names.REMEMBER:
             return (
@@ -365,6 +384,11 @@ class BuiltinTools:
                 ),
                 False,
             )
+        if claim.name == names.SEARCH_DOCS:
+            # An operator's agent asking for it never gets here: the
+            # withheld check above answers it as a name nobody
+            # publishes, as it answers a withheld memory tool.
+            return builtin.search_docs(claim.arguments or {}, self._guide), False
         if claim.name == names.RESUME_CONVERSATION:
             # The search half. A call that named a conversation never
             # arrives here: the runtime takes those, because a selection
