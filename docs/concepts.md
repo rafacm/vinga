@@ -277,10 +277,23 @@ set: a claim that names no agent binds the board to it, and it admits
 nothing by itself
 ([the decision record](adr/2026-10-07-an-unbound-device-only-pairs.md)).
 
+**Every bound device also reaches vinga.** Whenever the server serves
+the built-in agent, a device with any binding at all reaches vinga
+beside the agents it is bound to: after them, unless its binding
+already names vinga, in which case it stays where the operator put it.
+Nothing is written into the binding to do this; it is a rule about what
+a binding reaches, so an operator cannot unbind vinga, and it carries
+no MCP tool onto the device, since vinga has none. Two cases reach no
+vinga: a device with no binding, which only pairs, and any device while
+an agent stored under the name vinga displaces the built-in, since that
+agent is the operator's own and is reached only by the devices bound to
+it.
+
 A fresh wake always gets the default agent: the binding is resolved
 when the device connects, so whatever happened in the last session, the
-next one starts where the configuration says. Reaching another bound
-agent is a [handover](glossary.md#handover).
+next one starts where the configuration says, on the first agent the
+device is bound to rather than on vinga. Reaching another agent the
+device reaches, vinga included, is a [handover](glossary.md#handover).
 
 ## Conversation and session
 
@@ -593,8 +606,11 @@ These are not features of any one agent; they are vinga capabilities,
 built-in tools in every agent's tool set, exactly parallel to how the
 device's own controls reach agents as MCP tools. There are three: the
 handover tool, offered wherever the device reaches more than one agent,
-and the two that move a session between threads (start a new
-conversation, find and resume an earlier one). All three execute in
+which is every bound device of a server that serves vinga, since each
+reaches vinga beside its own agents; and the two that move a session
+between threads (start a new conversation, find and resume an earlier
+one). Asking any agent for vinga is a handover to it, and vinga hands
+back the same way. All three execute in
 vinga-owned code and log their reason, per
 [the decision-reason guideline](architecture/guidelines.md#give-every-decision-a-reason-and-know-whose-reason-it-is).
 

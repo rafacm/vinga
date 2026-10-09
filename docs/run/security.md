@@ -304,7 +304,9 @@ vinga, the built-in agent, references no MCP server at all, by
 construction: its `builtin_agent` entry has no `mcp` field to write a
 grant into, and it does not inherit `agent_defaults.mcp` either. So a
 device that reaches vinga reaches no MCP tool through it, whatever the
-defaults grant every other agent.
+defaults grant every other agent. That is what makes it safe for every
+bound device to reach vinga: the agent appended to each device's
+binding carries no grant onto it.
 
 The telemetry section carries one of its own, and it is your assertion
 rather than anything this server checks. `server.telemetry.reach` says
