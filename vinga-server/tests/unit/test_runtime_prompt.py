@@ -748,6 +748,66 @@ def test_a_device_with_neither_fact_contributes_nothing() -> None:
     assert prompt.device_introduction(None, None) == ""
 
 
+# The board's facts, in the same block (#612)
+
+BOARD = "# A board\n\nIt has one button.\n\n## Controls\n\nPress it."
+
+
+def test_the_board_s_facts_sit_between_the_introduction_and_the_notes() -> None:
+    """One device section, three kinds of thing in it, each a blank line
+    from the next: what the deployment calls the device, what the
+    hardware is, what somebody told it."""
+    assembled = prompt.with_scopes(
+        prompt.know_how("VINGA"),
+        PromptMemory(state="", agent="", device="- the speaker here is the loud one"),
+        named(location="the kitchen"),
+        remembering=True,
+        board=BOARD,
+    )
+
+    assert assembled.text == (
+        "VINGA\n"
+        "\n"
+        f"{FRAMED}"
+        "You are speaking through a device called Kitchen Speaker, which is in "
+        "the kitchen.\n"
+        "\n"
+        f"{BOARD}\n"
+        "\n"
+        f"{prompt.DEVICE_HEADING}\n"
+        "- the speaker here is the loud one"
+    )
+    assert [block.provenance for block in assembled.blocks] == ["persona", "device"]
+
+
+def test_the_board_s_facts_reach_a_prompt_with_memory_off_and_no_record() -> None:
+    """The hardware is not a remembered thing and not the record's: a
+    session with neither still says what it is speaking through."""
+    assembled = prompt.with_scopes(
+        prompt.know_how("VINGA"),
+        PromptMemory(state="", agent="", device=""),
+        None,
+        remembering=False,
+        board=BOARD,
+    )
+
+    assert assembled.text == f"VINGA\n\n{BOARD}"
+    assert assembled.sizes() == {"persona": len("VINGA"), "device": len(BOARD)}
+
+
+@pytest.mark.parametrize("remembering", [True, False])
+def test_no_board_text_leaves_the_prompt_as_it_was(remembering: bool) -> None:
+    """The byte-equality case for every agent but the built-in one: None
+    is exactly the argument left out."""
+    scopes = PromptMemory(state="- a: b", agent="- a fact", device="- a note")
+    half = prompt.know_how("POET")
+
+    assert (
+        prompt.with_scopes(half, scopes, named(), remembering=remembering, board=None)
+        == prompt.with_scopes(half, scopes, named(), remembering=remembering)
+    )
+
+
 # One reply round's prompt and what memory gave it (#533)
 
 

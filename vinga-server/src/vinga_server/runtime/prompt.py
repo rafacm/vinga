@@ -538,6 +538,7 @@ def with_scopes(
     *,
     remembering: bool,
     marked: bool = False,
+    board: str | None = None,
 ) -> Assembled:
     """The cached know-how half with everything a conversation's memory
     snapshot holds about its world appended, which is the prompt every
@@ -581,9 +582,21 @@ def with_scopes(
     choosing which one to believe. It is also the one thing here that
     does not come from memory, which is what lets an agent whose memory
     is switched off still be told what it is speaking through.
+
+    `board` is what the device block says about the hardware itself,
+    and None for every agent but the built-in one (#612), whose caller
+    hands it the facts of the board's guide or the fixed text for a
+    board with no guide. It is text the caller chose from the packaged
+    pages, never what the device reported, and it sits in the device
+    block between the introduction and the notes: one device section,
+    and the per-board text after everything every session of that
+    agent shares, so the prefix before it is one a prompt cache can
+    hold. None leaves the block exactly as it was before the text
+    existed, which is what keeps every other agent's prompt
+    byte-identical.
     """
     if not remembering:
-        introduced = _device_block(device, "")
+        introduced = _device_block(device, "", board)
         return half if introduced is None else _assembled([*half.blocks, introduced])
     saved = any((scopes.state, scopes.agent, scopes.device))
     blocks = [
@@ -593,7 +606,7 @@ def with_scopes(
             _scope_block(MEMORY, MEMORY_HEADING, scopes.agent)
             if saved
             else Block(MEMORY, NOTHING_SAVED),
-            _device_block(device, scopes.device),
+            _device_block(device, scopes.device, board),
         )
         if block is not None
     ]
@@ -617,9 +630,12 @@ def _scope_block(provenance: str, heading: str, rendered: str) -> Block | None:
     return Block(provenance, f"{heading}\n{rendered}")
 
 
-def _device_block(device: "LiveDevice | None", remembered: str) -> Block | None:
-    """The device's block: what this device is, then what is remembered
-    about it, or nothing at all where neither is known.
+def _device_block(
+    device: "LiveDevice | None", remembered: str, board: str | None = None
+) -> Block | None:
+    """The device's block: what this device is, then the facts of its
+    board where the caller handed any, then what is remembered about
+    it, or nothing at all where none of them is known.
 
     One block under one provenance, so the accounting stays what it
     says it is: `device` is what the whole device section costs, and a
@@ -635,6 +651,11 @@ def _device_block(device: "LiveDevice | None", remembered: str) -> Block | None:
     what it sent before the record existed, byte for byte. That last
     case is every deployment the morning after this upgrade, since the
     migration gives every existing row the `Device <mac>` default.
+
+    The board's facts are a third kind of thing, the hardware rather
+    than the deployment or the household, and are set apart the same
+    way. Compared `is not None` rather than by truth: a caller that
+    handed text meant it, and None is the one answer that adds nothing.
     """
     parts = [
         part
@@ -648,6 +669,7 @@ def _device_block(device: "LiveDevice | None", remembered: str) -> Block | None:
                 device.name if device.named else None,
                 device.location,
             ),
+            "" if board is None else board,
             "" if not remembered else f"{DEVICE_HEADING}\n{remembered}",
         )
         if part
