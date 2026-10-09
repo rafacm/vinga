@@ -4,6 +4,14 @@ the real lookup, against a real model, one question set at a time.
     VINGA_LOCAL_LLM_MODEL=gemma4:e4b uv run python -m tests.local.lookup_gate.harness \
         frozen .logs/gate-frozen.jsonl
 
+An OpenAI-compatible endpoint that asks for a key, a hosted runner
+for one, gets it from `VINGA_LOCAL_LLM_API_KEY`, read only when set
+and never printed; a model that refuses or ignores one of the default
+options gets its own from `VINGA_LOCAL_LLM_PASSTHROUGH`, a JSON object
+sent in place of the default `{"temperature": 0, "seed": 42,
+"reasoning_effort": "none"}`. With neither set, the request is the
+local Ollama one, byte for byte.
+
 What it sends is what vinga is sent on the LCD-1.54 board, short of the
 pipeline around it: the persona, the sentence about the lookup and
 the concept summary (`knowledge.persona()`), the board's facts
@@ -56,6 +64,16 @@ QUESTION_CAP_S = 360.0
 
 # The warm-up's own bound: the cold read of the shared prefix.
 WARM_UP_S = 1_800.0
+
+# The OpenAI-compatible path's key, for an endpoint that asks for one.
+# Unset, the request carries the SDK's placeholder, as local Ollama's
+# always has.
+API_KEY_ENV = "VINGA_LOCAL_LLM_API_KEY"
+
+PASSTHROUGH_ENV = "VINGA_LOCAL_LLM_PASSTHROUGH"
+
+DEFAULT_PASSTHROUGH = {"temperature": 0, "seed": 42, "reasoning_effort": "none"}
+
 
 VOLUME = ToolDef(
     name=scoring.VOLUME_TOOL,
@@ -184,7 +202,8 @@ def provider() -> tuple[Any, str]:
     """The model the lane names, through the server's own adapter: an
     OpenAI-compatible Ollama by default, or Anthropic's API when
     `VINGA_LOCAL_LLM_PROVIDER=anthropic`, its key read from
-    `VINGA_DEV_ANTHROPIC_API_KEY` and never printed."""
+    `VINGA_DEV_ANTHROPIC_API_KEY` and never printed. The compatible
+    path's key and options are `API_KEY_ENV` and `passthrough()`."""
     if os.environ.get("VINGA_LOCAL_LLM_PROVIDER") == "anthropic":
         from vinga_server.providers.anthropic_llm import AnthropicLlm
         from vinga_server.providers.kit import DEFAULT_MAX_TOKENS
@@ -206,11 +225,24 @@ def provider() -> tuple[Any, str]:
         base_url=OLLAMA,
         model=model,
         max_tokens=None,
-        api_key=None,
+        api_key=os.environ.get(API_KEY_ENV) or None,
         timeout_s=WARM_UP_S,
-        passthrough={"temperature": 0, "seed": 42, "reasoning_effort": "none"},
+        passthrough=passthrough(),
     )
     return llm, model
+
+
+def passthrough() -> dict[str, object]:
+    """The options sent beside vinga's request: the default, or the JSON
+    object `VINGA_LOCAL_LLM_PASSTHROUGH` holds instead of it, whole. A
+    value that is not an object stops the run before any request."""
+    raw = os.environ.get(PASSTHROUGH_ENV)
+    if raw is None:
+        return dict(DEFAULT_PASSTHROUGH)
+    options = json.loads(raw)
+    if not isinstance(options, dict):
+        raise TypeError("the passthrough is not a JSON object")
+    return options
 
 
 async def run(which: str, out: Path, lookup: ToolDef, guide: str | None):
