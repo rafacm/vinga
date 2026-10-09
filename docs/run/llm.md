@@ -169,9 +169,12 @@ device guides packaged with the build, for the questions its prompt
 does not answer. Whether a model calls it is the model's own choice,
 and it is where models differ most. Both measurements below asked the
 same 32 questions, each in two wordings (the questions are in
-`vinga-server/tests/local/lookup_gate/`), on 2026-10-09, with vinga's
-real prompt and tools on an ESP32-S3-Touch-LCD-1.54, every answer read
-by hand. A correct answer holds every key fact the pages give for it;
+`vinga-server/tests/local/lookup_gate/`), on 2026-10-09, through a
+model harness that sends vinga's real prompt and tools, with the
+ESP32-S3-Touch-LCD-1.54 board's facts in the prompt as a session on
+that board would have them, and reads the model's text back: no board,
+no speech recognition or synthesis and no device output were involved,
+and every answer was read by hand. A correct answer holds every key fact the pages give for it;
 of the 32, 15 need the lookup, 12 are answered by the prompt, 3 cannot
 be answered and should be declined, and 2 are volume commands.
 
@@ -182,7 +185,8 @@ be answered and should be declined, and 2 are volume commands.
 
 On Gemma 4 e4b the misses are mostly questions it answered "I do not
 have information" to without searching; the prompt's twelve questions
-it answers well, in a median 1.8 s to the first spoken word. When it
+it answers well, in a median 1.8 s to its first text (the harness
+times text, not speech). When it
 does search, the round after the search is slow on a Pi: the runner
 reads the passages found before it says anything, and the first byte
 of that round came after 34 to 53 s, every time past the 30 s at which
