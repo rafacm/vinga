@@ -1613,3 +1613,57 @@ no board was onboarded against this build, so asking a board for vinga
 has been exercised only through the session tests and the local lane's
 real model; and the cold-cache local run passes nowhere on this
 machine, with or without this milestone.
+
+### PR review round
+
+Reviewed 2026-10-09 by openai/gpt-6.1-sol, thinking high via codex CLI 0.162.0, read-only sandbox, runtime 3m24s, at commit 863e2fdb ([the round](https://github.com/rafacm/vinga/pull/636)). The fixes are by anthropic/claude-opus-5-5, thinking medium, M6's own implementer.
+
+1. **P2: the documented `switch_agent` condition contradicted the
+   implementation.** concepts.md, the Run pages, the glossary and the
+   fragment said every bound device is offered it once vinga is
+   served, while `tools/source.py` offers it only where the device
+   reaches more than one agent, so a device that reaches vinga alone
+   (bound to vinga only, or only to agents not served yet) gets none;
+   and the agent layer's `mcp` field description still gave the
+   pre-M6 condition. *Resolution:* verified against
+   `tools/source.py:256` (`len(self._agents) > 1` over the reachable
+   list); every page, the glossary, the fragment and the field
+   description now say "more than one served agent reached, vinga
+   among them while it is served"; the domain reference and OpenAPI
+   regenerated through their generators, the packaged copy
+   regenerated; a session test pins the vinga-alone case and fails
+   with the condition mutated to `>= 1` (`4baf3702`). Inventory:
+   `rg -n -i "switch_agent|handover tool|every bound device|every bound
+   board|first bound agent|first agent the device|own first
+   agent|bound to more than one" docs README.md vinga-server/src
+   vinga-server/config.example.yaml vinga-server/examples changelog.d`
+   excluding `docs/plans`, `docs/features`, `docs/adr` and the packaged
+   copy, untruncated: 53 lines (`.logs/round-inventory.log`), of which
+   seven sentences in six files stated the condition and were changed. Afterwards the residual
+   grep (`.logs/round-residual.log`, 7 lines) finds "every bound device"
+   only where it says what a device reaches, never what it is offered.
+2. **P2: the session-opening documentation contradicted the
+   unloaded-agent behavior.** The pages and this section said a fresh
+   wake opens on the first bound agent and never on an appended vinga,
+   but a device bound only to an agent not yet served opens on vinga.
+   *Resolution:* concepts.md (Binding and the wake word), the
+   glossary's Agent entry, `docs/devices/README.md`, the AMOLED 2.16
+   guide, `docs/run/configuration.md`, the `devices.agents`
+   descriptions in `config/models.py` and `config/responses.py`
+   (OpenAPI regenerated), the fragment and the resolution line above
+   now say a session opens on the first agent the device reaches: the
+   first bound agent the server serves, otherwise vinga. Inventory:
+   `rg -n -i "starts on|start(s)? with the (board|device)|opens
+   on|default agent answers|fresh wake"` over the same paths, 32 lines
+   (`.logs/round-opening-inventory.log`), nine of them the claim. The
+   three-edge tests in `test_reachable_agents.py` now assert the agent
+   `session_open` names as well as the list, so the unloaded case pins
+   opening on vinga; the reviewer's citation asserted only the list
+   before. Mutating vinga first fails them (`92cb7081`).
+
+Verification after the round: `uv run ruff check .` `All checks
+passed!`; the drift checks all current (`.logs/round-drift.log`); the
+unit tests touching reachability, sessions and tools (`-k "reachable or
+session or tools or builtin"`, `-n auto --dist loadfile`): `1271 passed
+in 372.59s (0:06:12)` (`.logs/round-unit.log`); the link, Run and Use
+page and fragment checks, and `tests/census` last, in the hand-back.
