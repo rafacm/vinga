@@ -1926,3 +1926,270 @@ Reviewed 2026-10-09 by openai/gpt-6.1-sol, thinking high via codex CLI 0.162.0, 
    has the lower median. *Resolution:* step 0 says most accurate, and
    substantially faster than the two 8B models it replaced
    (`f7366de0`).
+
+## M5: the lookup tool, as the gate chose
+
+**Attribution:** anthropic/claude-opus-5-5, thinking medium; Claude Code 2.1.295; 2026-10-09.
+
+**The gate was missed, and the lookup ships on every stack by Rafael's
+decision.** M5's gate (plan, Gate) asked for retrieval of at least 32
+of 39 recorded queries with no model, and at least 70% correct and at
+most 10% hallucinated on Gemma 4 e4b over both question sets.
+Retrieval reached 29 of 39, and Gemma 4 e4b 50% and 41% correct with 0
+and 1 hallucinated of 32. The plan's fallback (no lookup on the local
+stack, a second persona) needed a rule telling a local stack from a
+vendor's, which the plan never stated, so the milestone stopped and
+asked. Rafael decided on 2026-10-09: offer `search_docs` to the
+built-in agent on every stack, with one persona and no fallback,
+because it rarely hurts and the two-variant fallback cost more than it
+bought; and drop the lookup round's own first-token allowance, which
+the clients' 30 s read timeout caps. This section records the miss as
+a miss. The same gate was then run on `claude-sonnet-5`, the cloud
+preset's model.
+
+### What landed
+
+| Plan item | Where | Commit |
+| --- | --- | --- |
+| The gate reproducible from the repository (plan review round 2, finding 6) | `tests/local/lookup_gate/`: `frozen.json` (byte for byte, sha256 `1442b569...`), `rephrased.json` (written and hashed before retrieval was touched, `261e0c48...`), `queries.json` (the 39 recorded queries), `amendments.json` (B4, S5, S2), `scoring.py`; `tests/unit/test_lookup_gate_fixtures.py` | `Commit the lookup gate's question sets and scorer`, `Follow M6's wording in the gate's S2 fact` |
+| The winning shape in `knowledge/` (Q8, D4) | `knowledge/lookup.py` (`search(query, guide)`, `ranked`, `passages_of`, `terms`), `knowledge/boards.py` (`board_guide`), `tests/unit/test_knowledge_lookup.py` | `Search the Use pages for the built-in agent` |
+| Its builtin name and definition, offered to the built-in alone | `tools/names.py` (`SEARCH_DOCS`), `tools/builtin.py` (`search_docs_tool`, `search_docs`), `tools/source.py` (offer, dispatch, `withheld`), `runtime/tool_execution.py` (`builtin`), `runtime/pipeline.py` (the guide and the predicate handed over) | `Offer vinga a lookup over the pages it knows` |
+| The persona's sentence about it (D1) | `knowledge/persona.md`, rewritten (Deviations 4) | `Offer vinga a lookup...`, `Tell vinga to search before it declines` |
+| The vague text "a lookup away" (D3) | `knowledge/boards.py` (`VAGUE_BOARD_FACTS`) | `Send an unknown board's questions to the lookup` |
+| The holding phrase | `runtime/filler_runner.py` (`hold`), `runtime/pipeline.py` | `Hold the floor with the filler during a lookup` |
+| The lookup round's allowance, built and then dropped | `server.llm_lookup_first_token_timeout_s`, removed with its reference row | `Give the round after a lookup its own allowance`, `Regenerate the server reference for the allowance`, `Drop the lookup round's first-token allowance` |
+| Tests in a session, the sentinel with export off and on | `tests/unit/test_session_lookup.py`, `tests/support/llm_input.py` (`traced` takes the board and agent) | `Test vinga's lookup in a session`, `Drop the lookup round's...` |
+| The local-lane replay | `tests/local/lookup_gate/harness.py`, `tests/local/test_lookup_gate.py` | `Replay the lookup gate in the local lane`, `Run the lookup gate on Anthropic, each tool once` |
+| The census | `_HISTORICAL_PATHS` gains the two question sets | `Class the lookup gate's question sets as records` |
+| Documentation footprint | `docs/concepts.md` (Agent), `docs/glossary.md` (vinga), `docs/devices/README.md` (What vinga knows), the packaged copy, `docs/run/llm.md` (The built-in agent's lookup, beside M7's paragraphs), `docs/run/configuration.md` (Overriding vinga), `docs/architecture/product-promises.md` (the baseline item), the plan's Gate section | `Document that vinga looks things up`, `Put the lookup's measurements in the LLM guide`, `Name vinga in the local baseline`, this change |
+| The fragment | `changelog.d/612-lookup-tool.md`, with an `Upgrade:` line for an `mcp_servers` entry named `search_docs` | this change |
+
+Design footprint as planned: `knowledge/` and `tools/builtin.py`
+deepened, with `tools/source.py`, `runtime/tool_execution.py`,
+`runtime/filler_runner.py` and `runtime/pipeline.py` carrying the
+predicate, the guide and the hold. No new seam and no new
+`TOOL_SOURCES` member.
+
+### The gate, measured
+
+**Retrieval, no model** (`.logs/m5-retrieval-*.log`). A hit is the
+answer text holding the opening of the question's first key fact,
+which is stricter than the plan's "the right section in the top three":
+the passage answered has to be the part of the section that says it.
+
+| Index | Recorded queries (target 32) | Question texts |
+| --- | --- | --- |
+| The gate's BM25, 2026-10-06 | 22 of 39 | 7 of 15 |
+| M5, the LCD-1.54 guide weighed up | **29 of 39** | 10 of 15 |
+| M5, no board known | 25 of 39 | 8 of 15 |
+
+About 300 variants were measured: passage caps from 300 to 3,000
+characters and whole sections, BM25's two constants, title weight, a
+title-coverage bonus, pseudo-relevance feedback, rank fusion across
+cuts, excluding the other board guides, and weighing the session's up.
+The count plateaued at 28 to 30; the chosen constants (1,000-character
+passages, `k1` 2.0, the board's guide weighed 1.5) sit where it stopped
+moving with them, at 29, and 30 was reachable only at one edge setting.
+Of the ten misses, four are "change wifi network", whose answer (triple
+click PWR) is in vinga's prompt already as part of the board's
+controls; the rest are vocabulary the pages do not use ("connect a new
+board", "voice recognition speaker identification", "self-hosted vinga
+server", "device automatic shutdown"). **A synonym list was not added**:
+the only list that would reach 32 is one written from these ten misses,
+which would turn the target into a measurement of the list against
+the queries it was fitted to. The unit test holds the measured 29 as a
+floor and names the target as missed.
+
+**The model runs.** The same 32 questions, frozen and rephrased, with
+vinga's persona and summary, the LCD-1.54 board's facts, and the tools
+`BuiltinTools` offers the built-in agent on a device bound to it alone
+(the memory family, the two conversation tools, the location tool and
+`search_docs`) plus the board's volume tool, round after round as the
+tool loop runs them, every answer read by hand
+(`.logs/m5-gate-scores-final.log`, `.logs/m5-handcheck-gemma.json`,
+`.logs/m5-handcheck-anthropic.json`).
+
+| Model, set | Correct | Hallucinated | Declined (of 3) | Searched when needed (of 15) | Device commands (of 2) | Median s | p90 s | First byte after a search |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Gemma 4 e4b, frozen | 16/32, 50% | 0 | 3 | 5 | 1 | 6.3 | 55.0 | median 46.3 s (37.2 to 51.9, 6 of 6 past 30 s) |
+| Gemma 4 e4b, rephrased | 13/32, 41% | 1, 3% | 3 | 2 | 1 | 7.4 | 48.2 | median 41.2 s (34.1 to 52.9, 4 of 4 past 30 s) |
+| `claude-sonnet-5`, frozen | 25/32, 78% | 0 | 3 | 13 | 2 | 2.9 | 3.9 | median 0.8 s (0.7 to 1.5) |
+| `claude-sonnet-5`, rephrased | 26/32, 81% | 0 | 3 | 13 | 2 | 3.1 | 5.6 | median 0.9 s (0.7 to 2.8) |
+
+- **Conditions.** Gemma 4 e4b on the Raspberry Pi 5 (16 GB, CPU only)
+  under Ollama, temperature 0, seed 42, `reasoning_effort: none`, the
+  machine quiet (1-minute load under 0.4 at both starts, peak 74.35 °C,
+  never the 78 °C pause), the shared prefix read once unmeasured before
+  the first question (206 s cold). `claude-sonnet-5` through vinga's
+  own `AnthropicLlm`, with no temperature: the adapter sends none, and
+  the model refuses one (HTTP 400, "`temperature` is deprecated for
+  this model"), so its runs are not pinned the way Ollama's are.
+- **Tokens.** `claude-sonnet-5`: 268,232 input and 4,238 output on the
+  frozen set, 267,996 and 4,825 on the rephrased one, none cached
+  (about 8,400 input tokens a question). Ollama reported none: the
+  adapter asks for usage only from OpenAI's host.
+- **Hand-check overrides of an automatic verdict, each with its note:**
+  Gemma frozen 2 (B2 and F3, both regex false positives on
+  "hallucinated"), Gemma rephrased 0, Sonnet frozen 1 (B1, "same as
+  pressing PWR" read as a contradiction), Sonnet rephrased 1 (F3, as
+  Gemma's). Undecided answers settled by hand: 4, 4, 3 and 4. The one
+  hallucination on each side that counts is Gemma's rephrased S8 ("the
+  conversation history is carried over" to the next agent).
+- **What Gemma 4 e4b does.** Answers from its prompt are right and
+  fast (median 1.8 s to the first spoken word); the misses are lookup
+  questions answered "I do not have information" without a search
+  (most of its nine tool errors on the frozen set). When it does
+  search, the round after reached its first byte after 34 to 53 s:
+  Ollama sends nothing before the first token, so every one of those
+  rounds is past the 30 s the LLM clients wait without a byte
+  (`providers/kit.py`), and in a running server the turn would be given
+  up as a `ProviderCallTimeout`. That is what made the allowance
+  pointless (Deviations 5), and it is in `docs/run/llm.md`.
+
+### Voided and superseded runs
+
+None of these is merged into the results. Each is kept under
+`.logs/` with its reason in `.logs/m5-model-frozen.conditions.log`.
+
+1. **Ollama down.** The first frozen run failed at its first request
+   with `APIConnectionError`: the container had been stopped by M6's
+   implementer about 20:25.
+2. **Under load, cold.** D1 timed out at 360 s, prefill at about 7
+   tokens a second while M6's lanes held the 1-minute load at 5 to 9.
+   The harness gained the unmeasured warm-up after it.
+3. **The persona.** Stopped after B1: with M4's "from those facts
+   alone" device bullet, the model declined three of the first six
+   lookup questions without searching (Deviations 4).
+4. **Two harness processes.** A wait-for-quiet loop had already
+   started a run when it was killed, and a second run appended to the
+   same file.
+5. **Ollama stopped mid-run** by M6's implementer about 21:27:38 and
+   restarted at 21:28 by the orchestrator: discarded whole, as directed.
+6. **The tool offered twice** (frozen run 6 and the first rephrased
+   run, superseded rather than void). The harness appended
+   `search_docs` to a list `BuiltinTools` already put it in; Ollama
+   accepted the duplicate silently, and Anthropic's API refused it
+   ("Tool names must be unique"), which is how it was found. Both
+   Gemma sets were run again with each tool once; the duplicate runs
+   scored 47% and 41% correct, close to the clean 50% and 41%.
+7. **The first Anthropic attempts:** one refused for `temperature`,
+   one for the duplicate tool, each at its first request.
+
+### Deviations from the plan
+
+1. **The fixtures' key facts follow the pages.** The questions are
+   frozen; three questions' facts moved with pages changed since the
+   gate: B4 and S5 with M1b (`vinga device invite` prints the link,
+   `vinga info` no longer does) and S2 with M6 (a fresh wake opens on
+   the first agent the device reaches), each with its reason in
+   `amendments.json`. Facts are found by text, not line.
+2. **The lookup cuts its own passages**, at `##` and `###` and into
+   parts of at most 1,000 characters, where `library.sections()` cuts
+   at `##` for the board facts: M2's discovery that the glossary is one
+   28 KB section at `##` was decided this way. **`search` takes the
+   session's board guide**, a packaged path from `board_guide`, never
+   the reported string, which the runtime maps once at construction.
+3. **The tool is `search_docs`, not the gate's `search`**: a builtin's
+   name is an entry name no `mcp_servers` entry may take (Risks), and
+   `search` is one an operator's own search server could plausibly
+   have. The fragment's `Upgrade:` line names the refusal.
+4. **The persona was rewritten, not given a sentence.** D1 has M5 add
+   the persona's sentence about the lookup. With M3 and M4's wording
+   ("from those facts alone", and a decline that pointed the person to
+   the device guide) Gemma 4 e4b searched on none of four probe
+   questions; the gate's own prompt with vinga's tools searched on
+   three, and kept doing so with vinga's facts or summary swapped in,
+   and stopped when vinga's persona replaced its opening
+   (`.logs/m5-probe-*.log`). The persona now says where each answer
+   comes from and to search before it ever says it does not know; the
+   vague text says the same for an unknown board.
+5. **The allowance was built and dropped.** The plan's "its own
+   first-token allowance on the lookup round" became
+   `server.llm_lookup_first_token_timeout_s`, and Rafael dropped it
+   once the gate showed the 30 s read timeout caps it; the round after
+   a lookup is watched like any other, which the tests now pin.
+6. **The holding phrase is the one exception to one filler per turn**:
+   the timer covers the first wait, and a lookup starts a second.
+7. **The withheld rule covers the lookup** for the runtime as well as
+   the builtin source, so an operator agent's mangled call is told
+   there is no such tool rather than that its arguments were wrong.
+8. **The local-lane case uses the harness rather than a full server.**
+   It sends what vinga is sent, short of the device block's
+   introduction and memory section, through the server's own provider
+   adapters, so the round-by-round behavior is the tool loop's without
+   speech at either end.
+9. **The retrieval test holds the measured 29, not the target 32.**
+10. **The two question sets are classed as records** by the
+    command-spellings census: a person's question that names a command
+    in passing ("What is the vinga info command for?") is not an
+    invocation, and respelling it would break the hash.
+
+### Resolutions
+
+- **D4's budget:** 3,300 characters, three passages at the cap with
+  their titles; every passage fits alone, and an answer past it leaves
+  a passage out whole with a line saying so. Measured answers ran a
+  median 2,212 characters.
+- **The builtin-name collision check (Risks):** `search_docs` is in
+  `RESERVED_ENTRY_NAMES` through `BUILTIN_TOOL_NAMES`, so an entry of
+  that name is refused when the configuration is read; judged an
+  unlikely entry name, it still gets the `Upgrade:` line.
+- **The sentinel with export on** finds the query in three fields, all
+  the opt-in LLM-input export's: the tool span's arguments, which the
+  plan names, and the LLM spans' output and input messages (the round
+  that asked for the call, and the round after it), which it did not.
+  The test pins exactly these three, and no log line or other event
+  field in either setting.
+
+### Discoveries
+
+- **Ollama accepts a tool list naming one tool twice**; Anthropic's
+  API refuses it. A harness bug hid behind the first for six runs.
+- **vinga's real prompt with its tools is about 2,900 tokens** against
+  Ollama's default 4,096-token context: nothing was truncated, but a
+  long memory section or a second lookup's passages would reach it.
+- **Prefill on the Pi** ran at about 16 tokens a second idle and 7
+  under a parallel test lane, which is the cold first turn M7 measured.
+- **`claude-sonnet-5` refuses `temperature`**, so a gate on it cannot
+  be pinned the way Ollama's can.
+
+### Tests first, and the mutations
+
+Every mutation below was applied once, run, and restored by copy and
+`touch`; the log is `.logs/m5-mutations.log` (33 runs).
+
+| Mutation | Killed by |
+| --- | --- |
+| **Plan target:** the lookup offered to every agent | `test_an_operator_agent_is_not_offered_the_lookup` |
+| The withheld rule ignoring the lookup | the two operator-agent refusal tests |
+| The runtime never told who is built in | `test_a_mangled_call_from_an_operator_agent_is_told_the_same` |
+| The board guide not handed over | `test_vinga_looks_up_the_board_it_speaks_through` |
+| The query logged by the tool | both `test_a_lookup_query_reaches_no_log_line_or_event_field` cases |
+| The board weight dropped; any path weighed as a guide; stems not cut; the fence rule off; "On this page" kept; long paragraphs left whole; the query echoed into an answer; a `###` titled without its section; the left-out line dropped | the corresponding `test_knowledge_lookup.py` cases |
+| The budget not enforced | **survived** the first test set (three passages always fit); killed by `test_a_passage_past_the_budget_is_left_out_whole_and_the_answer_says_so`, added for it |
+| A quoted phrase edited out of a packaged page; the frozen set changed by one byte | `test_lookup_gate_fixtures.py` |
+| M4's "facts alone" persona back; the search-first sentence dropped | the persona pin in `test_knowledge.py` |
+| M4's decline-and-point vague text back | `test_the_vague_text_says_what_is_missing_and_how_the_server_learns_it` |
+| The hold never asked for; asked for after any tool; asked for at every round; skipped once the timer played; held to the timer's speaking-started rule | the holding-phrase tests |
+| The watchdog's bound multiplied tenfold | the two watched-like-any-other tests and the retried-round hold test |
+| (Before the drop) the allowance never passed, applied after any tool, used when shorter, kept past its round | the allowance tests, since removed with the key |
+
+No survivor after the budget test was added.
+
+### Verification
+
+All on the Raspberry Pi 5, logs in this worktree's `.logs/`, the
+machine quiet (M6 and M7 finished), both lanes with
+`-n auto --dist loadfile`.
+
+- `uv run ruff check .`: see the hand-back.
+- Unit lane, integration lane, drift checks, links, Run and Use pages,
+  fragments: see the hand-back, which quotes each summary line.
+- `tests/census`: run last, after this section was committed, and
+  reported in the hand-back.
+
+Not verified: a lookup turn through a running server end to end (the
+30 s give-up on the Pi is inferred from the first-byte times, not
+observed in a session); a board; the image; the smoke and browser
+lanes; the opt-in local-lane wrapper `tests/local/test_lookup_gate.py`
+as a pytest run (the harness it calls produced every number above).

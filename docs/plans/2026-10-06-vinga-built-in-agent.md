@@ -740,6 +740,26 @@ prompt-only fallback on the local stack if that gate is missed
 The Ministral 3 measurement he had asked for on 2026-10-07 was dropped
 with the decision rather than run. M5 and M7 are unblocked.
 
+**M5's gate was missed, and the lookup ships everywhere by Rafael's
+decision of 2026-10-09.** Measured in M5 (the implementation doc has
+every run): retrieval with no model put the needed fact in the answer
+for 29 of the 39 recorded queries, against the target of 32; Gemma 4
+e4b, shape A, with vinga's real prompt and tools, answered 50% of the
+frozen set and 41% of the rephrased set correctly, against the bar of
+70%, with 0 and 1 of 32 hallucinated, searching on 5 and 2 of the 15
+questions that needed it, and on the Raspberry Pi 5 the round after a
+search reached its first byte after 34 to 53 s, past the clients' 30 s
+read timeout every time. The same gate on `claude-sonnet-5`, the cloud
+preset's model, answered 78% and 81% correctly with none hallucinated,
+searching on 13 of 15 in both sets. The bar is not met on the local
+model, and this is not recorded as a pass: Rafael chose to offer
+`search_docs` to the built-in agent on every stack, with one persona
+and no local fallback, because it rarely hurts (at most one invented
+claim in 32) and a second persona and a rule telling local from vendor
+stacks cost more than they bought. He also dropped the lookup round's
+own first-token allowance, which the 30 s read timeout caps below what
+it would need; the holding phrase stays.
+
 ## Smaller decisions
 
 **D1. The persona.** `knowledge/persona.md`, hand-written, short: vinga
@@ -1148,7 +1168,7 @@ through their generators.
   not yet read off a real ESP32-S3-Touch-LCD-1.54's `ota_check.board`;
   that read is still owed. Design footprint: deepens `runtime/prompt.py`,
   `runtime/pipeline.py`, `device/session.py`.
-- [ ] **M5: the lookup tool, as the gate chose** (PR TBD). The winning
+- [x] **[M5: the lookup tool, as the gate chose](2026-10-06-vinga-built-in-agent-implementation.md#m5-the-lookup-tool-as-the-gate-chose)** (PR TBD). The winning
   shape in `knowledge/`, its builtin name(s) and definition, offered to
   the built-in alone; the persona's sentence about it; the local-lane
   replay; the baseline item in the promises page; the gate's numbers
