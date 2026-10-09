@@ -77,11 +77,42 @@ CPU or a GPU.
 ## The local model
 
 The local preset
-([`presets/local-stack.yaml`](../../vinga-server/examples/presets/local-stack.yaml))
-and the `openai_compatible` example name `qwen3:8b`. Getting Started's
-step 0 installs `llama3.1:8b` instead. Either is a reasonable choice on
-a machine that can run an 8B model; what separates them is measured,
-so here are the measurements, with their dates.
+([`presets/local-stack.yaml`](../../vinga-server/examples/presets/local-stack.yaml)),
+the `openai_compatible` example and Getting Started's step 0 name
+`gemma4:e4b`, Gemma 4 e4b. It was chosen by measurement on a Raspberry
+Pi 5 (16 GB, CPU only, Ollama 0.35.1), on 2026-10-06 and 2026-10-07:
+asked 32 questions about vinga and the board it speaks through, it was
+the most accurate model measured, at a median 9 s per question against
+117 s for `llama3.1:8b` and 27 s for `qwen3:8b` with its thinking off.
+
+Gemma 4 e4b thinks before it answers unless told not to, and over
+Ollama's OpenAI endpoint its thinking arrives before any of the
+answer: on the same Pi, on 2026-10-09, a question that needed one tool
+took 39 to 137 s with the thinking on. `reasoning_effort: none` on the
+entry turns it off, and the preset, Getting Started and the recipe
+below all carry it.
+
+**On small hardware the first turn does not fit.** Every request
+carries the agent's instructions and the tools it is offered, and the
+runner reads all of it before the first word of the answer. On the
+same Pi, on 2026-10-09, Gemma 4 e4b read a prompt it had not seen at
+about 13 tokens per second: a conversation's first request of 1,990
+tokens took 107.6 s to its first byte, and a probe of 2,363 tokens
+179.8 s. The server gives a round up after 30 seconds without a byte,
+a fixed bound that `llm_first_token_timeout_s` cannot raise (see
+[What the model has to do](#what-the-model-has-to-do)), so on that
+machine the first turn after the model loads ends in the fallback
+phrase, and in the measurements trying again did not get through
+either. Once the runner held the prompt, the same request answered in
+2.4 to 3.4 s. Pinning the model, below, is still needed and is not
+enough, since it keeps the weights loaded and it is the prompt that is
+slow to read. On hardware that size, what answers the first turn today
+is a model the machine reads faster (the 1.5B model below spent 2.7 s
+on a tool round once warm), a machine with a GPU, or a vendor's model.
+
+Before Gemma 4 e4b, the preset named `qwen3:8b` and Getting Started
+`llama3.1:8b`. Either remains an option on a machine that runs an 8B
+model fast enough, and these are their measurements, with their dates.
 
 - **Tool calls.** Both list `tools` among their capabilities, and both
   made the call in the tool-carrying turns below. On the 2026-09-03
@@ -116,7 +147,7 @@ so here are the measurements, with their dates.
 Whichever you run, **load it before the first conversation and keep it
 loaded.** Ollama unloads a model five minutes after its last request,
 and loading one is slower than the watchdog (a cold request took
-about 20 s to its first byte for either model on that Pi), so the turn that meets a cold model is given up and
+about 20 s to its first byte for either 8B model on that Pi), so the turn that meets a cold model is given up and
 answered with the fallback phrase. Getting Started's step 0 shows the
 one request that loads a model and pins it
 ([Getting Started](../../README.md#getting-started)); name your model
@@ -223,12 +254,12 @@ container, is on the host already, and `localhost` is right for it.
 ### Ollama
 
 ```bash
-ollama pull qwen3:8b
-ollama show qwen3:8b    # Capabilities lists tools
+ollama pull gemma4:e4b
+ollama show gemma4:e4b    # Capabilities lists tools
 ```
 
 Load and pin it with Getting Started's step 0 request, naming
-`qwen3:8b`, then write the entry and apply it:
+`gemma4:e4b`, then write the entry and apply it:
 
 ```bash
 vinga provider set llm local -f - <<'YAML'
@@ -236,7 +267,7 @@ type: openai_compatible
 # The host, from inside the container.
 base_url: http://host.docker.internal:11434/v1
 # In Ollama's vocabulary: the NAME column of `ollama list`.
-model: qwen3:8b
+model: gemma4:e4b
 # Sent to Ollama with every request: answer without streaming the
 # model's thinking first.
 reasoning_effort: none
@@ -248,7 +279,8 @@ vinga apply
 ```
 
 That replaces `local`, so every agent inheriting it now answers
-through `qwen3:8b`. For `llama3.1:8b`, write that name and leave
+through `gemma4:e4b`. For `qwen3:8b`, write that name and keep
+`reasoning_effort`; for `llama3.1:8b`, write that name and leave
 `reasoning_effort` out.
 
 ### Other local runners
