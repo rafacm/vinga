@@ -30,7 +30,7 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from tests.support.boundary import FakeDevice, StubRuntime
-from tests.support.configs import DEVICE_MAC, config_with_agent, world
+from tests.support.configs import DEVICE_MAC, DEVICE_UUID, config_with_agent, world
 from tests.support.leaks import chain
 from tests.support.providers import built_world
 from tests.support.sessions import device_session, listening_in, talking
@@ -43,6 +43,7 @@ from vinga_server.config import Config
 from vinga_server.device.boundary import DeviceGone, DeviceOutput, PlayableAudio, SessionInput
 from vinga_server.events import SessionEvents
 from vinga_server.generation import Generation
+from vinga_server.ota import OTA_PATH
 from vinga_server.providers import (
     LlmEvent,
     LlmProvider,
@@ -59,7 +60,9 @@ from vinga_server.tools.mcp import McpServers
 
 @contextlib.contextmanager
 def client_with_a_stub(
-    built: list[StubRuntime], config: Config | None = None
+    built: list[StubRuntime],
+    config: Config | None = None,
+    boards: list[str | None] | None = None,
 ) -> Iterator[TestClient]:
     """A served app, with the composition root's factory swapped for one
     that builds stubs. This is the whole of what plugging in a second
@@ -70,7 +73,7 @@ def client_with_a_stub(
     and this is the one write to a built composition the codebase
     sanctions. It lands before any connection, and the endpoint reads the
     factory per connection, so what every socket below gets is the
-    stub."""
+    stub. `boards` collects the board type each build was handed."""
     app = create_app(config if config is not None else config_with_agent())
     with TestClient(app) as client:
 
@@ -81,9 +84,12 @@ def client_with_a_stub(
             agents: Sequence[str],
             generation: Generation,
             device: object = None,
+            board: str | None = None,
         ) -> SessionInput:
             runtime = StubRuntime(output, events, conversations, agents)
             built.append(runtime)
+            if boards is not None:
+                boards.append(board)
             return cast(SessionInput, runtime)
 
         app.state.composition.runtime_factory = factory
@@ -152,6 +158,30 @@ def test_the_factory_is_handed_the_device_it_speaks_for() -> None:
     # bespoke runtime makes it, and never one the edge wrote.
     active = runtime.conversations.active
     assert active is not None and active.agent == runtime.agents[0]
+
+
+@pytest.mark.parametrize("checked_in", [True, False])
+def test_the_factory_is_handed_the_board_type_the_device_checked_in_with(
+    checked_in: bool,
+) -> None:
+    """The board type crosses beside the record, read off the device's
+    check-in at the open (#612), and None where the device reached the
+    socket without checking in, which a restarted server also
+    produces."""
+    built: list[StubRuntime] = []
+    boards: list[str | None] = []
+    with client_with_a_stub(built, boards=boards) as client:
+        if checked_in:
+            response = client.post(
+                OTA_PATH,
+                json={"board": {"type": " esp32-s3-touch-lcd-1.54 "}},
+                headers={"Device-Id": DEVICE_MAC, "Client-Id": DEVICE_UUID},
+            )
+            assert response.status_code == 200, response.text
+        with connect(client) as websocket:
+            shake_hands(websocket)
+
+    assert boards == (["esp32-s3-touch-lcd-1.54"] if checked_in else [None])
 
 
 def test_the_bespoke_runtime_holds_the_conversations_the_edge_built() -> None:

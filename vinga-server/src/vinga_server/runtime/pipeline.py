@@ -62,6 +62,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol
 
+from vinga_server import knowledge
 from vinga_server.audio.resample import Resampler
 from vinga_server.class_names import failure_name
 from vinga_server.config import Config
@@ -549,6 +550,7 @@ class PipelineRuntime:
         device: LiveDevice | None = None,
         llm_input: "LlmInputExport | None" = None,
         transcripts: "TranscriptExport | None" = None,
+        board: str | None = None,
     ) -> None:
         self._output = output
         # The world this runtime reads its configuration out of, asked
@@ -615,6 +617,15 @@ class PipelineRuntime:
         # board this session is talking to and cannot be moved by
         # anything.
         self._filing = device_access
+        # What the built-in agent is told about the hardware it speaks
+        # through (#612): the facts of the guide the reported board type
+        # names, or the fixed text for a board with no guide, a type
+        # nobody reported included. Looked up once here, at the open the
+        # edge read the type at, and the type itself is not kept: it is
+        # a string an unauthenticated request chose, and the text is
+        # chosen from the packaged pages alone. Every other agent is
+        # sent none of it (`_system_prompt`).
+        self._board_facts = knowledge.board_facts(board)
         # The conversation's content channel, beside the event tap and
         # separate from it on purpose: tool arguments and results never
         # rode the events, and the events are losing their text (#120).
@@ -2706,10 +2717,18 @@ class PipelineRuntime:
             return held.sent
         device = await self._device_record()
         record = device.record
+        # The board's facts are the built-in agent's alone, and decided
+        # off the key, so a reply that became or stopped being the
+        # built-in one is read again with or without them.
+        board = self._board_facts if key.builtin else None
         if not key.remembering:
             sent = prompt.RoundPrompt(
                 prompt.with_scopes(
-                    self._know_how, NOTHING_REMEMBERED, record, remembering=False
+                    self._know_how,
+                    NOTHING_REMEMBERED,
+                    record,
+                    remembering=False,
+                    board=board,
                 ),
                 facts=None,
             )
@@ -2736,6 +2755,7 @@ class PipelineRuntime:
                     record,
                     remembering=scopes.complete,
                     marked=marked,
+                    board=board,
                 ),
                 facts=scopes.facts,
             )
@@ -3113,7 +3133,9 @@ def bespoke_runtime_factory(
     read off the world: it belongs to one connection, and it comes in
     beside the agents because it was resolved with them, in one snapshot
     (#449). Everything the conversation later reads about its device is
-    addressed by the identity in it.
+    addressed by the identity in it. The board type the device reported
+    comes in beside it for the same reason, belonging to one connection,
+    and is turned into its guide's text at construction (#612).
 
     `llm_input` is closed over for the reason `memory` is: it is one
     object per server, it outlives every connection, and what a
@@ -3134,6 +3156,7 @@ def bespoke_runtime_factory(
         agents: Sequence[str],
         generation: Generation,
         device: LiveDevice | None = None,
+        board: str | None = None,
     ) -> SessionInput:
         return PipelineRuntime(
             output,
@@ -3155,6 +3178,7 @@ def bespoke_runtime_factory(
             device,
             llm_input,
             transcripts,
+            board,
         )
 
     return build

@@ -262,7 +262,8 @@ class DeviceOutput(Protocol):
 # How one conversation runtime is built for one connection: the device
 # to speak through, the session's observability, the device session's
 # conversations, the agent names the device is bound to, the world to
-# build it from, and the device record the conversation attaches to.
+# build it from, the device record the conversation attaches to, and
+# the board type the device reported at its check-in.
 #
 # The conversations are the third argument, beside the observability
 # and before everything else, and the edge constructs them rather than
@@ -289,6 +290,15 @@ class DeviceOutput(Protocol):
 # another device's name and place. None is a board with no record to
 # attach to, and a conversation that says nothing about its device.
 #
+# The board type is the seventh, read by the edge once at the open off
+# what the device told the OTA endpoint, because that check-in is the
+# one place a device ever says what hardware it is and the edge is
+# what holds it. None is a device that has not checked in since this
+# process started. It is a string an unauthenticated request chose, so
+# a runtime uses it as a key and nothing more: the one runtime looks up
+# its board's guide with it and keeps the guide's text, never the
+# string (#612).
+#
 # The world is the fifth argument rather than something the factory
 # looks up, and that is the whole of the generational binding (#191): a
 # conversation is built from one generation, speaks through that
@@ -310,6 +320,7 @@ RuntimeFactory = Callable[
         Sequence[str],
         "Generation",
         "LiveDevice | None",
+        str | None,
     ],
     SessionInput,
 ]
