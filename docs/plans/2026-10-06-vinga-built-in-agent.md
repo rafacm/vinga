@@ -748,8 +748,8 @@ e4b, shape A, with vinga's real prompt and tools, answered 50% of the
 frozen set and 41% of the rephrased set correctly, against the bar of
 70%, with 0 and 1 of 32 hallucinated, searching on 5 and 2 of the 15
 questions that needed it, and on the Raspberry Pi 5 the round after a
-search reached its first byte after 34 to 53 s, past the clients' 30 s
-read timeout every time. The same gate on `claude-sonnet-5`, the cloud
+search reached its first byte after 34 to 53 s in the model harness,
+past the clients' 30 s read timeout every time. The same gate on `claude-sonnet-5`, the cloud
 preset's model, answered 78% and 81% correctly with none hallucinated,
 searching on 13 of 15 in both sets. The bar is not met on the local
 model, and this is not recorded as a pass: Rafael chose to offer

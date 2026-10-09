@@ -186,15 +186,22 @@ be answered and should be declined, and 2 are volume commands.
 On Gemma 4 e4b the misses are mostly questions it answered "I do not
 have information" to without searching; the prompt's twelve questions
 it answers well, in a median 1.8 s to its first text (the harness
-times text, not speech). When it
-does search, the round after the search is slow on a Pi: the runner
-reads the passages found before it says anything, and the first byte
-of that round came after 34 to 53 s, every time past the 30 s at which
-a request ends without a byte (see
-[What the model has to do](#what-the-model-has-to-do)), so on that
-hardware a turn that searches is given up as a `ProviderCallTimeout`
-today. Raising `llm_first_token_timeout_s` cannot help, for the same
-reason. What vinga does say during that wait is its filler: a
+times text, not speech). When it does search, the round after the
+search is slow on a Pi: the runner reads the passages found before it
+says anything, and in the harness, which waits for as long as the
+model takes, the first byte of that round came after 34 to 53 s. A
+running server does not wait that long. With the defaults it waits
+`llm_first_token_timeout_s`, 10 s, for the first sign of that round,
+cancels the request and sends it once more, and when the second also
+stalls gives the turn up with a `FirstTokenTimeout` and speaks the
+agent's fallback phrase, as in the cold first turn above. Raising the
+watchdog stops helping at 30 s, where the request itself ends after 30
+s without a byte as a `ProviderCallTimeout`
+([What the model has to do](#what-the-model-has-to-do)), and every one
+of the measured rounds was past that. So on that hardware a turn that
+searches is expected to be given up today; that is inferred from the
+harness's first-byte times and was not observed in a running server.
+What vinga does say during that wait is its filler: a
 `builtin_agent.filler` section ([Overriding vinga](configuration.md#overriding-vinga-the-built-in-agent))
 plays one of its phrases the moment vinga searches. `claude-sonnet-5`
 reached the first byte after a search in under 3 s, and spent about

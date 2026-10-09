@@ -83,8 +83,9 @@ did from the beginning, and "complete" means all of:
   Gemma 4 e4b, the local preset's model, it searched on 5 of the 15
   questions that needed it (2 of 15 asked in other words) and answered
   50% of 32 correctly, against 13 of 15 and 78% for `claude-sonnet-5`,
-  and on a Raspberry Pi 5 a turn that searches waits longer than the
-  server waits for a reply
+  and on a Raspberry Pi 5 the round after a search took longer to
+  start answering than the server waits, measured in a model harness
+  rather than a running server
   ([the measurements](../run/llm.md#the-built-in-agents-lookup)). The
   promise is the first half working locally, and the lookup being
   there; how well it is used is the model's. Joined by
