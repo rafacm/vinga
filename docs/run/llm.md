@@ -167,9 +167,9 @@ vinga, the built-in agent, is offered one tool no other agent has,
 `search_docs`, a search over the concepts page, the glossary and the
 device guides packaged with the build, for the questions its prompt
 does not answer. Whether a model calls it is the model's own choice,
-and it is where models differ most. Both measurements below asked the
+and it is where models differ most. Every measurement below asked the
 same 32 questions, each in two wordings (the questions are in
-`vinga-server/tests/local/lookup_gate/`), on 2026-10-09, through a
+`vinga-server/tests/local/lookup_gate/`), on 2026-10-09 and 2026-10-10, through a
 model harness that sends vinga's real prompt and tools, with the
 ESP32-S3-Touch-LCD-1.54 board's facts in the prompt as a session on
 that board would have them, and reads the model's text back: no board,
@@ -182,6 +182,9 @@ be answered and should be declined, and 2 are volume commands.
 | --- | --- | --- | --- | --- | --- | --- |
 | `claude-sonnet-5` | 78%, 81% reworded | 0 | 13, 13 reworded | 3 | 2 | 2.9, 3.1 reworded |
 | `gemma4:e4b`, Pi 5 | 50%, 41% reworded | 0, 1 reworded | 5, 2 reworded | 3 | 1 | 6.3, 7.4 reworded |
+| `gemma4:31b`, Ollama's cloud | 66%, 59% reworded | 2, 1 reworded | 10, 7 reworded | 2 | 0 | 1.0, 0.8 reworded |
+| `gpt-oss:20b`, Ollama's cloud | 53%, 50% reworded | 5, 9 reworded | 9, 10 reworded | 3, 2 reworded | 1, 2 reworded | 1.6, 1.6 reworded |
+| `nemotron-3-nano:30b`, Ollama's cloud | 53%, 41% reworded | 10, 9 reworded | 1, 3 reworded | 1, 2 reworded | 2 | 1.0, 1.0 reworded |
 
 On Gemma 4 e4b the misses are mostly questions it answered "I do not
 have information" to without searching; the prompt's twelve questions
@@ -206,6 +209,35 @@ What vinga does say during that wait is its filler: a
 plays one of its phrases the moment vinga searches. `claude-sonnet-5`
 reached the first byte after a search in under 3 s, and spent about
 8,400 input tokens and 130 to 150 output tokens per question, uncached.
+
+**The three open-weight models were measured on Ollama's cloud**, its
+OpenAI-compatible endpoint at `https://ollama.com/v1`, on 2026-10-10,
+through the same harness and vinga's own `openai_compatible` adapter,
+each request sent with `temperature: 0` and `seed: 42`, which the
+service accepted. `gemma4:31b` and `nemotron-3-nano:30b` were sent
+`reasoning_effort: none`, which turned their thinking off;
+`gpt-oss:20b` thinks whatever `none` says, so it was sent
+`reasoning_effort: low`, the lowest it honored. Their seconds are a
+hosted service's over the network, not what a GPU at home gives: the
+first byte after a search came within 1.0 s there, and nothing here
+measures a machine of yours. There are no token counts: the service
+sends them only when asked, and the adapter asks only OpenAI's own
+host.
+
+What carries over to a machine with a GPU is the left of the table:
+which answers are right and which are invented belong to the model's
+weights, and the same model at the same settings should give much the
+same ones, provided the weights are the same build: a local pull may be
+quantized differently from the service's copy, which was not measured.
+On that measure Gemma 4 31B, the larger sibling of the default,
+was right more often than Gemma 4 e4b (66% and 59% against 50% and
+41%) and searched more often (10 and 7 of 15 against 5 and 2), still
+short of the 70% the gate asked for, and it never made the volume call,
+pointing to the buttons instead. `gpt-oss:20b` and
+`nemotron-3-nano:30b` invented a claim in 5 to 10 answers of 32, more
+than any other model in the table, `nemotron-3-nano:30b` searched on 1
+and 3 of the 15 questions that needed it, and `gpt-oss:20b` answered
+two English questions in German.
 
 ## Pointing an agent at an entry
 
