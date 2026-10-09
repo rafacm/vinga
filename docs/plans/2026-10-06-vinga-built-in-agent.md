@@ -1168,7 +1168,7 @@ through their generators.
   not yet read off a real ESP32-S3-Touch-LCD-1.54's `ota_check.board`;
   that read is still owed. Design footprint: deepens `runtime/prompt.py`,
   `runtime/pipeline.py`, `device/session.py`.
-- [x] **[M5: the lookup tool, as the gate chose](2026-10-06-vinga-built-in-agent-implementation.md#m5-the-lookup-tool-as-the-gate-chose)** (PR TBD). The winning
+- [x] **[M5: the lookup tool, as the gate chose](2026-10-06-vinga-built-in-agent-implementation.md#m5-the-lookup-tool-as-the-gate-chose)** ([PR #638](https://github.com/rafacm/vinga/pull/638)). The winning
   shape in `knowledge/`, its builtin name(s) and definition, offered to
   the built-in alone; the persona's sentence about it; the local-lane
   replay; the baseline item in the promises page; the gate's numbers
