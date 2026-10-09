@@ -7,7 +7,17 @@ type: openai_compatible
 
 base_url: http://localhost:11434/v1
 
-model: qwen3:8b
+# In the endpoint's own vocabulary: on Ollama, the NAME column of
+# `ollama list`. Gemma 4 e4b is the local model docs/run/llm.md
+# recommends, and the local preset's.
+model: gemma4:e4b
+
+# Ollama takes this for a model that thinks before it answers, Gemma 4
+# among them, and answers without streaming the thinking first. It is
+# not a declared option: it travels as a passthrough key, as the
+# paragraph further down describes. Leave it out for a model with no
+# thinking to turn off, or an endpoint that refuses it.
+reasoning_effort: none
 
 # The cap on one reply's length, in tokens. Left out, no cap is sent
 # and the endpoint decides, which is what a server this file has never

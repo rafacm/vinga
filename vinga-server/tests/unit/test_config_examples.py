@@ -275,11 +275,14 @@ def test_an_open_doors_fragment_documents_only_real_options() -> None:
     named here rather than counted, so documenting another one is a line
     of this test and a sentence of that file moving together.
 
-    There are two now. `max_completion_tokens` is what the current
+    There are three now. `max_completion_tokens` is what the current
     OpenAI models take instead of `max_tokens`, this repository declares
     no such field, and until #444 the inline-secret guard refused the
     key outright, so the fragment documenting it is half of what says
-    that endpoint is reachable at all.
+    that endpoint is reachable at all. `reasoning_effort` is live rather
+    than commented: it is what keeps Gemma 4 e4b, the local model the
+    fragment names (#612), from streaming its thinking before every
+    reply over Ollama.
     """
     from vinga_server.config.models import ProviderConfig
     from vinga_server.config.provider_options import OpenaiCompatibleOptions
@@ -288,7 +291,7 @@ def test_an_open_doors_fragment_documents_only_real_options() -> None:
     written = yaml.safe_load(_uncommented(fragment.read_text(encoding="utf-8")))
     declared = set(ProviderConfig.model_fields) | set(OpenaiCompatibleOptions.model_fields)
 
-    assert set(written) - declared == {"top_p", "max_completion_tokens"}
+    assert set(written) - declared == {"top_p", "max_completion_tokens", "reasoning_effort"}
 
 
 def test_the_open_doors_fragment_names_the_keys_it_may_not_take() -> None:
