@@ -325,8 +325,10 @@ talk to vinga" to whichever agent is answering, and it hands the
 conversation over. vinga answers questions about vinga itself, names
 the command that does something rather than doing it, and hands back to
 the board's own agents when asked for one of them by name. The next
-session starts with the board's own first agent again, not with vinga.
-A board bound to vinga alone talks to vinga from the start.
+session starts again with the first of the board's own agents the
+server serves; it starts with vinga only when the board is bound to
+vinga first or alone, or when none of its agents is served yet (one
+written but not yet applied, say).
 
 ## What the wake word does, and does not, do
 
@@ -334,10 +336,10 @@ The wake word wakes the *device*. It is spotted on the chip itself by a
 fixed set of compiled models, so it is a property of the firmware a
 board is running, not of the assistant you are talking to, and it
 cannot be assigned per agent on stock firmware. When a session opens,
-the device's default agent answers. A board whose wake word happens to
-match the name of the agent that answers is a pleasing coincidence of
-configuration, and it stops being true the moment a second agent is
-bound to that device.
+the first agent the device reaches answers. A board whose wake word
+happens to match the name of the agent that answers is a pleasing
+coincidence of configuration, and it stops being true the moment a
+second agent is bound to that device.
 
 Each guide states the wake word for the firmware its board was observed
 running, because "the upstream prebuilt" and "the vendor's shipped

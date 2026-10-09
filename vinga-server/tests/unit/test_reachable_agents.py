@@ -109,7 +109,8 @@ def reached(client: TestClient, caplog: pytest.LogCaptureFixture, mac: str) -> d
     check-in's `ota_check` agents and unloaded names, the activation
     poll's `activation_complete` agents (None when it said the device
     is still waiting), and the session's `session_open` agents (None
-    when the connection was refused)."""
+    when the connection was refused), and the agent that session opened
+    on."""
     caplog.set_level(logging.INFO)
     caplog.clear()
     token = check_in(client, mac)["websocket"]["token"]
@@ -123,7 +124,7 @@ def reached(client: TestClient, caplog: pytest.LogCaptureFixture, mac: str) -> d
         if getattr(record, "event", None) == "activation_complete"
     ]
 
-    session_agents = None
+    session_agents = opened = None
     if token:
         caplog.clear()
         headers = {
@@ -135,13 +136,15 @@ def reached(client: TestClient, caplog: pytest.LogCaptureFixture, mac: str) -> d
         with client.websocket_connect(WEBSOCKET_PATH, headers=headers) as websocket:
             websocket.send_text(json.dumps(HELLO))
             assert json.loads(websocket.receive_text())["type"] == "hello"
-        session_agents = fields_of(only(caplog, "session_open"))["agents"]
+        opening = fields_of(only(caplog, "session_open"))
+        session_agents, opened = opening["agents"], opening["agent"]
 
     return {
         "token": bool(token),
         "ota_check": (checked["agents"], checked["unloaded"]),
         "poll": (polled.status_code, completes[0]["agents"] if completes else None),
         "session": session_agents,
+        "opened": opened,
     }
 
 
@@ -163,6 +166,7 @@ def test_an_unprovided_built_in_adds_nothing_to_a_bound_device(
             "ota_check": (["kids"], []),
             "poll": (200, ["kids"]),
             "session": ["kids"],
+            "opened": "kids",
         }
 
 
@@ -189,12 +193,14 @@ def test_an_operator_s_agent_named_vinga_is_reached_only_where_it_is_bound(
             "ota_check": (["kids"], []),
             "poll": (200, ["kids"]),
             "session": ["kids"],
+            "opened": "kids",
         }
         assert reached(client, caplog, VINGA_MAC) == {
             "token": True,
             "ota_check": ([BUILTIN_AGENT], []),
             "poll": (200, [BUILTIN_AGENT]),
             "session": [BUILTIN_AGENT],
+            "opened": BUILTIN_AGENT,
         }
 
 
@@ -212,6 +218,7 @@ def test_a_displaced_world_reaches_nothing_from_an_unbound_device(
             "ota_check": ([], []),
             "poll": (202, None),
             "session": None,
+            "opened": None,
         }
 
 
@@ -251,6 +258,7 @@ def test_a_bound_device_also_reaches_vinga_after_its_binding(
             "ota_check": (["kids", BUILTIN_AGENT], []),
             "poll": (200, ["kids", BUILTIN_AGENT]),
             "session": ["kids", BUILTIN_AGENT],
+            "opened": "kids",
         }
 
 
@@ -267,6 +275,7 @@ def test_an_unbound_device_still_reaches_nothing_where_vinga_is_served(
             "ota_check": ([], []),
             "poll": (202, None),
             "session": None,
+            "opened": None,
         }
 
 
@@ -275,7 +284,8 @@ def test_a_device_bound_only_to_an_agent_not_yet_served_reaches_vinga(
 ) -> None:
     """Any binding at all is a binding vinga is appended to, so a board
     bound to an agent written but not yet applied talks to vinga while
-    it waits, and the agent it waits for is still named as unloaded."""
+    it waits: its session opens on vinga, the first agent it reaches,
+    and the agent it waits for is still named as unloaded."""
     config, from_store = a_world("database", devices={KIDS_MAC: ["kids"]}, serves_defaults=True)
 
     with running(config, from_store) as client:
@@ -288,6 +298,7 @@ def test_a_device_bound_only_to_an_agent_not_yet_served_reaches_vinga(
             "ota_check": ([BUILTIN_AGENT], ["poet"]),
             "poll": (200, [BUILTIN_AGENT]),
             "session": [BUILTIN_AGENT],
+            "opened": BUILTIN_AGENT,
         }
 
 

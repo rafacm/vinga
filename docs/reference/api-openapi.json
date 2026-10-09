@@ -9377,7 +9377,7 @@
         "description": "What a device write carries: the agents the device may reach.",
         "properties": {
           "agents": {
-            "description": "The agents this device is bound to, by name. The first is the agent a conversation starts on and the rest are the ones switch_agent can reach. Every name has to be an agent that exists, or the write is refused.",
+            "description": "The agents this device is bound to, by name. A conversation starts on the first of them the server serves, and switch_agent reaches the rest it serves and vinga, the built-in agent, while it is served; with none of them served, vinga answers. Every name has to be an agent that exists, or the write is refused.",
             "items": {
               "type": "string"
             },
@@ -9596,7 +9596,7 @@
             "title": "Location"
           },
           "agents": {
-            "description": "The agents this device may reach, by name. The first is the agent a conversation starts on and the rest are the ones it may be switched to.",
+            "description": "The agents this device is bound to, by name. A conversation starts on the first of them the server serves, and the rest it serves are the ones it may be switched to, with vinga, the built-in agent, after them while it is served; with none of them served, vinga answers.",
             "items": {
               "minLength": 1,
               "type": "string"

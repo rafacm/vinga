@@ -1522,8 +1522,10 @@ class DeviceBinding(BaseModel):
 
     agents: list[str] = Field(
         description=(
-            "The agents this device is bound to, by name. The first is the agent a "
-            "conversation starts on and the rest are the ones switch_agent can reach. "
+            "The agents this device is bound to, by name. A conversation starts on "
+            "the first of them the server serves, and switch_agent reaches the rest "
+            "it serves and vinga, the built-in agent, while it is served; with none "
+            "of them served, vinga answers. "
             "Every name has to be an agent that exists, or the write is refused."
         )
     )

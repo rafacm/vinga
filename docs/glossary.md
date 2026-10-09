@@ -28,7 +28,7 @@ More: [Speex/SpeexDSP AEC](https://www.speex.org/docs/manual/speex-manual/node7.
 
 A named configuration of prompt, providers, voice, and MCP tools that
 holds conversations and accrues memory. A device is bound to one or more
-agents; the default answers a fresh wake. Older issues say "persona";
+agents; the first of them the server serves answers a fresh wake. Older issues say "persona";
 new writing says agent. Never a [coding agent](#coding-agent), which is
 a different thing that shares the word. The full domain model is on
 [the concepts page](concepts.md).
