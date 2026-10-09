@@ -316,6 +316,36 @@ def _not_allowed(name: str, agents: Sequence[str]) -> AgentNotAllowed:
     )
 
 
+def handover_refusal(
+    arguments: Mapping[str, object], agents: Sequence[str], current: str | None, *, again: bool
+) -> str | None:
+    """Why a switch_agent with these arguments cannot happen on a device
+    bound to `agents`, with `current` speaking, as the sentence the
+    model is answered with; None when it can. `again` is the round's own
+    fact: this reply has already moved, or this is not the round's
+    first move. Module-level so the lookup gate's harness answers a
+    switch_agent exactly as a session does."""
+    if again:
+        return (
+            "this conversation has already been handed over once in this reply; "
+            "answer as yourself instead"
+        )
+    target = arguments.get("agent")
+    if not isinstance(target, str) or not target.strip():
+        return (
+            'switch_agent needs an "agent" argument naming one of the available '
+            f"assistants: {', '.join(agents)}"
+        )
+    if target not in agents:
+        return str(_not_allowed(target, agents))
+    # Handing over to the agent already speaking is a pure cost: the
+    # leg ends, the same agent is re-activated, and a second round
+    # runs only to greet a user who is already mid-conversation.
+    if target == current:
+        return "you are already speaking as this assistant; answer as yourself instead"
+    return None
+
+
 # The note a memory read with history behind it leaves in the thread
 # (#536), as one object so the runtime finds its own by identity.
 _REREAD = Turn("assistant", prompt.REREAD_NOTE)
@@ -2619,33 +2649,10 @@ class PipelineRuntime:
         `order` is which switch_agent of this round it is, not its place
         in the model's call list: what a second one is refused for is
         being the second the loop resolves."""
-        if switches_left <= 0 or order > 0:
-            return ToolResult(
-                call.id,
-                "this conversation has already been handed over once in this reply; "
-                "answer as yourself instead",
-                is_error=True,
-            )
-        target = call.arguments.get("agent")
-        if not isinstance(target, str) or not target.strip():
-            return ToolResult(
-                call.id,
-                'switch_agent needs an "agent" argument naming one of the available '
-                f"assistants: {', '.join(self._agents)}",
-                is_error=True,
-            )
-        if target not in self._agents:
-            return ToolResult(call.id, str(_not_allowed(target, self._agents)), is_error=True)
-        # Handing over to the agent already speaking is a pure cost: the
-        # leg ends, the same agent is re-activated, and a second round
-        # runs only to greet a user who is already mid-conversation.
-        if target == self._agent:
-            return ToolResult(
-                call.id,
-                "you are already speaking as this assistant; answer as yourself instead",
-                is_error=True,
-            )
-        return None
+        refusal = handover_refusal(
+            call.arguments, self._agents, self._agent, again=switches_left <= 0 or order > 0
+        )
+        return None if refusal is None else ToolResult(call.id, refusal, is_error=True)
 
     async def _system_prompt(self, history: list[Turn]) -> prompt.RoundPrompt:
         """The prompt every round of the leg starting now is sent: the
