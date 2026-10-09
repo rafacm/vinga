@@ -63,7 +63,7 @@ If you would rather a coding agent such as Claude Code or Codex took these steps
 
 **Step 0. Setup Ollama** 
 
-Any model [Ollama](https://ollama.com) serves works, and any endpoint that speaks the [OpenAI chat completions API](https://developers.openai.com/api/reference/chat-completions/overview) does too. This one, Gemma 4 e4b, is the local default: of the local models measured for vinga it answered most accurately and fastest, and it makes the tool calls the device exposes, which is what lets you ask the board to change its own volume or brightness. What a model has to do here, the measurements behind this choice, and pointing vinga at another runner or a vendor are in [Choosing the model an agent thinks with](docs/run/llm.md). This path was walked with `llama3.1:8b`, which Gemma 4 e4b replaced on measurements taken on a Raspberry Pi 5; it has not been walked with Gemma 4 e4b on macOS.
+Any model [Ollama](https://ollama.com) serves works, and any endpoint that speaks the [OpenAI chat completions API](https://developers.openai.com/api/reference/chat-completions/overview) does too. This one, Gemma 4 e4b, is the local default: of the local models measured for vinga it answered most accurately, and substantially faster than the two 8B models it replaced, and it makes the tool calls the device exposes, which is what lets you ask the board to change its own volume or brightness. What a model has to do here, the measurements behind this choice, and pointing vinga at another runner or a vendor are in [Choosing the model an agent thinks with](docs/run/llm.md). This path was walked with `llama3.1:8b`, which Gemma 4 e4b replaced on measurements taken on a Raspberry Pi 5; it has not been walked with Gemma 4 e4b on macOS.
 
 ```bash
 ollama pull gemma4:e4b
