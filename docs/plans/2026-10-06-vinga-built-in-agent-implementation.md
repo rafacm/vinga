@@ -1460,8 +1460,11 @@ vinga-server/tests` on the final tree, untruncated
   applying it, so it is flagged for the PR review.
 - **Order.** vinga goes after the bound names the world serves; a
   binding that names vinga keeps it where the operator put it, once.
-  A fresh wake opens on the first bound agent, never on an appended
-  vinga.
+  A fresh wake opens on the first reachable agent: the first bound
+  agent the world serves, or the appended vinga when none of them is
+  served (the case the resolution above flags). An earlier draft of
+  this line said an appended vinga never opens a session, which the
+  PR review corrected.
 - **The displaced case is decided by `is_builtin`**, never by the name
   being in `agents`, and that is the access boundary the plan names.
 

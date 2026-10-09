@@ -4202,8 +4202,10 @@ class DeviceRecord(BaseModel):
     )
     agents: list[NonBlankStr] = Field(
         description=(
-            "The agents this device may reach, by name. The first is the agent a "
-            "conversation starts on and the rest are the ones it may be switched to."
+            "The agents this device is bound to, by name. A conversation starts on "
+            "the first of them the server serves, and the rest it serves are the "
+            "ones it may be switched to, with vinga, the built-in agent, after them "
+            "while it is served; with none of them served, vinga answers."
         ),
     )
 

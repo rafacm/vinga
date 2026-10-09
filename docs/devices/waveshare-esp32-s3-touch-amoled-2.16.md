@@ -69,7 +69,7 @@ with: the wake word is **"Sophia"**, a WakeNet model
 (`wn9_sophia_tts`) compiled into that image. It has nothing to do with
 any agent name configured on the server side; as everywhere,
 [the wake word wakes the device](README.md#what-the-wake-word-does-and-does-not-do)
-and the device's default agent answers.
+and the first agent the device reaches answers.
 
 Also verified: Waveshare's downloadable factory image for this board
 (`ESP32-S3-Touch-AMOLED-2.16-FactoryOnly-260318.bin`) carries the

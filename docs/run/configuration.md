@@ -181,8 +181,10 @@ Since a voice is a `tts` provider entry, two agents that should sound
 different reference two entries, and a typical agent is a prompt plus a
 voice. `agent_defaults` takes no prompt: a prompt is what makes an agent
 that agent. A device is bound to one agent or to a list of them; with a
-list, the first entry is the agent a conversation starts on, and the
-rest are the ones `switch_agent` can reach.
+list, a conversation starts on the first entry this server serves, and
+`switch_agent` can reach the rest it serves, and vinga, the built-in
+agent, while it is served, which every bound device reaches after its
+own.
 
 Every key of the file half can be overridden with a `VINGA_`-prefixed
 environment variable, nested keys joined with `__`:

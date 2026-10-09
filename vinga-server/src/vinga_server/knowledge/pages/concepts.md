@@ -289,11 +289,14 @@ an agent stored under the name vinga displaces the built-in, since that
 agent is the operator's own and is reached only by the devices bound to
 it.
 
-A fresh wake always gets the default agent: the binding is resolved
-when the device connects, so whatever happened in the last session, the
-next one starts where the configuration says, on the first agent the
-device is bound to rather than on vinga. Reaching another agent the
-device reaches, vinga included, is a [handover](glossary.md#handover).
+A fresh wake always opens on the first agent the device reaches: the
+binding is resolved when the device connects, so whatever happened in
+the last session, the next one starts where the configuration says.
+That is the first agent of its binding this server serves, and vinga
+only when none of them is served yet (a board bound to an agent written
+but not yet applied talks to vinga until the apply) or when the binding
+names vinga first. Reaching another agent the device reaches, vinga
+included, is a [handover](glossary.md#handover).
 
 ## Conversation and session
 
@@ -485,11 +488,11 @@ Wake words are also a fixed compiled set, so per-agent wake words are
 impossible on stock firmware, which is
 [the compatibility floor](architecture/product-promises.md#stock-xiaozhi-firmware-is-the-compatibility-floor).
 
-So the wake word is the doorbell: it opens a session, and the device's
-default agent answers. When a board's wake word happens to be "Sophia"
-and its default agent is Sophia, that is a pleasing illusion produced by
-configuration, not a mechanism, and it breaks the moment a second agent
-is bound to the device.
+So the wake word is the doorbell: it opens a session, and the first
+agent the device reaches answers. When a board's wake word happens to
+be "Sophia" and the agent that answers is Sophia, that is a pleasing
+illusion produced by configuration, not a mechanism, and it breaks the
+moment a second agent is bound to the device.
 
 ## Memory
 
