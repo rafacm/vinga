@@ -4996,14 +4996,27 @@ class Config(DomainConfig):
     def reachable_from(self, bound: Sequence[str]) -> tuple[str, ...]:
         """The agents a device bound to `bound` may talk to in this
         world, the first of them the one a conversation starts on: the
-        bound names this world serves, in binding order.
+        bound names this world serves, in binding order, followed by
+        vinga, the built-in agent, when there is any binding at all,
+        this world serves the built-in, and the binding does not
+        already name it (#612, Q3).
 
         The one home of that rule. `BoundNames.against` answers it for
         a binding read live, and `agents_for_device` for one this
         snapshot holds, so the two cannot come to disagree. A name this
         world does not serve is not reached; what the caller says about
-        it is `against`'s other half."""
-        return tuple(name for name in bound if name in self.agents)
+        it is `against`'s other half.
+
+        Whether the world serves the built-in is asked of `is_builtin`,
+        never of the name being in `agents`: a world whose vinga is an
+        operator's stored agent has displaced the built-in, and that
+        agent, with its own persona and grants, is reached only by the
+        devices bound to it. An unbound device reaches nothing, vinga
+        included: it only pairs."""
+        reached = tuple(name for name in bound if name in self.agents)
+        if not bound or BUILTIN_AGENT in bound or not self.is_builtin(BUILTIN_AGENT):
+            return reached
+        return (*reached, BUILTIN_AGENT)
 
     def agents_for_device(self, mac: str) -> list[str]:
         """The agents a device may talk to, the first of them the one a

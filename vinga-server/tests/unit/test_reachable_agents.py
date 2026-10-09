@@ -27,7 +27,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import insert
 
-from tests.support.configs import DEVICE_UUID
+from tests.support.configs import DEVICE_UUID, world
 from tests.support.events import fields_of, only
 from tests.support.registry import AGENT, STAGES, booted, check_in, store_at
 from tests.support.registry import BINDINGS_DEVICE_MAC as KIDS_MAC
@@ -36,6 +36,7 @@ from vinga_server.app import create_app
 from vinga_server.config import Config
 from vinga_server.config.models import BUILTIN_AGENT, AgentConfig
 from vinga_server.db import schema
+from vinga_server.device.bindings import DeviceBindings
 from vinga_server.ota import ACTIVATE_SEGMENT, OTA_PATH
 from vinga_server.ws import WEBSOCKET_PATH
 
@@ -229,3 +230,143 @@ def test_the_configuration_s_answer_is_the_binding_where_vinga_is_not_served(
 
     assert config.agents_for_device(KIDS_MAC) == ["kids"]
     assert config.agents_for_device("aa:bb:cc:dd:ee:99") == []
+
+
+# A world that serves the built-in agent
+
+
+@pytest.mark.parametrize("home", HOMES)
+def test_a_bound_device_also_reaches_vinga_after_its_binding(
+    home: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """vinga is reachable from every bound device (#612, Q3): the
+    binding first, so a conversation still opens on the agent the
+    operator bound, and vinga behind it, at every edge that asks."""
+    config, from_store = a_world(home, devices={KIDS_MAC: ["kids"]}, serves_defaults=True)
+    assert config.builtin_state.status == "served"
+
+    with running(config, from_store) as client:
+        assert reached(client, caplog, KIDS_MAC) == {
+            "token": True,
+            "ota_check": (["kids", BUILTIN_AGENT], []),
+            "poll": (200, ["kids", BUILTIN_AGENT]),
+            "session": ["kids", BUILTIN_AGENT],
+        }
+
+
+@pytest.mark.parametrize("home", HOMES)
+def test_an_unbound_device_still_reaches_nothing_where_vinga_is_served(
+    home: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The append is to a binding: an unbound device only pairs."""
+    config, from_store = a_world(home, devices={KIDS_MAC: ["kids"]}, serves_defaults=True)
+
+    with running(config, from_store) as client:
+        assert reached(client, caplog, VINGA_MAC) == {
+            "token": False,
+            "ota_check": ([], []),
+            "poll": (202, None),
+            "session": None,
+        }
+
+
+def test_a_device_bound_only_to_an_agent_not_yet_served_reaches_vinga(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Any binding at all is a binding vinga is appended to, so a board
+    bound to an agent written but not yet applied talks to vinga while
+    it waits, and the agent it waits for is still named as unloaded."""
+    config, from_store = a_world("database", devices={KIDS_MAC: ["kids"]}, serves_defaults=True)
+
+    with running(config, from_store) as client:
+        with store_at() as store:
+            store.set_agent("poet", dict(AGENT))
+            store.bind_device(VINGA_MAC, ["poet"])
+
+        assert reached(client, caplog, VINGA_MAC) == {
+            "token": True,
+            "ota_check": ([BUILTIN_AGENT], ["poet"]),
+            "poll": (200, [BUILTIN_AGENT]),
+            "session": [BUILTIN_AGENT],
+        }
+
+
+# Both homes of the rule, one test
+
+
+ALSO_MAC = "aa:bb:cc:dd:ee:32"
+AFTER_MAC = "aa:bb:cc:dd:ee:33"
+UNBOUND_MAC = "aa:bb:cc:dd:ee:34"
+
+
+def answered(home: str, config: Config, mac: str) -> tuple[str, ...]:
+    """What one home of the rule says a device reaches: the live view
+    over the database, the view with no database behind it, or the
+    configuration's own `agents_for_device`."""
+    if home == "config":
+        return tuple(config.agents_for_device(mac))
+    generations = world(config)
+    view = (
+        DeviceBindings.open(generations)
+        if home == "database"
+        else DeviceBindings.snapshot_only(generations)
+    )
+    try:
+        return view.names_for(mac).against(config).agents
+    finally:
+        view.dispose()
+
+
+@pytest.mark.parametrize("home", ["database", "snapshot", "config"])
+def test_every_home_of_the_rule_appends_vinga_the_same_way(home: str) -> None:
+    """The append asserted through `DeviceBindings` with a database,
+    through `DeviceBindings.snapshot_only`, and through
+    `Config.agents_for_device`, so breaking the rule in any of them
+    fails here. vinga goes last unless the binding already names it,
+    and then it stays where the operator put it, once."""
+    devices = {
+        KIDS_MAC: ["kids"],
+        ALSO_MAC: [BUILTIN_AGENT, "kids"],
+        AFTER_MAC: ["kids", BUILTIN_AGENT],
+    }
+    config, _ = a_world(
+        "database" if home == "database" else "snapshot",
+        devices=devices,
+        serves_defaults=True,
+    )
+
+    assert answered(home, config, KIDS_MAC) == ("kids", BUILTIN_AGENT)
+    assert answered(home, config, ALSO_MAC) == (BUILTIN_AGENT, "kids")
+    assert answered(home, config, AFTER_MAC) == ("kids", BUILTIN_AGENT)
+    assert answered(home, config, UNBOUND_MAC) == ()
+
+
+@pytest.mark.parametrize("home", ["database", "snapshot", "config"])
+def test_no_home_of_the_rule_appends_a_displacing_agent(home: str) -> None:
+    """The displaced case in every home: the world serves an agent named
+    vinga, and it is the operator's, so it is reached where it is bound
+    and nowhere else."""
+    config, _ = a_world(
+        "database" if home == "database" else "snapshot",
+        devices={KIDS_MAC: ["kids"], VINGA_MAC: [BUILTIN_AGENT]},
+        serves_defaults=True,
+        legacy_vinga=True,
+    )
+
+    assert answered(home, config, KIDS_MAC) == ("kids",)
+    assert answered(home, config, VINGA_MAC) == (BUILTIN_AGENT,)
+
+
+@pytest.mark.parametrize("home", ["database", "snapshot", "config"])
+def test_no_home_of_the_rule_appends_an_unprovided_built_in(home: str) -> None:
+    """A world that cannot serve vinga reaches nothing by its name, and a
+    device bound to it alone waits, named as unloaded, as a device bound
+    to any agent not yet served waits."""
+    config, _ = a_world(
+        "database" if home == "database" else "snapshot",
+        devices={KIDS_MAC: ["kids"], VINGA_MAC: [BUILTIN_AGENT]},
+        serves_defaults=False,
+    )
+
+    assert answered(home, config, KIDS_MAC) == ("kids",)
+    assert answered(home, config, VINGA_MAC) == ()
