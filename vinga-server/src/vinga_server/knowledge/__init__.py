@@ -16,6 +16,8 @@ maps to a guide.
 - `library` reads the copy once per process and cuts it into sections.
 - `boards` names the board guides and answers a board type with its
   guide's facts, or with fixed text when no guide is named for it.
+- `lookup` is the built-in agent's search over the same pages, cut
+  finer and bounded, which its lookup tool answers with.
 - `persona` is the text the built-in agent's prompt opens with: the
   hand-written `persona.md`, then the concept summary cut from the
   packaged concepts page.
@@ -28,9 +30,11 @@ from vinga_server.knowledge.boards import (
     NOT_BOARD_GUIDES,
     VAGUE_BOARD_FACTS,
     board_facts,
+    board_guide,
     board_guides,
 )
 from vinga_server.knowledge.library import Section, pages, section, sections
+from vinga_server.knowledge.lookup import search
 from vinga_server.knowledge.persona import persona
 
 __all__ = [
@@ -38,9 +42,11 @@ __all__ = [
     "VAGUE_BOARD_FACTS",
     "Section",
     "board_facts",
+    "board_guide",
     "board_guides",
     "pages",
     "persona",
+    "search",
     "section",
     "sections",
 ]

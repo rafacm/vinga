@@ -94,13 +94,24 @@ def _by_type() -> dict[str, str]:
     return named
 
 
+def board_guide(board: str | None) -> str | None:
+    """The board guide `board` names, by its path inside the copy, or
+    None when it names none.
+
+    The reported string is a key and nothing more: what comes back is
+    one of `board_guides()`, a path this package chose, so a caller may
+    keep it where it may not keep the string.
+    """
+    return None if board is None else _by_type().get(board.strip().casefold())
+
+
 def board_facts(board: str | None) -> str:
     """The facts of the guide `board` names, or the vague text.
 
     The reported string is a key and nothing more: what comes back is
     a guide's own lead and controls, or `VAGUE_BOARD_FACTS`.
     """
-    guide = None if board is None else _by_type().get(board.strip().casefold())
+    guide = board_guide(board)
     if guide is None:
         return VAGUE_BOARD_FACTS
     lead = section(guide, None).text.rstrip()
