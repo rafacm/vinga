@@ -257,6 +257,21 @@ def two_agents() -> Any:
     )
 
 
+def served_without_vinga() -> Any:
+    """`served`, in a world that does not serve vinga, the built-in
+    agent: the defaults leave the voice to each agent, so vinga has no
+    voice to be served with. Where vinga is served, every bound device
+    reaches it beside its binding (#612), so a device whose bound agent
+    is deleted talks to vinga instead of being turned away; that rule is
+    `test_reachable_agents.py`'s, and the race below is about the world
+    the session captures."""
+    return config_with(
+        agent_defaults=dict.fromkeys(("llm", "asr", "vad"), "mock"),
+        agents={"assistant": {"prompt": "A", "tts": "mock"}},
+        devices={BOUND: ["assistant"]},
+    )
+
+
 def installed(generations: Any, config: Any) -> Any:
     """Put a world built from this configuration in front of new work,
     the way an apply does."""
@@ -295,7 +310,7 @@ async def test_an_agent_deleted_during_the_lookup_turns_the_device_away() -> Non
     # The stored world that deleted the agent dropped the binding with
     # it, which is the only shape a valid configuration can have; the
     # session is holding the name the lookup read a moment before that.
-    installed(generations, served())
+    installed(generations, served_without_vinga())
     bindings.answer.set()
     await running
     registry.remove(session)
