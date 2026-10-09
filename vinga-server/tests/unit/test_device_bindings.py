@@ -296,7 +296,7 @@ def test_a_loaded_name_beside_an_unloaded_one_still_answers(tmp_path: Path) -> N
         bound = composition.bindings.names_for(DEVICE_MAC)
         assert bound.names == ("assistant", "poet")
 
-        served = bound.against(composition.generations.current().config.agents)
+        served = bound.against(composition.generations.current().config)
         assert (served.agents, served.unloaded) == (("assistant",), ("poet",))
 
 

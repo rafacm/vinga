@@ -4993,12 +4993,25 @@ class Config(DomainConfig):
         record = self.devices.get(normalize_mac(mac))
         return () if record is None else tuple(record.agents)
 
+    def reachable_from(self, bound: Sequence[str]) -> tuple[str, ...]:
+        """The agents a device bound to `bound` may talk to in this
+        world, the first of them the one a conversation starts on: the
+        bound names this world serves, in binding order.
+
+        The one home of that rule. `BoundNames.against` answers it for
+        a binding read live, and `agents_for_device` for one this
+        snapshot holds, so the two cannot come to disagree. A name this
+        world does not serve is not reached; what the caller says about
+        it is `against`'s other half."""
+        return tuple(name for name in bound if name in self.agents)
+
     def agents_for_device(self, mac: str) -> list[str]:
         """The agents a device may talk to, the first of them the one a
-        conversation starts on, derived from `bound_to` so the two
-        cannot come to disagree. A device with no binding resolves to
-        nothing, whatever `default_agent` says, and is turned away."""
-        return list(self.bound_to(mac))
+        conversation starts on: `reachable_from` over `bound_to`, so a
+        snapshot answers by the rule a live read is classified by. A
+        device with no binding resolves to nothing, whatever
+        `default_agent` says, and is turned away."""
+        return list(self.reachable_from(self.bound_to(mac)))
 
 
 def _check_binding(mac: str, bound: object) -> None:

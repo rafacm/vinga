@@ -37,8 +37,10 @@ after the conversation being built rather than in the middle of it, and
 the OTA paths classify against the world current when they answer. A
 classification made here would be a second read of a second generation
 at a different moment, which is the race the pinned handoff exists to
-close. `BoundNames.against` is the one implementation of it, so the two
-callers cannot come to disagree about a rule they both apply.
+close. `BoundNames.against` is the one implementation of it, so its
+three callers (the check-in, the activation poll and the session) cannot
+come to disagree about a rule they all apply, and what it applies is
+`Config.reachable_from`, the rule a snapshot answers by too.
 
 A name this server is not serving is not nothing: handing such a device
 a token would invite a websocket the session layer has to refuse, with
@@ -68,7 +70,6 @@ Three properties this component exists to keep:
 """
 
 import asyncio
-from collections.abc import Collection
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -138,20 +139,24 @@ class BoundNames:
     # a test lane and an embedded server have.
     authoritative: bool = True
 
-    def against(self, servable: Collection[str]) -> "DeviceAgents":
-        """This binding, split by what one world can serve.
+    def against(self, config: "Config") -> "DeviceAgents":
+        """This binding, classified against one world: the agents it
+        reaches there, and the names it binds that the world does not
+        serve.
 
-        `servable` is the agents of exactly one generation, and which
-        generation that is is the caller's decision: the session's is
-        the world it is about to build a conversation from, and the OTA
-        paths' is the world current as they answer. One implementation
-        of the split, here rather than at the two call sites, because
-        the difference between the two lists is what both of them say
-        out loud to an operator.
+        `config` is exactly one generation's, and which generation that
+        is is the caller's decision: the session's is the world it is
+        about to build a conversation from, and the OTA paths' is the
+        world current as they answer. One implementation of the split,
+        here rather than at the three call sites, because the
+        difference between the two lists is what all of them say out
+        loud to an operator. What a binding reaches is the
+        configuration's rule, `Config.reachable_from`, so a live read
+        and a snapshot answer by the same one.
         """
         return DeviceAgents(
-            tuple(name for name in self.names if name in servable),
-            tuple(name for name in self.names if name not in servable),
+            config.reachable_from(self.names),
+            tuple(name for name in self.names if name not in config.agents),
             self.authoritative,
         )
 

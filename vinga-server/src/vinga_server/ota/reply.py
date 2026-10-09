@@ -397,7 +397,7 @@ async def check_version(request: Request) -> Response:
     # both the token below and what is said about the device here.
     bindings: DeviceBindings = comp.bindings
     bound = await bindings.resolve(mac)
-    resolution = bound.against(comp.generations.current().config.agents)
+    resolution = bound.against(comp.generations.current().config)
     agents = list(resolution.agents)
 
     # Read once, and the two readings of that one answer derived here
