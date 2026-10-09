@@ -240,6 +240,7 @@ historical  vinga export
 historical  vinga export agent assistant
 historical  vinga import
 historical  vinga info
+historical  vinga info command
 historical  vinga list
 historical  vinga list agents
 historical  vinga mcp-server
