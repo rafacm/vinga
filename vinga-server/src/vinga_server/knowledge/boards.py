@@ -53,14 +53,17 @@ _CONTROLS = "Controls"
 
 # What a device with no guide gets: an absent type, `unknown`, or a
 # type no board guide is named for. Fixed text, so nothing the device
-# reported can reach a prompt through it.
+# reported can reach a prompt through it. It names where the guides
+# are and never asks the model to answer from them: until a lookup
+# exists the model cannot read a page, and an instruction to answer
+# from one invites the invention the gate counted.
 VAGUE_BOARD_FACTS = (
-    "The server has not been told which board this device is, so there are no facts "
-    "here about its buttons, screen or controls. Answer questions about the device "
-    "from the common device guide (Device guides, docs/devices/README.md), and say "
-    "plainly when it does not cover the question rather than guessing. Restarting the "
-    "device lets the server learn which board it is: a board reports its type when it "
-    "checks in at boot."
+    "The server has not been told which board this device is, so you have no facts "
+    "about its buttons, screen or controls. When asked about them, say plainly that "
+    "you do not know which board this is rather than guessing, and point the person "
+    "to the guide for their board, among the device guides in vinga's documentation "
+    "(docs/devices/). Restarting the device lets the server learn which board it is: "
+    "a board reports its type when it checks in at boot."
 )
 
 
