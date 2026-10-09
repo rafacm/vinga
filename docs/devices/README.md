@@ -39,6 +39,9 @@ says where it differs.
   resetting, reading the boot log, reading NVS back and reading the
   whole of what a board reports at check-in, with the reset behavior
   that is not what the usual advice says.
+- [What vinga knows about the device](#what-vinga-knows-about-the-device):
+  how the built-in agent learns which board it is speaking through, and
+  why a restart can make it forget until the board checks in again.
 - [Talking to the device itself](#talking-to-the-device-itself): the
   controls a board publishes as tools, so an agent can turn it down.
 - [What the wake word does, and does not, do](#what-the-wake-word-does-and-does-not-do):
@@ -272,6 +275,27 @@ wants an interactive terminal). The port was `/dev/cu.usbmodem101` at
   writes down a bounded copy of every check-in body whether or not
   anybody is watching. That second one is a choice worth making
   deliberately on a server boards check in to.
+
+## What vinga knows about the device
+
+vinga, the built-in agent, answers questions about the device in front
+of you from that device's guide: the guide's opening paragraphs and its
+Controls section are part of what it is told. It knows which guide from
+the board model the device reports when it checks in with the server,
+which a board running the upstream firmware does each time it starts
+(the ESP32-S3-Touch-LCD-1.54 reports itself as
+`esp32-s3-touch-lcd-1.54`), and the browser page each time it loads.
+
+The server keeps that board model in memory only. After the server
+restarts, vinga does not know which board it is speaking through until
+the device checks in again, and it says so rather than guessing; so
+does a board with no guide here. Restarting the device is what teaches
+it: switch the board off and on, or reload the browser page. Until
+then vinga answers device questions from this page, and the guide for
+your board is the place to look.
+
+Only vinga is told this. Every other agent on the device answers about
+it from its own prompt, whatever the operator wrote there.
 
 ## Talking to the device itself
 

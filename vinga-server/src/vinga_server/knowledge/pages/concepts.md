@@ -200,12 +200,18 @@ on purpose:
   server rather than of the domain: what matters here is that none of
   these observed facts lands in the stored record above, which holds
   what an operator and a conversation put there and nothing a board
-  reports about itself.
+  reports about itself. The board model is kept in the server's memory
+  alone, so after the server restarts it is known again only when the
+  device next checks in, which a board does each time it starts and
+  the browser page each time it loads.
 - **Hardware facts from the board guides**: what the model implies
   but the wire never says: microphone count, echo cancellation,
   display, button layout. They are written down per board model in
   the [board guides](devices/README.md), for the people using the
-  board; the server reads none of them.
+  board, and vinga, the built-in agent, is told its own board's: the
+  board model from the check-in names the guide, and the guide's
+  opening and controls join vinga's prompt. That is the one thing the
+  server reads them for.
 
 The runtime adapts to what the device reports rather than controlling
 it: the device owns its own listening mode, so adaptation is by
@@ -238,9 +244,13 @@ it ships in, a persona of its own followed by
 [the paragraph above](#the-model-in-one-paragraph). It answers about
 vinga itself from that summary, naming the command that does something
 rather than running it, and hands over to the other agents the device
-reaches. Its prompt carries its persona and the summary and nothing
-about the particular board it speaks through, so a question about that
-board gets a general answer, said as one. An operator chooses its
+reaches. Its prompt carries its persona, the summary, and the facts of
+the board it speaks through: the opening and the controls section of
+that board's [guide](devices/README.md), chosen by the board model the
+device reported at its check-in, or, for a board with no guide or one
+the server has not heard from since it started, a note saying so,
+which sends a device question to the common page. No other agent's
+prompt carries them. An operator chooses its
 providers, its voice and the shared fragments its prompt carries
 (which is how its reply language is set) in its `builtin_agent` entry,
 and nothing else: it has no prompt to write and no MCP tools, by

@@ -591,8 +591,9 @@ The agent every deployment has without anyone storing it: composed by
 the server from the build it ships in, with a persona of its own and
 the concept summary, it answers about vinga, names the commands that do
 things rather than running them, and hands over to the device's other
-agents. It is told nothing about the particular board it speaks
-through, so about that board it answers only in general. Its `builtin_agent` entry chooses its
+agents. It is told the facts of the board it speaks through, from that
+board's guide, or that the server has not been told which board it is.
+Its `builtin_agent` entry chooses its
 providers, voice and shared fragments; it has no prompt and no MCP
 tools to configure. Its memory and the threads it can resume are its
 device's. See [the concepts page](concepts.md#agent).
