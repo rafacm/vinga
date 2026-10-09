@@ -10,11 +10,10 @@
 # The import orders the writes for you. A write whose references do not
 # resolve is refused, and a document is refused whole rather than half
 # written, so there is no creation order to get right here: the
-# providers, the defaults naming them and the agent inheriting them all
-# arrive together. Importing is additive and never deletes, so a section
-# this document does not name is left alone and the same document twice
-# changes nothing. Nothing the import wrote is serving until the apply
-# behind it installs it.
+# providers and the defaults naming them arrive together. Importing is
+# additive and never deletes, so a section this document does not name
+# is left alone and the same document twice changes nothing. Nothing
+# the import wrote is serving until the apply behind it installs it.
 #
 # No credential is written here, and none can be. Every key below names
 # the environment variable that holds the value, and the models refuse
@@ -28,19 +27,22 @@
 # A stored secret wins over an environment reference for the same slot,
 # and `vinga show` marks the reference it displaces.
 #
-# There are deliberately no devices and no default agent below. Which
-# board talks to which agent is the one thing a preset cannot know, and
-# it is one command afterwards. A board nobody has bound shows a
-# six-digit code, and `device pending claim` with that code binds it; or
-# bind it by the MAC on its sticker:
+# There are deliberately no agents, no devices and no default agent
+# below. The first agent a deployment has is vinga, the agent built
+# into the server: it runs on the providers and defaults this document
+# writes, and it answers what vinga is, what the board in front of you
+# can do, and which command does the rest. Which board talks to which
+# agent is the one thing a preset cannot know. A board nobody has bound
+# shows a six-digit code, and `vinga device pending claim` with that
+# code binds it to the default agent, which is vinga until you set
+# another with `vinga default-agent set`. Or bind a board by the MAC on
+# its sticker:
 #
-#   vinga device bind aa:bb:cc:dd:ee:ff assistant
+#   vinga device bind aa:bb:cc:dd:ee:ff vinga
 #
-# A claim may leave the agent out, binding the board to the default
-# agent, which is vinga, the built-in agent, unless you name another;
-# the default reaches no unbound board by itself:
-#
-#   vinga default-agent set assistant
+# Your own agents are a document or a command each
+# (examples/agent.yaml), and a board bound to one of them still reaches
+# vinga beside it.
 #
 # Every field below is documented in docs/reference/domain-config.md,
 # and examples/ holds a commented fragment per provider type with the
@@ -83,19 +85,11 @@ providers:
     gate:
       type: silero
 
-# What every agent uses unless it names something else. A prompt is
-# deliberately not here: a prompt is what makes an agent that agent.
+# What every agent uses unless it names something else, vinga included
+# unless a builtin_agent entry names its own. A prompt is deliberately
+# not here: a prompt is what makes an agent that agent.
 agent_defaults:
   llm: brain
   asr: ears
   tts: voice
   vad: gate
-
-agents:
-  assistant:
-    # State the reply language explicitly: models otherwise pick one by
-    # their training bias.
-    prompt: >
-      You are a helpful voice assistant. Keep replies short, plain, and
-      speakable: one or two sentences, no lists, no markdown. Always
-      reply in the language the user spoke.
