@@ -20,7 +20,7 @@ from typing import Any
 import pytest
 
 from tests.local.lookup_gate import harness
-from tests.support.providers import ScriptedLlm, results_of
+from tests.support.providers import ScriptedLlm, errors_of, results_of
 from vinga_server.class_names import UNNAMED_FAILURE
 from vinga_server.providers import ToolCall, Turn
 from vinga_server.providers.openai_llm import OpenAiCompatibleLlm
@@ -61,6 +61,49 @@ async def test_a_mangled_call_gets_the_runtime_s_sentence() -> None:
 async def test_a_good_query_gets_the_pages() -> None:
     call = ToolCall(id="c-1", name=names.SEARCH_DOCS, arguments={"query": "change wake word"})
     assert "building the firmware with it" in " ".join((await handed(call)).split())
+
+
+# A call to a tool the harness did not offer is answered as a session
+# answers it, never as if it ran: a model that handed the conversation
+# to an agent this device does not reach used to be told "Done.".
+
+
+async def answered(*calls: ToolCall) -> list[tuple[str, bool]]:
+    """What the model is handed back for one round of calls, through the
+    harness's own round loop, with whether each was an error."""
+    script = ScriptedLlm([list(calls), "Done."])
+    await harness.ask(script, "system", harness.offered(), [], "a question", names.SEARCH_DOCS, LCD)
+    return list(zip(results_of(script), errors_of(script), strict=True))
+
+
+async def test_a_switch_to_an_agent_the_device_does_not_reach_is_refused() -> None:
+    call = ToolCall(id="c-1", name=names.SWITCH_AGENT, arguments={"agent": "music"})
+    assert await answered(call) == [
+        ('this device is not bound to agent "music" (bound to: vinga)', True)
+    ]
+
+
+async def test_a_second_switch_in_one_round_is_refused_as_the_session_refuses_it() -> None:
+    first = ToolCall(id="c-1", name=names.SWITCH_AGENT, arguments={"agent": "music"})
+    second = ToolCall(id="c-2", name=names.SWITCH_AGENT, arguments={"agent": "vinga"})
+    (_, (text, is_error)) = await answered(first, second)
+    assert text.startswith("this conversation has already been handed over once")
+    assert is_error
+
+
+async def test_a_name_nobody_offered_is_no_such_tool() -> None:
+    call = ToolCall(id="c-1", name="play_music", arguments={"playlist": "mine"})
+    assert await answered(call) == [('there is no tool called "play_music"', True)]
+
+
+async def test_a_mangled_call_to_a_name_nobody_offered_gets_the_runtime_s_sentence() -> None:
+    call = ToolCall(id="c-1", name="play_music", arguments={}, malformed_arguments="{")
+    assert await answered(call) == [(UNPARSEABLE_ARGUMENTS, True)]
+
+
+async def test_an_offered_tool_is_still_answered_with_the_fixed_line() -> None:
+    call = ToolCall(id="c-1", name=names.NEW_CONVERSATION, arguments={})
+    assert await answered(call) == [(harness.STUBBED, False)]
 
 
 # A run that stops says the failure's class name and nothing else (PR
