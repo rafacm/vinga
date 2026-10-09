@@ -1755,17 +1755,38 @@ a preset, which M3's own cases already falsify.
   `llm.md` recipe all carry it.
 - **The cold first turn**, stated where the local model is introduced
   (Getting Started step 0, a warning after the pin; `docs/run/llm.md`,
-  its own paragraph) with M6's numbers: about 13 tokens per second on
-  an unseen prompt, 107.6 s to the first byte of a 1,990-token first
-  request, 179.8 s for a 2,363-token probe, 2.4 to 3.4 s warm, against
-  the fixed 30 s bound. Both say pinning the model is needed and not
-  enough, and that what answers the first turn on that hardware today
-  is a faster-read model, a GPU or a vendor's model. No warm-up
-  mechanism is described, because none exists: warming the prompt
-  means sending the server's own first request with no 30 s bound,
-  which nothing an operator runs does. The token count is attributed to
-  "the conversation measured" (the lane's assistant with vinga
-  reachable), not to vinga's own prompt, which was not measured.
+  its own paragraph) with M6's numbers: 107.6 s to the first byte of a
+  1,990-token first request, 179.8 s for a 2,363-token probe, 2.4 to
+  3.4 s warm. What an operator meets is the watchdog, not the transport
+  bound: with the defaults, `llm_first_token_timeout_s` (10 s,
+  `config/models.py`) cancels the first request, `runtime/provider_watch.py`
+  sends it once more, and the second stall raises `FirstTokenTimeout`
+  and the turn ends in the fallback phrase about 20 s in. The 30 s in
+  `providers/kit.py` is a per-operation transport read timeout that
+  caps a raised watchdog (a request ending as `ProviderCallTimeout`);
+  M6's run with the watchdog at 30 s gave up after two 30 s stalls
+  (`no first token after 30.0 s, retrying round 1`, then
+  `FirstTokenTimeout`, M6's `.logs/local-rerun-m6-1.log`). "Trying again
+  did not help" is stated as far as M6 measured it: seven cold
+  conversations with thinking off (five at 10 s, two at 30 s, 19:53 to
+  20:07), each with its retry, all `FirstTokenTimeout`. The pages
+  state that and no cause: M6 read the reason in Ollama's own log (each
+  request cancelled before the first 512-token batch completed), but
+  that log is not among M6's kept logs and the runner is M5's for this
+  milestone, so the pages say only that a cancelled request left the
+  next one no closer. The first draft of this
+  section and of both pages said the server gives up "after 30 s" and
+  quoted "about 13 tokens per second" beside the 107.6 s request, which
+  is 18 tokens per second; the PR review round below corrected the
+  first, and the rate is now left out in favor of the two measured
+  times. Both pages say pinning the model is needed and not enough,
+  and that what answers the first turn on that hardware today is a
+  faster-read model, a GPU or a vendor's model. No warm-up mechanism is
+  described, because none exists: warming the prompt means sending the
+  server's own first request with no bound, which nothing an operator
+  runs does. The token count is attributed to "the conversations
+  measured" (the lane's assistant, with and without vinga reachable),
+  not to vinga's own prompt, which was not measured.
 - **Getting Started's walk.** The step says it was walked with
   `llama3.1:8b` and has not been walked with Gemma 4 e4b on macOS.
 - **Existing deployments.** Importing is additive, so a stored
