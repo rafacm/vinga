@@ -2033,19 +2033,24 @@ tool loop runs them, every answer read by hand
   "hallucinated"), Gemma rephrased 0, Sonnet frozen 1 (B1, "same as
   pressing PWR" read as a contradiction), Sonnet rephrased 1 (F3, as
   Gemma's). Undecided answers settled by hand: 4, 4, 3 and 4. The one
-  hallucination on each side that counts is Gemma's rephrased S8 ("the
+  hallucination counted in all four runs is Gemma's rephrased S8 ("the
   conversation history is carried over" to the next agent).
 - **What Gemma 4 e4b does.** Answers from its prompt are right and
   fast (median 1.8 s to the first text: the harness has no speech);
   the misses are lookup
   questions answered "I do not have information" without a search
   (most of its nine tool errors on the frozen set). When it does
-  search, the round after reached its first byte after 34 to 53 s:
-  Ollama sends nothing before the first token, so every one of those
-  rounds is past the 30 s the LLM clients wait without a byte
-  (`providers/kit.py`), and in a running server the turn would be given
-  up as a `ProviderCallTimeout`. That is what made the allowance
-  pointless (Deviations 5), and it is in `docs/run/llm.md`.
+  search, the round after reached its first byte after 34 to 53 s in
+  the harness, which waits as long as the model takes. Ollama sends
+  nothing before the first token, so every one of those rounds is past
+  the 30 s the LLM clients wait without a byte (`providers/kit.py`),
+  which is what made the allowance pointless (Deviations 5). In a
+  running server with the defaults the 10 s watchdog fires first: it
+  cancels the round, retries it once, and gives the turn up with a
+  `FirstTokenTimeout` and the fallback phrase when the retry stalls
+  too; `ProviderCallTimeout` is reached only with the watchdog raised
+  past 30 s. That outcome is inferred from the harness's timings, not
+  observed in a session; `docs/run/llm.md` says so.
 
 ### Voided and superseded runs
 

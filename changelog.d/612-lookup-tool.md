@@ -11,8 +11,10 @@
   `claude-sonnet-5` searched on 13 of the 15 that needed it and
   answered 78% correctly, and Gemma 4 e4b, the local preset's model,
   on 5 of 15 and 50%, missing the 70% it was measured against; on a
-  Raspberry Pi 5 a turn in which it searches waits longer than the
-  server waits for a reply. `docs/run/llm.md` has the measurements.
+  Raspberry Pi 5 the round after a search took longer to start than
+  the server waits, so such a turn is expected to be given up with the
+  fallback phrase (inferred from a model harness, not observed in a
+  running server). `docs/run/llm.md` has the measurements.
   Upgrade: an `mcp_servers` entry named `search_docs` is now refused
   when the configuration is read, since a builtin tool's name is
   reserved; rename the entry.
