@@ -1138,7 +1138,7 @@ through their generators.
   `config/models.py`, `config/store.py`, `tools/builtin.py`,
   `tools/source.py`, `memory/store.py`, `conversations/threads.py`,
   `runtime/resumption.py`.
-- [ ] **M4: the board reaches vinga's prompt** (PR TBD). The session
+- [x] **[M4: the board reaches vinga's prompt](2026-10-06-vinga-built-in-agent-implementation.md#m4-the-board-reaches-vingas-prompt)** (PR TBD). The session
   reads its board once at open; the pipeline hands
   `knowledge.board_facts` to `with_scopes` for the built-in; the device
   block carries it; the vague text; the board string read off a real

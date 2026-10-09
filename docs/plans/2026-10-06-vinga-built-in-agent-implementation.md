@@ -1169,3 +1169,177 @@ Verification after the round: the unit lane (`-n auto --dist loadfile`)
 passed`; the drift checks current; ruff, link, Run and Use page and
 fragment checks clean; the knowledge tests `16 passed` after the persona
 commit.
+
+## M4: the board reaches vinga's prompt
+
+**Attribution:** anthropic/claude-opus-5-5, thinking medium; Claude Code 2.1.295; 2026-10-09.
+
+### What landed
+
+| Plan item | Where | Commit |
+| --- | --- | --- |
+| The device block carries the board's facts (Q10) | `runtime/prompt.py`: `with_scopes(..., board=None)` and `_device_block`, the text between the introduction and the notes under the one `device` provenance, compared `is not None` | `Carry a board's facts in the prompt's device block` |
+| The session reads its board once at open; the pipeline hands `knowledge.board_facts` to `with_scopes` for the built-in | `device/boundary.py` (`RuntimeFactory` gains a seventh argument, the reported type), `device/session.py` (read off `DeviceFacts` at the open, the read the capture manifest makes, kept nowhere), `runtime/pipeline.py` (`bespoke_runtime_factory` and `PipelineRuntime` take `board`; the constructor keeps `knowledge.board_facts(board)` and not the type; `_system_prompt` hands it over when the snapshot key says the speaker is the built-in) | `Hand vinga the facts of the board it speaks through` |
+| The vague text | `knowledge.VAGUE_BOARD_FACTS` from M2, unchanged; reached for no check-in, `unknown`, a type with no guide, `readme` and `flashing` | same |
+| Tests, the pin, the sentinel | `tests/unit/test_session_builtin_board.py` (new), `test_session_prompt.py` (the operator pin parametrized with an LCD board reported), `test_boundary_contract.py` (the factory is handed the type), `test_runtime_prompt.py` (three assembler cases), `tests/support/sessions.py` (`device_facts` on the builders) | the two commits above and `Test the board's facts in vinga's prompt` |
+| M3's persona sentence qualified back | `knowledge/persona.md`: device questions are answered from the facts further down, with the honest decline kept; `test_knowledge.py`'s pin rewritten | `Let vinga answer device questions from its facts` |
+| The board string read off a real board | not done on a board; derived from the upstream source instead, below | |
+| Documentation footprint | `docs/devices/README.md` (new section, What vinga knows about the device), `docs/devices/browser.md`, `docs/concepts.md` (Agent, observed facts, hardware facts), `docs/glossary.md` (vinga), `docs/run/configuration.md` (Overriding vinga), the packaged copy | `Document that vinga knows the board it speaks through` |
+| The fragment | `changelog.d/612-board-in-prompt.md`, one Changed entry, no `Upgrade:` line | `Add the changelog fragment for the board facts` |
+
+Design footprint as planned: `runtime/prompt.py`, `runtime/pipeline.py`
+and `device/session.py` deepened, with `device/boundary.py`'s factory
+type gaining the argument the crossing needs. No new module and no new
+seam; nothing at the device edge knows vinga is built in.
+
+### The board string, from the firmware's source and not off a board
+
+The plan has M4 read the type a real ESP32-S3-Touch-LCD-1.54 reports
+off `vinga events` (`ota_check`'s `board`). **That read was not done:
+no board was attached to the machine this milestone ran on** (the
+Raspberry Pi, which has none), so the verification box for it stays
+unchecked for a session with the board on its desk. What the stock
+firmware reports was derived from upstream's source instead, in the
+vendored clone of 78/xiaozhi-esp32:
+
+- **At the vendored head** (`4632dc51`, 2026-09-20), `board.type` is
+  `BOARD_TYPE` (`main/boards/common/wifi_board.cc:267`, inside
+  `GetBoardJson`, which `Board::GetSystemInfoJson` puts under `"board"`
+  at `main/boards/common/board.cc:168`, the body `main/ota.cc:95` posts
+  at check-in). `main/CMakeLists.txt:879-886` sets `BOARD_TYPE` from the
+  `"type"` of the board's `config.json`, which for this board
+  (`main/CMakeLists.txt:464-465` selects
+  `waveshare/esp32-s3-touch-lcd-1.54`) is
+  `"type": "esp32-s3-touch-lcd-1.54"`
+  (`main/boards/waveshare/esp32-s3-touch-lcd-1.54/config.json:3`); the
+  build refuses anything outside `[a-z0-9.-]` (`:898-901`).
+- **At v2.4.0** (`5540258a`, the version the board guide was tested on,
+  fetched as a tag into the shallow clone for this read),
+  `main/CMakeLists.txt:474` sets it directly:
+  `set(BOARD_TYPE "esp32-s3-touch-lcd-1.54")`, and
+  `main/boards/common/wifi_board.cc:279` writes it the same way.
+
+Both spell `esp32-s3-touch-lcd-1.54`, without the vendor, which M2's
+matcher maps to `devices/waveshare-esp32-s3-touch-lcd-1.54.md` by its
+`waveshare-` rule, and which
+`test_vinga_is_told_the_facts_of_the_board_it_speaks_through[esp32-s3-touch-lcd-1.54]`
+drives through a session. The two sibling guides' boards report
+`esp32-s3-epaper-1.54` and `esp32-s3-touch-amoled-2.16` by the same
+mechanism (their `config.json:3`, and v2.4.0's `CMakeLists.txt:450`,
+`:453` and `:360`), so all three reach their guides. The firmware
+checks in at every boot (`Application::CheckNewVersion`,
+`main/application.cc:373`), which is what the docs' "restarting the
+device teaches it" rests on. What a board actually sends could differ
+from its source only through a custom build, which vinga does not
+ship.
+
+### Deviations from the plan
+
+1. **The board crosses as a seventh `RuntimeFactory` argument.** The
+   plan names `device/session.py` and `runtime/pipeline.py` but not
+   `device/boundary.py`, whose factory type is the only way the
+   session's read reaches the runtime; the record crosses there for the
+   same reason. The alternative, the factory closing over
+   `DeviceFacts` and reading by MAC, would have left the session out
+   and made two readers of one object.
+2. **The runtime maps the type at construction, for every agent**,
+   rather than when the built-in first speaks: keeping the raw type
+   until then would hold an untrusted string in the runtime's state,
+   which the sentinel test forbids. The cost is one cached dictionary
+   lookup per session; the pages are read once per process.
+
+No other deviation.
+
+### Resolutions
+
+- **What the prompt preview shows for vinga.** `app._prompt_preview`
+  renders "a fresh session with no device", so it carries no board
+  text, vague or otherwise, as it carries no device record. Unchanged
+  by M4; the preview's description already says it.
+- **No heading over the facts.** The facts are the guide's own text,
+  opening with its `# ` title, so the model reads which board they are
+  about; the vague text says so itself. The persona tells the model
+  where they are.
+- **The facts follow the agent speaking, not the session.** Decided
+  off the prompt snapshot's key (`builtin`), so a handover to vinga
+  reads them in and one away reads them out, with no second clock.
+- **The capture manifest and the pending table keep the reported type**,
+  as they did: see Discoveries.
+
+### Discoveries
+
+1. **Two more pre-existing surfaces carry the reported type** beyond the
+   two the plan names (`ota_check.board` and `ota_check_body`): the
+   capture manifest's `device.board`, written beside the audio when
+   capture is on (`DeviceSession._manifest`), and the pending table's
+   bounded `board`, which `vinga device pending list` and its API route
+   show (`onboarding/pending.py`, `_fact`). M4 changes neither and adds
+   no new one. The sentinel test's state walk skips `DeviceFacts`, the
+   in-memory holder the endpoint writes and the manifest reads, and
+   names why.
+2. **A state walk reaches the log.** The first draft of the sentinel's
+   state walk found it in the session's state, through the session's
+   logger, its handlers and the capture handler's records. The walk now
+   skips the logging machinery, since the log records are hunted
+   separately with their two pinned exceptions, and asserts it reached
+   the runtime's own board text, so a walk that stopped short fails
+   rather than passes.
+3. **The browser guide's lead is part of the browser's facts**, so the
+   sentence M4 adds there (vinga knows it is a browser) is also in what
+   vinga is told: 2,808 characters, within the 3,500 budget.
+
+### Tests first, and the mutations
+
+The assembler tests and the persona pin were written before or
+alongside the code they drive, and the persona pin failed against M3's
+wording before the persona moved. Every mutation below was applied
+once, run, and restored by copy and `touch`; the logs are
+`.logs/m4-mutations-prompt.log` and `.logs/m4-mutations-session.log`.
+
+| Mutation | Killed by |
+| --- | --- |
+| **Plan target:** mapping only one LCD spelling (the vendor-stripped spelling dropped in `knowledge/boards.py`) | the three `test_vinga_is_told_the_facts_of_the_board_it_speaks_through` cases, three `test_a_waveshare_board_is_reached_with_or_without_the_vendor` cases, `test_a_reported_type_is_casefolded_and_stripped` |
+| **Plan target:** interpolating the reported type (appended to the facts in the runtime) | `test_the_facts_sit_in_the_device_block_after_its_introduction`, `test_a_reported_board_type_reaches_no_surface_this_feeds` |
+| The facts handed to every agent | `test_an_operator_agent_on_a_reporting_board_is_told_nothing_of_it`, `test_a_handover_to_vinga_brings_the_facts_and_one_away_takes_them`, both cases of the operator byte pin, and eleven other `test_session_prompt.py` cases |
+| The facts handed to no agent | twelve `test_session_builtin_board.py` cases |
+| The runtime keeping the reported string beside the text | `test_a_reported_board_type_reaches_no_surface_this_feeds` |
+| The session handing None | `test_the_factory_is_handed_the_board_type_the_device_checked_in_with[True]` |
+| The session handing the firmware instead of the board | the same |
+| The board dropped from the device block | `test_the_board_s_facts_sit_between_the_introduction_and_the_notes`, `test_the_board_s_facts_reach_a_prompt_with_memory_off_and_no_record` |
+| The board placed after the notes | `test_the_board_s_facts_sit_between_the_introduction_and_the_notes` |
+| The board passed only when memory is on | `test_the_board_s_facts_reach_a_prompt_with_memory_off_and_no_record` |
+
+No survivor. One observation: the interpolation mutation leaves the
+vague-text cases green, since they assert the fixed text is present
+rather than that nothing else is; the sentinel test is what holds the
+"never the reported string" half, and it caught it.
+
+### Verification
+
+All on the Raspberry Pi 5, logs in this worktree's `.logs/`, both lanes
+with `-n auto --dist loadfile`. M6's implementer was running lanes on
+the same machine against the same Postgres for part of this, so the
+timings are not idle timings; neither lane errored in setup.
+
+- `uv run ruff check .`: all checks passed.
+- Unit lane (`.logs/m4-unit-1.log`): `8614 passed, 19 skipped in
+  1216.97s (0:20:16)`, first run.
+- Integration lane (`.logs/m4-integration-1.log`): `363 passed in
+  337.62s (0:05:37)`, first run.
+- The drift checks (`.logs/m4-drift.log`), scripted from the workflow's
+  steps: domain and server references, conversations schema, metrics
+  views, events, OpenAPI, the CLI reference and its recipes, all
+  current.
+- `scripts/check_doc_links.py .`: `checked 337 files, 0 failures`;
+  `scripts/check_run_use_pages.py .`: `checked 37 Run and Use pages, 0
+  findings`; `scripts/fold_changelog.py check .`: `checked 1 fragments,
+  0 failures`.
+- `tests/census`: run last, after this section was committed, and
+  reported in the hand-back.
+
+Not verified: **the board string off a real ESP32-S3-Touch-LCD-1.54**
+(no board on this machine; derived from source above); vinga answering
+a device question by voice on a board, or with a real model (only the
+mock model and the recorded prompt); the image and the smoke lane; the
+browser lane, since nothing it drives changed beyond the browser
+guide's lead, which no browser-lane case reads.
