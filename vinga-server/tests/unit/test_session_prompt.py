@@ -26,6 +26,7 @@ from tests.support.providers import CountingServers, RecordingLlm, ScriptedLlm
 from tests.support.sessions import call, hand_over_to, run_reply, session_with, talking_thread
 from tests.support.stores import memory as lane_memory
 from tests.support.stores import memory_that_cannot_read
+from vinga_server.capture import DeviceFacts
 from vinga_server.config import Config
 from vinga_server.events.catalog import MEMORY_FACTS_NOTE
 from vinga_server.memory.store import (
@@ -840,7 +841,8 @@ def test_the_fact_list_s_bound_is_stated_as_the_store_sets_it() -> None:
 # guidance, a fact of its own, a note about its board, and its board's
 # record. Captured at the commit before M3 touched the device block, and
 # held here because M3 and M4 add text to that block for the built-in
-# alone: an operator agent's prompt must not move by a byte.
+# alone: an operator agent's prompt must not move by a byte, whether or
+# not its board checked in with a type that names a guide (M4).
 OPERATOR_PROMPT = (
     "POET\n\nThe bins go out on Tuesday.\n\nGuidance for using the tools whose "
     "names begin with home__:\nAsk before unlocking the door.\n\nWhat follows is "
@@ -853,7 +855,13 @@ OPERATOR_PROMPT = (
 )
 
 
-async def test_an_operator_agent_s_prompt_is_what_it_was_before_the_built_in() -> None:
+@pytest.mark.parametrize("board", [None, "esp32-s3-touch-lcd-1.54"])
+async def test_an_operator_agent_s_prompt_is_what_it_was_before_the_built_in(
+    board: str | None,
+) -> None:
+    facts = DeviceFacts()
+    if board is not None:
+        facts.record(POET_MAC.lower(), "2.4.0", board)
     store = lane_memory()
     await store.add(MemoryScope.AGENT, "poet", "the user is vegetarian", agent="poet")
     await store.add(
@@ -872,7 +880,11 @@ async def test_an_operator_agent_s_prompt_is_what_it_was_before_the_built_in() -
         },
     )
     session = session_with(
-        CountingServers((Guidance("home", GUIDANCE),)), {"poet": llm}, store, config=config
+        CountingServers((Guidance("home", GUIDANCE),)),
+        {"poet": llm},
+        store,
+        config=config,
+        device_facts=facts,
     )
 
     await run_reply(session, "hello")
