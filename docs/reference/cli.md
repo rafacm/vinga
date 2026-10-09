@@ -758,8 +758,7 @@ Which board reaches which agent, which is the one thing a preset cannot know.
 A binding applies at that device's next check-in rather than at an apply.
 
 ```bash
-vinga device bind aa:bb:cc:dd:ee:ff assistant
-vinga default-agent set assistant
+vinga device bind aa:bb:cc:dd:ee:ff vinga
 ```
 
 ### Stored credentials

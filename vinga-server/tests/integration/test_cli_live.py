@@ -83,6 +83,7 @@ from tests.support.config_cli import document, registered
 from tests.support.deployment import (
     BOARD,
     CONFIG_ENV,
+    DATABASE_NAME_ENV,
     Live,
     check_in,
     serving,
@@ -91,13 +92,16 @@ from tests.support.leaks import chain
 from tests.support.stores import dangling_default_agent
 from vinga_server.build_info import revision
 from vinga_server.config import ConfigError, cli, docgen, entities, server_reference
+from vinga_server.config.boot import load_boot_config
 from vinga_server.config.cli import deployment, devices, grammar, input, local, output, reach
 from vinga_server.config.cli.grammar import installed_version
 from vinga_server.config.loader import CONFIG_FROM_FLAG, CONFIG_NOT_FOUND
 from vinga_server.config.models import (
     API_MOUNT_PATH,
+    BUILTIN_AGENT,
     DOMAIN_KEYS,
     NOT_A_MAC,
+    Config,
     DatabaseConfig,
 )
 from vinga_server.config.responses import RefusalReason
@@ -2891,9 +2895,79 @@ def test_a_preset_imports_onto_an_empty_store(
     assert run("show") == 0
     shown = document(capsys.readouterr().out)
     written_document = yaml.safe_load(preset.read_text(encoding="utf-8"))
-    assert shown["agents"].keys() >= written_document["agents"].keys()
     for stage, entries in written_document["providers"].items():
         assert shown["providers"][stage].keys() >= entries.keys()
+
+
+# The board the preset case claims, its own for the reason every board
+# in this file is: what that case reads back is the binding a claim
+# wrote, and a board another case is about would make the reading
+# ambiguous.
+PRESET_MAC = "02:00:00:00:00:34"
+
+
+def _booted_from(database: DatabaseConfig, monkeypatch: pytest.MonkeyPatch) -> Config:
+    """The configuration a server starting on this database would serve,
+    composed by `load_boot_config()` exactly as `main()` composes it: the
+    file half from the environment, the domain half read out of the
+    store, validated whole and its stored envelopes opened. What it does
+    not do is build the engines, which is the lifespan's work and the
+    reason the preset cases never run the apply either."""
+    with monkeypatch.context() as patch:
+        patch.delenv(CONFIG_ENV, raising=False)
+        patch.setenv(DATABASE_NAME_ENV, database.name)
+        return load_boot_config().config
+
+
+@pytest.mark.parametrize("preset", PRESETS, ids=[path.stem for path in PRESETS])
+def test_a_preset_s_first_agent_is_vinga(
+    live: Live,
+    isolated: Live,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    preset: Path,
+) -> None:
+    """A preset is the first thing a new deployment imports, and what it
+    leaves is a deployment whose only agent is vinga, the built-in one
+    (#612, Q9): the preset names providers and the defaults every agent
+    inherits, and no agent and no default agent of its own.
+
+    Three readings, each of a different surface. The boot serves exactly
+    vinga, which says the preset provides every stage the built-in agent
+    needs and stores no agent beside it. No default agent is stored, so
+    what a claim binds below is vinga because nothing was written, not
+    because the preset wrote it. And a board's first contact, a check-in
+    that is offered a code and a claim that names no agent, binds the
+    board to vinga, which a second boot reads back as the agent it
+    reaches.
+
+    Run red first against the presets as they stood, each still carrying
+    an `assistant` agent and the boot serving it beside vinga.
+    """
+    monkeypatch.chdir(SERVER)
+    monkeypatch.setenv(reach.API_URL_ENV, isolated.api_url)
+
+    assert run("import", "-f", str(preset.relative_to(SERVER))) == 0
+    capsys.readouterr()
+
+    served = _booted_from(isolated.database, monkeypatch)
+    assert list(served.agents) == [BUILTIN_AGENT]
+    assert served.is_builtin(BUILTIN_AGENT)
+
+    engine = open_database(isolated.database)
+    try:
+        assert ConfigStore(engine).load().domain.default_agent is None
+    finally:
+        engine.dispose()
+
+    waiting = check_in(isolated, PRESET_MAC)
+    assert isinstance(waiting, board.Activating)
+    assert run("device", "pending", "claim", waiting.code) == 0
+    assert capsys.readouterr().out == f"wrote device {PRESET_MAC} bound to {BUILTIN_AGENT}\n"
+
+    assert _booted_from(isolated.database, monkeypatch).agents_for_device(PRESET_MAC) == [
+        BUILTIN_AGENT
+    ]
 
 
 # The one published line this lane does not run, for the reason the
