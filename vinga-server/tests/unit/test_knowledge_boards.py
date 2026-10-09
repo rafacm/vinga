@@ -129,13 +129,19 @@ def test_a_type_with_no_board_guide_gets_the_vague_text(board: str | None) -> No
 
 
 def test_the_vague_text_says_what_is_missing_and_how_the_server_learns_it() -> None:
-    """Plan D3: the server was not told the board, the common page
-    answers instead, and a restart lets it learn."""
+    """Plan D3, with its "a lookup away" deferred to M5: the server was
+    not told the board, so vinga declines rather than guessing and
+    points to the guide for the board, which it names and cannot read,
+    and a restart lets the server learn. Until a lookup exists the text
+    must not send the model to a page it does not have."""
     text = knowledge.VAGUE_BOARD_FACTS
 
     assert "not been told which board" in text
-    assert "docs/devices/README.md" in text
+    assert "rather than guessing" in text
+    assert "guide for their board" in text
+    assert "docs/devices/" in text
     assert "Restarting the device" in text
+    assert "Answer questions about the device from" not in text
 
 
 # The reported string never reaches the output
