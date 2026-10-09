@@ -1343,3 +1343,31 @@ a device question by voice on a board, or with a real model (only the
 mock model and the recorded prompt); the image and the smoke lane; the
 browser lane, since nothing it drives changed beyond the browser
 guide's lead, which no browser-lane case reads.
+
+### PR review round
+
+Reviewed 2026-10-09 by openai/gpt-6.1-sol, thinking high via codex CLI 0.162.0, read-only sandbox, runtime 3m34s, at commit d81f91df ([the round](https://github.com/rafacm/vinga/pull/635)). The fixes are by anthropic/claude-opus-5-5, thinking medium, M4's own implementer.
+
+1. **P2: the unknown-board documentation promised a page vinga cannot
+   read.** The device page and the fragment said vinga answers device
+   questions from the common device page, but this branch sends only
+   the vague text, which names that page without carrying it, and no
+   lookup is offered until M5. *Resolution:* the device page, concepts
+   and the fragment say vinga declines rather than guessing and points
+   to the guide for the board; the copy regenerated (`1d83505d`).
+2. **P2: the browser does not check in when the page loads.** The page
+   checks in inside `start()` (`browser/static/page.js:120`), run when
+   Start or Start again is clicked (`:211`), so "reload the page" did
+   not teach the server. *Resolution:* verified against `page.js`; the
+   device page, concepts and the fragment say the browser checks in
+   when Start or Start again is pressed, and the recovery is to press
+   it; the browser guide carried no timing; the copy regenerated
+   (`b039e4c0`).
+3. **P2: M4 ticked while the real-board read is undone.**
+   *Resolution:* as the orchestrator resolved, M4 stays ticked and its
+   checklist line now states that the string was derived from the
+   firmware source (`config.json:3`) and that the read off a real
+   ESP32-S3-Touch-LCD-1.54 is still owed (`c1f05c52`).
+
+Verification after the round: the link, Run and Use page and fragment
+checks, and `tests/census` last, in the hand-back.
