@@ -733,6 +733,13 @@ model than the two 8B ones to be measured, which is how Gemma 4 entered
 the gate; the fallback is new and is his to accept. M1 to M4 and M6 do
 not depend on it.
 
+**Confirmed by Rafael on 2026-10-09, as a whole:** Gemma 4 e4b as the
+default local model, shape A, M5's own gate as stated above, and the
+prompt-only fallback on the local stack if that gate is missed
+([#612 comment](https://github.com/rafacm/vinga/issues/612#issuecomment-6085813230)).
+The Ministral 3 measurement he had asked for on 2026-10-07 was dropped
+with the decision rather than run. M5 and M7 are unblocked.
+
 ## Smaller decisions
 
 **D1. The persona.** `knowledge/persona.md`, hand-written, short: vinga
