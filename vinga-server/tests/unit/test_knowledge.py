@@ -218,18 +218,19 @@ def test_the_persona_answers_the_device_from_the_facts_it_is_given() -> None:
     """Since M4 the prompt carries the facts of the board's guide, or a
     fixed text saying the board is not known, so the persona sends a
     question about the buttons and controls to those facts. Since M5
-    anything else about the device or about vinga is looked up with the
-    lookup tool before it is answered, and only what neither covers is
-    declined: a first run of the gate with the facts called the only
-    source ("from those facts alone") had the model decline three of
-    the first six questions that needed the lookup without making it.
-    The gate measured small models inventing what a prompt does not
-    hold, so it still says what to do when nothing covers a question."""
+    anything else about the device or about vinga is searched with the
+    lookup tool before it is answered, and only what the search does not
+    cover is declined. Two wordings were measured against Gemma 4 e4b
+    before this one: "from those facts alone" and a decline that pointed
+    the person to the device guide both had the model decline every
+    lookup question probed without searching (`.logs/m5-probe-*`), so
+    the persona tells it to search before it ever says it does not know,
+    and never to send the person to a guide instead."""
     opening = " ".join(knowledge.persona().split("## The model in one paragraph")[0].split())
 
     assert "you do not know this particular board yet" not in opening
     assert "from those facts alone" not in opening
-    assert "buttons and controls from those facts" in opening
+    assert "buttons and controls: the facts of the board" in opening
     assert opening.count(names.SEARCH_DOCS) == 1
-    assert "neither what you were told nor the documentation covers" in opening
-    assert "device guide" in opening
+    assert "Search before you ever say you do not know" in opening
+    assert "never send the person to a guide instead of searching" in opening
