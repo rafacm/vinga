@@ -1247,6 +1247,13 @@ ship.
    until then would hold an untrusted string in the runtime's state,
    which the sentinel test forbids. The cost is one cached dictionary
    lookup per session; the pages are read once per process.
+3. **D3's "a lookup away" is deferred to M5.** D3 has the vague text
+   send the answer to the common page, a lookup away; until M5 there is
+   no lookup, so after the PR review round the text has the model
+   decline what it does not know and point to the guide for the board,
+   naming where the guides are without claiming to read them
+   (`16e83a46`). M5 is where the common page becomes reachable and the
+   text can say so.
 
 No other deviation.
 
@@ -1354,7 +1361,10 @@ Reviewed 2026-10-09 by openai/gpt-6.1-sol, thinking high via codex CLI 0.162.0, 
    the vague text, which names that page without carrying it, and no
    lookup is offered until M5. *Resolution:* the device page, concepts
    and the fragment say vinga declines rather than guessing and points
-   to the guide for the board; the copy regenerated (`1d83505d`).
+   to the guide for the board; the copy regenerated (`1d83505d`). The
+   code half of the finding is `16e83a46`: the vague text itself told
+   the model to answer from that page, and now has it decline and
+   point to the guide.
 2. **P2: the browser does not check in when the page loads.** The page
    checks in inside `start()` (`browser/static/page.js:120`), run when
    Start or Start again is clicked (`:211`), so "reload the page" did
