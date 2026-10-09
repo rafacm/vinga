@@ -1154,7 +1154,7 @@ through their generators.
   replay; the baseline item in the promises page; the gate's numbers
   in `docs/run/llm.md`. Design footprint: deepens `knowledge/` and
   `tools/builtin.py`.
-- [x] **[M6: vinga reachable from every bound device](2026-10-06-vinga-built-in-agent-implementation.md#m6-vinga-reachable-from-every-bound-device)** (PR TBD).
+- [x] **[M6: vinga reachable from every bound device](2026-10-06-vinga-built-in-agent-implementation.md#m6-vinga-reachable-from-every-bound-device)** ([PR #636](https://github.com/rafacm/vinga/pull/636)).
   `Config.reachable_from`, `BoundNames.against(config)` and its three
   callers, the displaced falsification, the local tool-calling rerun,
   the fragment with its `Upgrade:` line. A behavior change for every
