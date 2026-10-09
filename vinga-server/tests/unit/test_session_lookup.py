@@ -3,9 +3,9 @@
 The built-in agent is offered `search_docs`, and no other agent is: one
 that asks for it anyway is answered as a name nobody publishes, however
 it asks. The lookup weighs up the guide of the board the session speaks
-through. The round after a lookup gets its own first-token allowance
-and the agent's filler as a holding phrase, since that round is the
-slow one on a small local model. The query is conversation content, so
+through. The round after a lookup is watched like any other, and gets
+the agent's filler as a holding phrase, since that round is the slow
+one on a small local model. The query is conversation content, so
 the last section plants a credential-shaped one and hunts it.
 """
 
@@ -170,7 +170,6 @@ class PacedLlm(LlmProvider):
 
 
 WATCHDOG_S = 0.05
-ALLOWANCE_S = 0.5
 SLOW_S = 0.2
 
 
@@ -180,91 +179,43 @@ def paced(first: ToolCall, after_s: float) -> PacedLlm:
     return PacedLlm([(0.0, [first]), (after_s, ["Found it."])])
 
 
-def timed(allowance_s: float = ALLOWANCE_S) -> Config:
-    return world(
-        server={
-            "llm_first_token_timeout_s": WATCHDOG_S,
-            "llm_lookup_first_token_timeout_s": allowance_s,
-        }
-    )
+def watched(**builtin_agent: Any) -> Config:
+    return world(server={"llm_first_token_timeout_s": WATCHDOG_S}, **builtin_agent)
 
 
-async def test_the_round_after_a_lookup_waits_out_its_allowance(
+async def test_the_round_after_a_lookup_is_watched_like_any_other(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    llm = paced(call(names.SEARCH_DOCS, query="wake word"), SLOW_S)
-    session = session_for(timed(), KITCHEN, {BUILTIN_AGENT: cast(Any, llm)})
+    """No allowance of its own: a round after a lookup that passes the
+    watchdog is retried once, and the retry answers. The LLM clients'
+    30 s read timeout would cap any longer bound against a runner that
+    sends nothing before its first token, which is what Ollama does."""
+    llm = PacedLlm(
+        [
+            (0.0, [call(names.SEARCH_DOCS, query="wake word")]),
+            (SLOW_S, ["Found it."]),
+            (0.0, ["Found it."]),
+        ]
+    )
+    session = session_for(watched(), KITCHEN, {BUILTIN_AGENT: cast(Any, llm)})
     with caplog.at_level("INFO"):
         spoken = await run_reply(session, "can I change the wake word?")
 
     assert spoken == ["Found it."]
-    assert llm.calls == 2
-    assert events(caplog, "llm_retry") == []
-
-
-async def test_the_round_after_any_other_tool_keeps_the_session_s_bound(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """The same wait after a call that is not the lookup is a stall,
-    and the retry answers."""
-    llm = PacedLlm(
-        [(0.0, [call(names.RECALL, query="tea")]), (SLOW_S, ["Found it."]), (0.0, ["Found it."])]
-    )
-    session = session_for(timed(), KITCHEN, {BUILTIN_AGENT: cast(Any, llm)})
-    with caplog.at_level("INFO"):
-        await run_reply(session, "what do I drink?")
-
     assert only(caplog, "llm_retry").round == 2
 
 
-async def test_a_round_after_a_lookup_that_passes_its_allowance_is_retried_then_given_up(
+async def test_a_round_after_a_lookup_that_stalls_twice_is_given_up(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """The allowance is a bound like the session's: past it, the round
-    is retried once and then given up as `FirstTokenTimeout`."""
-    llm = paced(call(names.SEARCH_DOCS, query="wake word"), 3 * ALLOWANCE_S)
-    session = session_for(timed(), KITCHEN, {BUILTIN_AGENT: cast(Any, llm)})
+    llm = paced(call(names.SEARCH_DOCS, query="wake word"), SLOW_S)
+    session = session_for(watched(), KITCHEN, {BUILTIN_AGENT: cast(Any, llm)})
     with caplog.at_level("INFO"), pytest.raises(FirstTokenTimeout):
         await run_reply(session, "can I change the wake word?")
 
     assert only(caplog, "llm_retry").round == 2
     assert only(caplog, "provider_failed").error == "FirstTokenTimeout"
     assert llm.calls == 3
-
-
-async def test_an_allowance_shorter_than_the_session_s_bound_bounds_nothing_tighter(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    llm = paced(call(names.SEARCH_DOCS, query="wake word"), WATCHDOG_S / 2)
-    session = session_for(
-        timed(allowance_s=WATCHDOG_S / 10), KITCHEN, {BUILTIN_AGENT: cast(Any, llm)}
-    )
-    with caplog.at_level("INFO"):
-        spoken = await run_reply(session, "can I change the wake word?")
-
-    assert spoken == ["Found it."]
-    assert events(caplog, "llm_retry") == []
-
-
-async def test_the_allowance_is_the_round_after_the_lookup_s_alone(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """A lookup, a round that asks for another tool at once, and a slow
-    round after that: the third round is bounded as the session bounds
-    it, since the lookup was two rounds ago."""
-    llm = PacedLlm(
-        [
-            (0.0, [call(names.SEARCH_DOCS, query="wake word")]),
-            (0.0, [call(names.RECALL, query="tea")]),
-            (SLOW_S, ["Found it."]),
-            (0.0, ["Found it."]),
-        ]
-    )
-    session = session_for(timed(), KITCHEN, {BUILTIN_AGENT: cast(Any, llm)})
-    with caplog.at_level("INFO"):
-        await run_reply(session, "hello")
-
-    assert only(caplog, "llm_retry").round == 3
 
 
 # The holding phrase
@@ -279,8 +230,9 @@ FILLER = {
 }
 
 
-def masked(**filler: Any) -> Config:
+def masked(server: dict[str, object] | None = None, **filler: Any) -> Config:
     return base_config(
+        **({"server": server} if server is not None else {}),
         providers={
             "llm": {"mock": {"type": "mock", "reply": "Said."}},
             "asr": {"mock": {"type": "mock", "text": "hello"}},
@@ -332,6 +284,27 @@ async def test_a_turn_whose_timer_already_played_still_holds_the_lookup_round(
         await drive_reply(session, UTTERANCE)
 
     assert [record.phrase_index for record in events(caplog, "filler_played")] == [0, 1]
+
+
+async def test_a_retried_round_after_a_lookup_hears_one_holding_phrase(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The hold is asked for at the lookup, once, and not again when the
+    watchdog retries the round after it: the retry is the same round."""
+    llm = PacedLlm(
+        [
+            (0.0, [call(names.SEARCH_DOCS, query="wake word")]),
+            (0.3, ["Found it."]),
+            (0.0, ["Found it."]),
+        ]
+    )
+    config = masked(server={"llm_first_token_timeout_s": 0.1})
+    session = await masked_session(config, KITCHEN, {BUILTIN_AGENT: llm})
+    with caplog.at_level("INFO"):
+        await drive_reply(session, UTTERANCE)
+
+    assert only(caplog, "llm_retry").round == 2
+    assert len(events(caplog, "filler_played")) == 1
 
 
 # The query is conversation content

@@ -1930,11 +1930,6 @@ class PipelineRuntime:
         self._output.restart_pacing()
 
         switch_to: _Transition | None = None
-        # The round after the built-in agent's lookup gets its own
-        # first-token allowance (#612): it sends the passages found, and
-        # a small model reads them before it says a word. None is every
-        # other round, bounded as the session bounds them.
-        allowance: float | None = None
         for round_index in range(MAX_TOOL_ROUNDS):
             choice: ToolChoice = "none" if round_index == MAX_TOOL_ROUNDS - 1 else "auto"
             splitter = SentenceSplitter()
@@ -1991,7 +1986,6 @@ class PipelineRuntime:
                     round_=self._pass.round,
                     prompt=sent,
                     history=lost,
-                    first_token_timeout_s=allowance,
                 ):
                     if self._llm_input is not None:
                         self._llm_input.observe(invocation, event)
@@ -2059,7 +2053,6 @@ class PipelineRuntime:
             if not calls:
                 break
             looked_up = any(call.name == names.SEARCH_DOCS for call in calls)
-            allowance = self._server.llm_lookup_first_token_timeout_s if looked_up else None
             if looked_up:
                 # The holding phrase: the next round is the slow one,
                 # and what the person hears through it is this agent's
