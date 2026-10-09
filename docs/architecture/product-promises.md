@@ -74,7 +74,22 @@ did from the beginning, and "complete" means all of:
 - an interruption during playback that is heard and stops the reply,
   promptly enough to converse;
 - agent memory;
-- tool use.
+- tool use;
+- the built-in agent, vinga: it answers questions about the device it
+  speaks through from that board's guide and about vinga from the
+  concept summary, and it is offered its lookup over the pages packaged
+  with the build. Locally the lookup is offered and is used on a
+  minority of the questions that need it: measured on 2026-10-09 with
+  Gemma 4 e4b, the local preset's model, it searched on 5 of the 15
+  questions that needed it (2 of 15 asked in other words) and answered
+  50% of 32 correctly, against 13 of 15 and 78% for `claude-sonnet-5`,
+  and on a Raspberry Pi 5 a turn that searches waits longer than the
+  server waits for a reply
+  ([the measurements](../run/llm.md#the-built-in-agents-lookup)). The
+  promise is the first half working locally, and the lookup being
+  there; how well it is used is the model's. Joined by
+  [the built-in agent's plan](../plans/2026-10-06-vinga-built-in-agent.md),
+  under the record below.
 
 A cloud provider is an upgrade, never a requirement, for everything
 on that list. The list is closed and changes only by recorded
