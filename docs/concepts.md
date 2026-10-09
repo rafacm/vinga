@@ -203,7 +203,7 @@ on purpose:
   reports about itself. The board model is kept in the server's memory
   alone, so after the server restarts it is known again only when the
   device next checks in, which a board does each time it starts and
-  the browser page each time it loads.
+  the browser page each time Start or Start again is pressed.
 - **Hardware facts from the board guides**: what the model implies
   but the wire never says: microphone count, echo cancellation,
   display, button layout. They are written down per board model in
