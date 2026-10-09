@@ -1142,7 +1142,11 @@ through their generators.
   reads its board once at open; the pipeline hands
   `knowledge.board_facts` to `with_scopes` for the built-in; the device
   block carries it; the vague text; the board string read off a real
-  board and recorded. Design footprint: deepens `runtime/prompt.py`,
+  board and recorded. *Owed:* the board string was derived from the
+  firmware source, `esp32-s3-touch-lcd-1.54` (upstream
+  `main/boards/waveshare/esp32-s3-touch-lcd-1.54/config.json:3`), and
+  not yet read off a real ESP32-S3-Touch-LCD-1.54's `ota_check.board`;
+  that read is still owed. Design footprint: deepens `runtime/prompt.py`,
   `runtime/pipeline.py`, `device/session.py`.
 - [ ] **M5: the lookup tool, as the gate chose** (PR TBD). The winning
   shape in `knowledge/`, its builtin name(s) and definition, offered to
