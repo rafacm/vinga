@@ -14,9 +14,10 @@ the prompts in this skill's directory.
 ## Which model, by stakes
 
 Two tiers, decided per round (maintainer decision, 2026-08-19; the
-default moved from `gpt-5.6-sol` to `gpt-6-sol` on 2026-10-02):
+default moved from `gpt-5.6-sol` to `gpt-6-sol` on 2026-10-02, and
+to `gpt-6.1-sol` on 2026-10-09):
 
-- `gpt-6-sol`, the default: every plan review, and every PR whose
+- `gpt-6.1-sol`, the default: every plan review, and every PR whose
   diff changes behavior. Sol's record here is P1s that need
   whole-repo rule synthesis or concurrency reasoning; do not trade
   those away for speed.
@@ -24,7 +25,7 @@ default moved from `gpt-5.6-sol` to `gpt-6-sol` on 2026-10-02):
   documentation-only diff, a mechanical follow-up (renames, moves,
   pin updates with no logic change), or a re-review of fixes whose
   original round was Sol's. When in doubt, it is not low-stakes.
-  The GPT-6 family has no terra model, so this tier stays on 5.6
+  Neither GPT-6 nor GPT-6.1 has a terra model, so this tier stays on 5.6
   and is selected explicitly with `REVIEW_MODEL=gpt-5.6-terra`.
 
 `run-pr-review.sh` reads the backend from `REVIEW_BACKEND` (default
@@ -75,7 +76,7 @@ the recorded round, and return to codex when the quota resets.
 - Run it in the background from the worktree under review. Sol takes
   10 to 25 minutes and looks stuck; stderr shows file-reading
   activity, and only the final answer reaches stdout:
-  `codex exec -m gpt-6-sol -c model_reasoning_effort=high --sandbox read-only - < prompt.md > out.txt 2> err.txt`
+  `codex exec -m gpt-6.1-sol -c model_reasoning_effort=high --sandbox read-only - < prompt.md > out.txt 2> err.txt`
 - The claude backend is silent on both streams until it exits, so an
   empty stderr does not mean a dead run there. Watching progress
   needs `--output-format stream-json --verbose`, at the cost of the
