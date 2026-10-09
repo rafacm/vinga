@@ -234,6 +234,13 @@ _HISTORICAL_PATHS = (
     # would. Classified `respell` until #371 asked what it was, which
     # is the misclassification a verb rename exposes.
     "vinga-server/tests/integration/data/pre-cutover-export.yaml",
+    # And the #612 lookup gate's question sets: what a person asks the
+    # built-in agent, frozen and hashed before any model answered them,
+    # so a question that names a command in passing ("What is the vinga
+    # info command for?") is someone's words, not an invocation, and
+    # respelling it would break the hash the gate is held to.
+    "vinga-server/tests/local/lookup_gate/frozen.json",
+    "vinga-server/tests/local/lookup_gate/rephrased.json",
     # And the CLI guide's source audit, the dated 2026-08-24 walk of
     # four published guides that the guide's practices were
     # dispositioned from. Its rows quote the merged grammar as the
