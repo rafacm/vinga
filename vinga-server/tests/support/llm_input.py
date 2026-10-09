@@ -100,14 +100,17 @@ def traced(
     llm: Any,
     llm_input: Any,
     config: Config | None = None,
+    mac: str = POET_MAC,
+    agent: str = "poet",
 ) -> tuple[DeviceSession, SessionEvents]:
     """A real session for the one agent `llm` answers, its events tapped
     by a real exporter whose trace is open on a turn, so a reply driven
-    through it hands its content over the production way."""
+    through it hands its content over the production way. The poet on
+    its own board unless a test names another board and its agent."""
     session = session_for(
         base_config() if config is None else config,
-        POET_MAC,
-        {"poet": llm},
+        mac,
+        {agent: llm},
         llm_input=llm_input,
     )
     events = events_of(session)
