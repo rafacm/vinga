@@ -525,7 +525,7 @@ class DeviceSession:
         # would be two questions about two worlds, and the answer to the
         # first could name an agent the second has never heard of.
         generation = self._generations.current()
-        resolution = bound.against(generation.config.agents)
+        resolution = bound.against(generation.config)
         agents = list(resolution.agents)
         if not agents:
             if resolution.unloaded:
