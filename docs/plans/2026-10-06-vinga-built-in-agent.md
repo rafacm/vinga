@@ -1160,7 +1160,7 @@ through their generators.
   the fragment with its `Upgrade:` line. A behavior change for every
   bound device, alone in review. Design footprint: deepens
   `config/models.py` and `device/bindings.py`.
-- [x] **[M7: presets and first contact](2026-10-06-vinga-built-in-agent-implementation.md#m7-presets-and-first-contact)** (PR TBD). The presets carry no
+- [x] **[M7: presets and first contact](2026-10-06-vinga-built-in-agent-implementation.md#m7-presets-and-first-contact)** ([PR #637](https://github.com/rafacm/vinga/pull/637)). The presets carry no
   agent and no default; `config.example.yaml`, `examples/README.md`
   and Getting Started follow; the local model the gate chose; the
   preset boot case. Existing deployments are untouched: importing a
