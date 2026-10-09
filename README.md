@@ -37,6 +37,7 @@ We took what we liked: the [78/xiaozhi-esp32](https://github.com/78/xiaozhi-esp3
 One premise makes all of this possible, a [**thin device and a smart server**](docs/architecture/guidelines.md#thin-device-smart-server): the board's only tie to a backend is a single config URL, and everything else (endpoints, credentials, even firmware updates) is delivered by *your* server at runtime. Changing what vinga does means changing server configuration, never reflashing a board.
 
 - 🎭 **A cast of agents, not one assistant.** Define as many as you like, each with its own personality, providers, and tools. Bind boards to them, switch mid-conversation just by asking, and let an agent follow you from board to board. One device can be a whole cast.
+- 🧭 **An agent that comes with the server.** vinga, built in, is the first agent every deployment has, and every bound board reaches it beside its own agents: ask it what vinga is, what the board in front of you can do, or which command does the rest, and ask for your own agents to be handed over to them.
 - 🎛️ **Mix and match every stage.** Who listens, who transcribes, who thinks, who speaks: each is a provider you pick, a local [Ollama](https://ollama.com), [Anthropic](https://www.anthropic.com), any [OpenAI-compatible endpoint](https://developers.openai.com/api/reference/chat-completions/overview), a cloud voice or a local one, and swap without touching the rest. Choose a better voice, or an ear that copes with a noisy room, the day you want one.
 - 🏠 **Fully local when you want it.** [Silero](https://github.com/snakers4/silero-vad), [faster-whisper](https://github.com/SYSTRAN/faster-whisper), [Ollama](https://ollama.com) and [Piper](https://github.com/OHF-Voice/piper1-gpl) make a conversation that [runs entirely on your own hardware](docs/architecture/product-promises.md#a-fully-local-deployment-is-first-class): no API key anywhere, nothing billed per word, and heard nowhere else.
 - 🧰 **Tools via [MCP](https://modelcontextprotocol.io), on both sides.** Give your agents tools from any MCP server, and the board offers its own controls (volume, brightness, screen) as tools over the same channel, so you can ask it to turn itself down.
@@ -62,10 +63,10 @@ If you would rather a coding agent such as Claude Code or Codex took these steps
 
 **Step 0. Setup Ollama** 
 
-Any model [Ollama](https://ollama.com) serves works, and any endpoint that speaks the [OpenAI chat completions API](https://developers.openai.com/api/reference/chat-completions/overview) does too. This one is a good starting point: it answers fast enough for speech, and it is reliable at the tool calls the device exposes, which is what lets you ask the board to change its own volume or brightness. What a model has to do here, how this one compares with the local preset's, and pointing vinga at another runner or a vendor are in [Choosing the model an agent thinks with](docs/run/llm.md).
+Any model [Ollama](https://ollama.com) serves works, and any endpoint that speaks the [OpenAI chat completions API](https://developers.openai.com/api/reference/chat-completions/overview) does too. This one, Gemma 4 e4b, is the local default: of the local models measured for vinga it answered most accurately and fastest, and it makes the tool calls the device exposes, which is what lets you ask the board to change its own volume or brightness. What a model has to do here, the measurements behind this choice, and pointing vinga at another runner or a vendor are in [Choosing the model an agent thinks with](docs/run/llm.md). This path was walked with `llama3.1:8b`, which Gemma 4 e4b replaced on measurements taken on a Raspberry Pi 5; it has not been walked with Gemma 4 e4b on macOS.
 
 ```bash
-ollama pull llama3.1:8b
+ollama pull gemma4:e4b
 ```
 
 A pull puts the model on disk without loading it, and the two questions have two commands: `ollama list` says what you have, `ollama ps` says what is in memory right now. Straight after a pull, `ollama ps` prints its header and no rows.
@@ -78,12 +79,15 @@ That distinction matters here, because **Ollama unloads a model after five minut
 
 ```bash
 curl -s http://localhost:11434/api/generate \
-  -d '{"model":"llama3.1:8b","keep_alive":-1}'
+  -d '{"model":"gemma4:e4b","keep_alive":-1}'
 ```
 
 It answers `{"done_reason":"load"}` once the weights are in memory. `ollama ps` then shows the model with `Forever` under `UNTIL`, and that column is the one to read: any duration there is a countdown to the silent device above. Requests that name no expiry of their own, which is what the server sends, leave the pin as it is.
 
-The pin lasts as long as the Ollama process does, so the request above is also how it comes back after Ollama restarts, and `ollama stop llama3.1:8b` is how you end it deliberately. Until you do, the model holds the memory it loaded into.
+The pin lasts as long as the Ollama process does, so the request above is also how it comes back after Ollama restarts, and `ollama stop gemma4:e4b` is how you end it deliberately. Until you do, the model holds the memory it loaded into.
+
+> [!WARNING]
+> **On a small machine with no GPU, the first turn does not fit yet.** Every turn starts with the agent's instructions and the tools it is offered, about 1,900 tokens in the conversation measured, and the model reads all of them before it says a word. On a Raspberry Pi 5 (16 GB, CPU only), Gemma 4 e4b read a prompt it had not seen at about 13 tokens per second, so a request that size took 107.6 s to its first byte, and the server gives a reply up after 30 s without one: the first turn after the model loads ends in the fallback phrase, and trying again did not get through in the measurements. Once the model held the prompt, the same request answered in 2.4 to 3.4 s. Pinning the model, above, does not change this, because it is the prompt and not the weights that is slow to read. On hardware that size, a smaller model, a machine with a GPU, or a vendor's model is what answers the first turn today; [Choosing the model an agent thinks with](docs/run/llm.md#the-local-model) has the numbers.
 
 **Step 1. Configure and start the vinga server**
 
@@ -185,9 +189,9 @@ vinga info
 
 It answers with the API it reached, which build is serving, the URL a board will be given in step 4, and the tally above, which is the whole of what there is to say about a deployment nothing has been written to: step 3 is what fills it in. Run it from the directory you created above. The CLI finds that same `.env` itself, searching upwards from wherever it is invoked. Everything else it can do is on [its own page](docs/reference/cli.md).
 
-**Step 3. Configure an agent**
+**Step 3. Configure the engines**
 
-Which engines, which agents, which devices: this is the other half of the configuration, and it goes in as one document. The stack it builds is fully local and needs no account anywhere: Silero listens for the end of a phrase, faster-whisper transcribes, [Ollama](https://ollama.com) answers and Piper speaks.
+Which engines every agent runs on: this is the other half of the configuration, and it goes in as one document. The stack it builds is fully local and needs no account anywhere: Silero listens for the end of a phrase, faster-whisper transcribes, [Ollama](https://ollama.com) answers and Piper speaks. The document names no agent, because the server has one built in: vinga, the first agent you will talk to, runs on these engines.
 
 ```bash
 vinga import -f - <<'EOF'
@@ -203,7 +207,10 @@ providers:
       # (https://github.com/ollama/ollama/blob/main/docs/faq.md).
       # Untested here, which was walked on macOS.
       base_url: http://host.docker.internal:11434/v1
-      model: llama3.1:8b
+      model: gemma4:e4b
+      # Answer without streaming the model's thinking first, which
+      # Gemma 4 otherwise does before every reply.
+      reasoning_effort: none
       # openai_compatible cannot know its own reach, since base_url
       # decides it. `host` asserts this endpoint is on this machine.
       reach: host
@@ -224,26 +231,13 @@ providers:
     ears:
       type: silero
 
-# What every agent uses unless it names something else.
+# What every agent uses unless it names something else, vinga, the
+# agent built into the server, included.
 agent_defaults:
   llm: local
   asr: whisper
   tts: voice
   vad: ears
-
-agents:
-  assistant:
-    # State the reply language explicitly: models otherwise pick one by
-    # their training bias.
-    prompt: >
-      You are a helpful voice assistant. Keep replies short, plain, and
-      speakable: one or two sentences, no lists, no markdown. Always
-      reply in the language the user spoke.
-
-# Which agent a board starts with once you claim it by the code it
-# shows. Or bind it by the MAC on its sticker instead:
-#   vinga device bind aa:bb:cc:dd:ee:ff assistant
-default_agent: assistant
 EOF
 ```
 
@@ -311,7 +305,7 @@ The board reboots into your network and checks in by itself. When it does not tu
 
 **Step 5. Talk**
 
-A board nobody has bound shows and speaks a six-digit code, and one command binds it. Step 3 set a `default_agent`, so the claim needs no agent: it binds the board to `assistant`, and says so. The device polls while it waits, so it connects seconds later.
+A board nobody has bound shows and speaks a six-digit code, and one command binds it. The claim needs no agent: with no default agent set, it binds the board to vinga, the agent built into the server, and says so. The device polls while it waits, so it connects seconds later.
 
 ```bash
 vinga device pending list            # which board is showing what
@@ -319,6 +313,8 @@ vinga device pending claim 418293    # bind the one showing 418293
 ```
 
 Then short-press PWR, the button on its own edge, and speak. Your board's guide in [`docs/devices/`](docs/devices/README.md) says which wake word it ships with, if any, and saying that opens a session with no button at all.
+
+vinga answers. Ask it what vinga is, what this board's buttons do, or how to make an agent of your own, and it answers from what the server ships, naming the command where something takes one; it never runs one itself. An agent of your own is a name and a prompt ([`agent.yaml`](vinga-server/examples/agent.yaml) is one command), and a board you bind to it still reaches vinga beside it, so asking for vinga hands the conversation back.
 
 When a turn does not go the way you expected, `vinga events` is the first place to look: it is the server's own account of what it decided, turn by turn, and it names the stage that failed rather than leaving you to read a container log. A turn that worked reads `heard`, then the model's rounds, then `speaking_started` and `replied`; `speaking_started` is the one worth finding, because it says audio frames went out rather than that the server decided to speak.
 
