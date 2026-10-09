@@ -7,7 +7,7 @@ then have to invent a tie-break, the namespace is structural:
 - builtins are bare (`switch_agent`, the memory family of `remember`,
   `update_memory`, `forget`, `restore_memory` and `recall`, `set_state`,
   `clear_state`, `new_conversation`, `resume_conversation`,
-  `set_device_location`);
+  `set_device_location`, and the built-in agent's `search_docs`);
 - the device's tools keep the firmware's `self.` prefix, with the dots
   sanitized away (`self_audio_speaker_set_volume`);
 - an MCP server's tools carry their configuration entry name and a
@@ -69,6 +69,12 @@ RESUME_CONVERSATION = "resume_conversation"
 # the two are deliberately not the same word: a command line addresses
 # a device by its MAC, and this tool addresses nothing at all.
 SET_DEVICE_LOCATION = "set_device_location"
+# The built-in agent's lookup over the pages it knows (#612), offered to
+# that agent alone. `search_docs` rather than the gate's bare `search`,
+# because a builtin's name is an entry name no `mcp_servers` entry may
+# take, and `search` is a name an operator's own search server could
+# plausibly have.
+SEARCH_DOCS = "search_docs"
 BUILTIN_TOOL_NAMES = (
     SWITCH_AGENT,
     REMEMBER,
@@ -81,6 +87,7 @@ BUILTIN_TOOL_NAMES = (
     NEW_CONVERSATION,
     RESUME_CONVERSATION,
     SET_DEVICE_LOCATION,
+    SEARCH_DOCS,
 )
 
 # The family an agent's `memory` section switches on and off, which is
