@@ -595,7 +595,10 @@ the server from the build it ships in, with a persona of its own and
 the concept summary, it answers about vinga, names the commands that do
 things rather than running them, and hands over to the device's other
 agents. It is told the facts of the board it speaks through, from that
-board's guide, or that the server has not been told which board it is.
+board's guide, or that the server has not been told which board it is,
+and it looks up what those do not answer in the concepts page, this
+glossary and the device guides with a search tool only it is offered;
+a small local model often answers without looking.
 Its `builtin_agent` entry chooses its
 providers, voice and shared fragments; it has no prompt and no MCP
 tools to configure. Its memory and the threads it can resume are its

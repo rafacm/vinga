@@ -248,10 +248,21 @@ reaches. Its prompt carries its persona, the summary, and the facts of
 the board it speaks through: the opening and the controls section of
 that board's [guide](devices/README.md), chosen by the board model the
 device reported at its check-in, or, for a board with no guide or one
-the server has not heard from since it started, a note saying so, on
-which vinga declines a device question rather than guessing and points
-to the device's guide. No other agent's
-prompt carries them. An operator chooses its
+the server has not heard from since it started, a note saying so. No
+other agent's prompt carries them. For anything those do not answer,
+vinga looks things up: it alone is offered a search over this page,
+the [glossary](glossary.md) and the device guides, the pages packaged
+with the build it runs in, and is told to search before it says it does
+not know, and never to guess which board an unknown device is. How
+often it actually searches depends on the model. Measured on
+2026-10-09 with the same 32 questions, `claude-sonnet-5` searched on 13
+of the 15 that needed it and answered 78% of all of them correctly;
+Gemma 4 e4b, the local preset's model, on a Raspberry Pi 5, searched on
+5 of 15 (2 of 15 asked in other words), answered 50% correctly, and
+otherwise answered from its prompt or said it did not know. So on a
+small local model vinga answers the device's controls and the summary
+reliably, and deeper questions about vinga or the device less often,
+though it rarely invents an answer (no more than one of 32). An operator chooses its
 providers, its voice and the shared fragments its prompt carries
 (which is how its reply language is set) in its `builtin_agent` entry,
 and nothing else: it has no prompt to write and no MCP tools, by
