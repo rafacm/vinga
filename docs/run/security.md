@@ -283,7 +283,7 @@ boundary they must carry your own declaration:
 vinga-server config provider set llm local -f - <<'YAML'
 type: openai_compatible
 base_url: http://localhost:11434/v1
-model: qwen3:8b
+model: gemma4:e4b
 # Your assertion about where this endpoint is.
 reach: host
 YAML
