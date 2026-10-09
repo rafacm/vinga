@@ -33,7 +33,6 @@ generated  vinga conversation show
 generated  vinga default-agent
 generated  vinga default-agent clear
 generated  vinga default-agent set
-generated  vinga default-agent set assistant
 generated  vinga device
 generated  vinga device bind
 generated  vinga device clear-location
@@ -367,11 +366,13 @@ respell  config schema
 respell  config show
 respell  vinga agent
 respell  vinga agent export assistant
+respell  vinga agent export sam
 respell  vinga agent preview
 respell  vinga agent rename
 respell  vinga agent rename vinga old-vinga
 respell  vinga agent set
 respell  vinga agent set assistant
+respell  vinga agent set sam
 respell  vinga agent show kids
 respell  vinga agent-defaults export
 respell  vinga agent-defaults set
@@ -384,7 +385,7 @@ respell  vinga conversation
 respell  vinga conversation delete
 respell  vinga conversation list
 respell  vinga conversation show
-respell  vinga default-agent set assistant
+respell  vinga default-agent set
 respell  vinga device
 respell  vinga device bind
 respell  vinga device invite
@@ -475,7 +476,6 @@ respell  vinga-server config check
 respell  vinga-server config cli-reference
 respell  vinga-server config conversation delete
 respell  vinga-server config conversation list
-respell  vinga-server config default-agent set assistant
 respell  vinga-server config device bind
 respell  vinga-server config device clear-location
 respell  vinga-server config device delete
