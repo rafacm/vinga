@@ -553,8 +553,21 @@ class DeviceSession:
         # Where the first agent used to be activated by hand: the
         # runtime's constructor does that, and the MCP revive after it,
         # in that order, and spawns nothing.
+        #
+        # The board type goes with them, read here once and kept
+        # nowhere on this side: the runtime turns it into its guide's
+        # text at construction (#612). The same read the capture
+        # manifest makes, so a session that opened without a check-in
+        # behind it hands over None, and its built-in agent is told it
+        # does not know the board rather than told a wrong one.
         self.runtime = self._runtime_factory(
-            self, self._events, conversations, agents, generation, attachment.record
+            self,
+            self._events,
+            conversations,
+            agents,
+            generation,
+            attachment.record,
+            self._device_facts.get(mac).get("board"),
         )
         if self._sessions is not None:
             self._sessions.bound(self, generation)

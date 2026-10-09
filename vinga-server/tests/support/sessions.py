@@ -46,6 +46,7 @@ from tests.support.events import only
 from tests.support.providers import ScriptedLlm, Unreachable, built_world
 from tests.support.sockets import LoopingSocket, RecordingSocket
 from tests.support.stores import memory as lane_memory
+from vinga_server.capture import DeviceFacts
 from vinga_server.config import Config
 from vinga_server.config.models import normalize_mac
 from vinga_server.conversations.store import Half
@@ -131,6 +132,7 @@ def device_session(
     device_access: Any = None,
     llm_input: Any = None,
     transcripts: Any = None,
+    device_facts: DeviceFacts | None = None,
 ) -> session_module.DeviceSession:
     """A device session with a real bespoke runtime behind it, built the
     way `run` builds one: the agents resolved from the binding, then the
@@ -191,7 +193,14 @@ def device_session(
     a server whose world came from a configuration it was handed rather
     than from a store: the tool is still offered and answers that this
     server cannot move its devices. A suite about the tool hands in a
-    `DevicePlacements` over the lane's own database."""
+    `DevicePlacements` over the lane's own database.
+
+    `device_facts` is what the OTA endpoint recorded about the devices
+    that checked in, the object `app.py` hands both the endpoint and the
+    session. None is a device that never checked in, which hands the
+    runtime no board type; a suite about what a board's check-in does
+    to a conversation records one in it, or hands in the very object a
+    served app's check-in wrote."""
     if generations is None:
         generations = world(
             config,
@@ -211,11 +220,13 @@ def device_session(
         llm_input,
         transcripts,
     )
+    facts = device_facts if device_facts is not None else DeviceFacts()
     session = session_module.DeviceSession(
         cast(Any, websocket),
         generations,
         factory,
         recordings=recordings(transcripts=transcripts, llm_input=llm_input),
+        device_facts=facts,
     )
     # White-box, deliberately, and the only four sites in this file that
     # are. These lines are `run`'s own, transcribed: it reads the device
@@ -244,7 +255,9 @@ def device_session(
     # the conversation attaches to is resolved with the binding, in one
     # snapshot, and handed to the factory beside the agents (#449). The
     # view is asked here the way `run` asks it, so a session built by
-    # this one attaches exactly as a served one does.
+    # this one attaches exactly as a served one does. The seventh is the
+    # board type, read off the same facts object the session holds, the
+    # read `run` makes (#612).
     session.runtime = factory(
         session,
         session._events,
@@ -252,6 +265,7 @@ def device_session(
         session._agents,
         session._generation,
         view.attachment_for(session._mac).record,
+        facts.get(normalize_mac(mac)).get("board"),
     )
     return session
 
@@ -273,6 +287,7 @@ def session_for(
     device_access: Any = None,
     llm_input: Any = None,
     transcripts: Any = None,
+    device_facts: DeviceFacts | None = None,
 ) -> DeviceSession:
     """A device session with a real bespoke runtime behind it, built the
     way `run` builds one, with the named agents' LLMs replaced by
@@ -294,6 +309,7 @@ def session_for(
         device_access,
         llm_input,
         transcripts,
+        device_facts,
     )
 
 
@@ -304,6 +320,7 @@ def session_with(
     mac: str = POET_MAC,
     config: Config | None = None,
     devices: Any = None,
+    device_facts: DeviceFacts | None = None,
 ):
     return session_for(
         config if config is not None else base_config(),
@@ -312,6 +329,7 @@ def session_with(
         memory=memory,
         mcp_servers=servers,
         devices=devices,
+        device_facts=device_facts,
     )
 
 
