@@ -215,16 +215,15 @@ def test_the_persona_opens_with_who_vinga_is_and_how_it_speaks() -> None:
     assert "look" not in opening.casefold()
 
 
-def test_the_persona_claims_nothing_about_the_board_it_is_not_told() -> None:
-    """Until the board's facts are in the prompt (M4), vinga is told
-    nothing about the particular board it speaks through, and the gate
-    measured small models inventing what a prompt does not hold. So the
-    persona advertises no description of a device's buttons or screen:
-    it says vinga does not know this board yet and points to the device
-    guide or the person running the server."""
+def test_the_persona_answers_the_device_from_the_facts_it_is_given() -> None:
+    """Since M4 the prompt carries the facts of the board's guide, or a
+    fixed text saying the board is not known, so the persona sends a
+    device question to those facts alone. The gate measured small
+    models inventing what a prompt does not hold, so it still says what
+    to do when the facts do not cover a question, and it no longer says
+    vinga does not know the board."""
     opening = " ".join(knowledge.persona().split("## The model in one paragraph")[0].split())
 
-    assert "what its buttons and screen do" not in opening
-    assert "what the device in front of the person does" not in opening
-    assert "you do not know this particular board yet" in opening
+    assert "you do not know this particular board yet" not in opening
+    assert "from those facts alone" in opening
     assert "device guide" in opening
