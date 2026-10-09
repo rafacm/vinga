@@ -224,8 +224,10 @@ the audio runs on, and they arrive under their firmware names with the
 dots replaced (`self_audio_speaker_set_volume`), because both LLM APIs
 restrict tool names to `[A-Za-z0-9_-]`.
 
-**Builtins** are `switch_agent`, offered when the device is bound to
-more than one agent; the memory family (`remember`, `update_memory`,
+**Builtins** are `switch_agent`, offered when the device reaches more
+than one agent, which is every bound device while the server serves
+vinga, the built-in agent, since each reaches vinga beside the agents
+it is bound to; the memory family (`remember`, `update_memory`,
 `forget`, `restore_memory`, `recall`) and the conversation ledger's
 `set_state` and `clear_state`, offered to every agent whose `memory`
 section leaves them on, which is every agent that does not say

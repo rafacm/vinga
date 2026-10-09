@@ -308,8 +308,9 @@ speech cancels it.
 
 Switching the active agent mid-session, requested by
 name in conversation and executed by the LLM's `switch_agent` tool.
-The tool's enum of bound agents is what maps a near-miss transcript
-("Mark") onto the right agent (`marc`). Each agent of a session has
+The tool's enum of the agents the device reaches, vinga among them
+wherever it is served, is what maps a near-miss transcript ("Mark")
+onto the right agent (`marc`). Each agent of a session has
 its own conversation, and the switch is a per-conversation context
 switch: the incoming agent reads its own thread and nothing of the
 outgoing agent's, and switching back returns an agent to the thread
@@ -404,10 +405,11 @@ More: [modelcontextprotocol.io](https://modelcontextprotocol.io/).
 A vinga-owned tool in every agent's tool set, so a meta request is
 answerable in any conversation, whoever is answering. There are
 three: the handover tool, offered wherever the device reaches more
-than one agent, and the two conversation tools, which start a new
-thread and find and resume an old one. Conversation search is
-deliberately agent-scoped: an agent finds its own past threads and no
-other agent's. See
+than one agent (every bound device, while vinga is served, since each
+reaches vinga beside its own agents), and the two conversation tools,
+which start a new thread and find and resume an old one. Conversation
+search is deliberately agent-scoped: an agent finds its own past
+threads and no other agent's. See
 [the concepts page](concepts.md#meta-capabilities).
 
 ### Opus

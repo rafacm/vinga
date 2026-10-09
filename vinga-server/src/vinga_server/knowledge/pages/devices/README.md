@@ -43,7 +43,8 @@ says where it differs.
   how the built-in agent learns which board it is speaking through, and
   why a restart can make it forget until the board checks in again.
 - [Talking to the device itself](#talking-to-the-device-itself): the
-  controls a board publishes as tools, so an agent can turn it down.
+  controls a board publishes as tools, so an agent can turn it down,
+  and asking for vinga.
 - [What the wake word does, and does not, do](#what-the-wake-word-does-and-does-not-do):
   what waking is, what it is not, and why it never picks an agent.
 
@@ -317,6 +318,15 @@ before that discovery has finished, and discovery is not guaranteed to
 finish at all. If a device command is ignored the first time, asking
 again a moment later is the remedy. The exchange itself is in
 [`../xiaozhi-notes.md`](../xiaozhi-notes.md#the-device-is-the-mcp-server-and-discovery-is-a-race).
+
+**Asking for vinga.** Every bound board also reaches vinga, the
+agent built into the server, whenever the server serves it: say "let me
+talk to vinga" to whichever agent is answering, and it hands the
+conversation over. vinga answers questions about vinga itself, names
+the command that does something rather than doing it, and hands back to
+the board's own agents when asked for one of them by name. The next
+session starts with the board's own first agent again, not with vinga.
+A board bound to vinga alone talks to vinga from the start.
 
 ## What the wake word does, and does not, do
 
