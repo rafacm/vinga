@@ -159,6 +159,10 @@ class FillerRunner:
         self._filler_task: asyncio.Task[None] | None = None
         self._filler_sounding = False
         self._filler_fires = 0
+        # When this turn's timer was armed, which a hold's record
+        # measures its delay from as the timer's does. None before the
+        # first arm.
+        self._armed_at: float | None = None
 
     def _agent(self) -> str | None:
         """The agent talking at the moment of asking. A method rather
@@ -222,9 +226,43 @@ class FillerRunner:
         delay_ms = own.delay_ms if own is not None else min(c.delay_ms for c in reachable)
         self._filler_sounding = False
         armed_at = asyncio.get_running_loop().time()
+        self._armed_at = armed_at
         self._filler_task = asyncio.create_task(self._fire(delay_ms / 1000, armed_at))
 
-    async def _fire(self, delay_s: float, armed_at: float) -> None:
+    def hold(self) -> None:
+        """Say a filler phrase now, because the next round of this reply
+        is a slow one: the round after the built-in agent's lookup, which
+        a small model spends reading what it found (#612).
+
+        The one exception to "one filler per turn", and a deliberate
+        one: the timer's phrase covers the wait for the first round, and
+        a lookup starts a second wait, often far longer, after it. So it
+        plays the agent's next phrase in rotation, at once, whether or
+        not the turn's timer has played one; an unfired timer is stood
+        down in its favour, so the turn still holds one clip task at a
+        time and `tail` and `settle` see it exactly as they see the
+        timer's. A clip already sounding is holding the floor, and
+        nothing more is played. The mask still yields to the user: the
+        fire-time checks are the timer's, unchanged.
+
+        Nothing where the agent speaking has no filler, which is every
+        agent whose `filler` section is off: the holding phrase is the
+        agent's own filler, and an agent with none waits in silence, as
+        it does at the start of every turn."""
+        running = self._filler_task is not None and not self._filler_task.done()
+        if running and self._filler_sounding:
+            return
+        if self._fillers.get(self._agent() or "") is None:
+            return
+        if running:
+            assert self._filler_task is not None
+            self._filler_task.cancel()
+        self._filler_sounding = False
+        now = asyncio.get_running_loop().time()
+        armed_at = self._armed_at if self._armed_at is not None else now
+        self._filler_task = asyncio.create_task(self._fire(0.0, armed_at, holding=True))
+
+    async def _fire(self, delay_s: float, armed_at: float, holding: bool = False) -> None:
         """Wait out the delay, then mask the silence, unless the reply's
         first audio arrived first.
 
@@ -258,7 +296,9 @@ class FillerRunner:
         per turn stays the rule, and the cancelled reply's successor
         arms its own timer."""
         await asyncio.sleep(delay_s)
-        if self._output.speaking_started_at() is not None:
+        # A hold plays whatever was said before it (`hold` says why);
+        # the timer's phrase never talks after the reply has begun.
+        if not holding and self._output.speaking_started_at() is not None:
             return
         speech_ms = self._turn.speech_ms()
         if speech_ms > 0:

@@ -2060,6 +2060,11 @@ class PipelineRuntime:
                 break
             looked_up = any(call.name == names.SEARCH_DOCS for call in calls)
             allowance = self._server.llm_lookup_first_token_timeout_s if looked_up else None
+            if looked_up:
+                # The holding phrase: the next round is the slow one,
+                # and what the person hears through it is this agent's
+                # filler rather than silence.
+                self._filler.hold()
             # Here and nowhere else: the reservation has filed the
             # originals, which are what the history will keep, and
             # `_run_tools` has not yet branched into the move tools,
