@@ -327,7 +327,7 @@ RESTRICTED_MAC = "aa:bb:cc:dd:ee:23"
 
 def granting_config(kids_grant: object) -> Config:
     """Two agents on one MCP server, one of them restricted, each on a
-    device of its own so neither is offered `switch_agent`. The reply is
+    device of its own, which reaches vinga beside it. The reply is
     the list of tools the model was handed, which is the only place the
     offer is visible from outside the session."""
     return Config(
@@ -382,9 +382,11 @@ MEMORY_BUILTINS: set[str] = {
     "clear_state",
 }
 
-# The builtins due in this configuration. `switch_agent` is not among
-# them: each device here is bound to a single agent, so there is
-# nowhere to switch. The two conversation tools are, and so is
+# The builtins due in this configuration. `switch_agent` is among them
+# although each device here is bound to a single agent: the defaults
+# name every stage, so vinga, the built-in agent, is served and every
+# bound device reaches it beside its own (#612). The two conversation
+# tools are, and so is
 # `set_device_location`, because all three are offered whether or not a
 # deployment can act on them: what a server that cannot resume anything,
 # or cannot move its devices, answers with is a sentence the agent reads
@@ -394,6 +396,7 @@ MEMORY_BUILTINS: set[str] = {
 # conditional builtin appearing where its condition does not hold fails
 # this test rather than passing under a subtraction.
 DUE_BUILTINS: set[str] = MEMORY_BUILTINS | {
+    "switch_agent",
     "new_conversation",
     "resume_conversation",
     "set_device_location",

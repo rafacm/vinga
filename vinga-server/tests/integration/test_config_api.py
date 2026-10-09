@@ -94,7 +94,9 @@ def test_an_empty_start_is_configured_over_http_and_serves_after_a_restart(
         composition = restarted.state.composition
         generation = composition.generations.current()
         served = generation.config
-        assert served.agents_for_device("aa:bb:cc:dd:ee:ff") == ["assistant"]
+        # The pipeline's defaults serve vinga, the built-in agent, so the
+        # bound device reaches it after its own agent (#612).
+        assert served.agents_for_device("aa:bb:cc:dd:ee:ff") == ["assistant", "vinga"]
         providers = generation.providers.agents["assistant"]
         assert served.prompt_for_agent("assistant") == "You are an assistant."
         assert providers.llm is not None
