@@ -284,6 +284,9 @@ vinga-server config provider set llm local -f - <<'YAML'
 type: openai_compatible
 base_url: http://localhost:11434/v1
 model: gemma4:e4b
+# Sent to Ollama with every request: answer without streaming the
+# model's thinking first.
+reasoning_effort: none
 # Your assertion about where this endpoint is.
 reach: host
 YAML
