@@ -291,8 +291,9 @@ restarts, vinga does not know which board it is speaking through until
 the device checks in again, and it says so rather than guessing; so
 does a board with no guide here. Restarting the device is what teaches
 it: switch the board off and on, or reload the browser page. Until
-then vinga answers device questions from this page, and the guide for
-your board is the place to look.
+then vinga is told nothing about the device itself: asked about it, it
+says it does not know which board this is and points you to the guide
+for your board, which is the place to look.
 
 Only vinga is told this. Every other agent on the device answers about
 it from its own prompt, whatever the operator wrote there.
