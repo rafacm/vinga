@@ -150,6 +150,12 @@ def _tool_arguments_coerced(
     )
 
 
+# What a call whose arguments never parsed as an object is answered,
+# for every tool that exists for the agent asking. Named so the lookup
+# gate's harness answers a mangled lookup exactly as this does.
+UNPARSEABLE_ARGUMENTS = "the arguments were not a JSON object; call again with valid ones"
+
+
 def _tool_called(
     classified: ToolInvocation,
     agent: str,
@@ -759,7 +765,7 @@ class ToolExecution:
                 named,
                 len(call.malformed_arguments),
             )
-            return "the arguments were not a JSON object; call again with valid ones", True
+            return UNPARSEABLE_ARGUMENTS, True
         assert self._agent is not None
         for source in self._sources:
             if source.owns(classified):

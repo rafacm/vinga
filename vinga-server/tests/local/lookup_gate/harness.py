@@ -42,6 +42,7 @@ from vinga_server.providers import StreamStarted, TextDelta, ToolCall, ToolResul
 from vinga_server.providers.base import ToolDef
 from vinga_server.providers.openai_llm import OpenAiCompatibleLlm
 from vinga_server.runtime.pipeline import MAX_TOOL_ROUNDS
+from vinga_server.runtime.tool_execution import UNPARSEABLE_ARGUMENTS
 from vinga_server.tools import builtin
 from vinga_server.tools.source import BuiltinTools
 
@@ -91,6 +92,17 @@ def system() -> str:
     """vinga's persona and the board's facts, as the device block ends
     with them."""
     return f"{knowledge.persona()}\n\n{knowledge.board_facts(BOARD)}"
+
+
+def answer_lookup(call: ToolCall, guide: str | None) -> str:
+    """What a deployment answers this lookup call with: the runtime's
+    sentence for arguments that never parsed as an object, and
+    otherwise the shipped `search_docs` builtin, which refuses a missing,
+    blank or non-string query with its own sentence. The harness
+    measures what the tool does, not a friendlier copy of it."""
+    if call.malformed_arguments is not None:
+        return UNPARSEABLE_ARGUMENTS
+    return builtin.search_docs(call.arguments, guide)
 
 
 async def ask(llm, prompt, tools, history, text, lookup_name, guide):
@@ -150,7 +162,7 @@ async def ask(llm, prompt, tools, history, text, lookup_name, guide):
                 calls.append(scoring.Call(call.name, dict(call.arguments), malformed))
                 if call.name == lookup_name:
                     after_lookup = True
-                    content = knowledge.search(str(call.arguments.get("query", "")), guide)
+                    content = answer_lookup(call, guide)
                 elif call.name == scoring.VOLUME_TOOL:
                     content = "true"
                 else:
