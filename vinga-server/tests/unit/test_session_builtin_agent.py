@@ -281,6 +281,17 @@ async def test_a_board_bound_to_one_agent_is_offered_the_way_to_vinga() -> None:
     assert offered.input_schema["properties"]["agent"]["enum"] == ["poet", BUILTIN_AGENT]
 
 
+async def test_a_board_that_reaches_vinga_alone_is_offered_no_handover() -> None:
+    """The condition is more than one served agent reached, not a
+    binding: the kitchen board is bound to vinga alone, so vinga is the
+    one agent it reaches and there is nowhere to hand over to."""
+    vinga = ScriptedLlm(["Hello."])
+
+    await run_reply(session_for(vinga_world(), KITCHEN, {BUILTIN_AGENT: vinga}), "hi")
+
+    assert names.SWITCH_AGENT not in {tool.name for tool in vinga.seen[0][1]}
+
+
 async def test_the_poet_hands_over_to_vinga_and_vinga_answers() -> None:
     poet = ScriptedLlm([[call(names.SWITCH_AGENT, agent=BUILTIN_AGENT)]])
     vinga = RecordingLlm()

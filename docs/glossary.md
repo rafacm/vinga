@@ -405,8 +405,9 @@ More: [modelcontextprotocol.io](https://modelcontextprotocol.io/).
 A vinga-owned tool in every agent's tool set, so a meta request is
 answerable in any conversation, whoever is answering. There are
 three: the handover tool, offered wherever the device reaches more
-than one agent (every bound device, while vinga is served, since each
-reaches vinga beside its own agents), and the two conversation tools,
+than one agent this server serves (vinga among them while it is
+served, so a device bound to one served agent is offered it and one
+that reaches vinga alone is not), and the two conversation tools,
 which start a new thread and find and resume an old one. Conversation
 search is deliberately agent-scoped: an agent finds its own past
 threads and no other agent's. See

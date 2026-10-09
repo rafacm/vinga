@@ -170,8 +170,9 @@ none needs to be: each of them is either structural or a policy of its
 own, and the two are different things.
 
 `switch_agent`'s condition is the device's: it exists exactly when the
-board reaches more than one agent (every bound board, while the server
-serves vinga, the built-in agent), and withholding it from one of
+board reaches more than one agent this server serves (vinga, the
+built-in agent, counts among them while it is served), and withholding
+it from one of
 them would strand a conversation on whichever agent has no way back,
 which is the receptionist handoff the tool was written for. The two
 conversation tools have no condition, for a reason of their own: a tool

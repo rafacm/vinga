@@ -3396,8 +3396,9 @@ class AgentDefaults(BaseModel):
             "than extending it, so an empty list opts an agent out of the tools its "
             "siblings have. The builtin tools are outside this list: the memory "
             "family is offered wherever the memory section leaves it on, and "
-            "switch_agent appears under a structural condition (a device bound to "
-            "more than one agent) rather than by grant."
+            "switch_agent appears under a structural condition (a device that "
+            "reaches more than one served agent, vinga, the built-in agent, among "
+            "them while it is served) rather than by grant."
         ),
     )
 

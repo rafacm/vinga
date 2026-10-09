@@ -605,11 +605,12 @@ answering: "let me talk to Nadia", "let's talk about something else",
 These are not features of any one agent; they are vinga capabilities,
 built-in tools in every agent's tool set, exactly parallel to how the
 device's own controls reach agents as MCP tools. There are three: the
-handover tool, offered wherever the device reaches more than one agent,
-which is every bound device of a server that serves vinga, since each
-reaches vinga beside its own agents; and the two that move a session
-between threads (start a new conversation, find and resume an earlier
-one). Asking any agent for vinga is a handover to it, and vinga hands
+handover tool, offered wherever the device reaches more than one agent
+this server serves (so, while vinga is served, a device bound to one
+served agent is offered it, since it reaches vinga beside that agent,
+and a device that reaches vinga alone is not); and the two that move a
+session between threads (start a new conversation, find and resume an
+earlier one). Asking any agent for vinga is a handover to it, and vinga hands
 back the same way. All three execute in
 vinga-owned code and log their reason, per
 [the decision-reason guideline](architecture/guidelines.md#give-every-decision-a-reason-and-know-whose-reason-it-is).
