@@ -1667,3 +1667,188 @@ unit tests touching reachability, sessions and tools (`-k "reachable or
 session or tools or builtin"`, `-n auto --dist loadfile`): `1271 passed
 in 372.59s (0:06:12)` (`.logs/round-unit.log`); the link, Run and Use
 page and fragment checks, and `tests/census` last, in the hand-back.
+
+## M7: presets and first contact
+
+**Attribution:** anthropic/claude-opus-5-5, thinking medium; Claude Code 2.1.295; 2026-10-09.
+
+### What landed
+
+| Plan item | Where | Commit |
+| --- | --- | --- |
+| The presets carry no agent and no default (Q9); the local preset names the gate's model | `examples/presets/local-stack.yaml`, `examples/presets/cloud-stack.yaml`, `docs/reference/cli.md` (the recipes they feed) | `Ship the presets with no agent of their own` |
+| The preset boot case | `tests/integration/test_cli_live.py` (`test_a_preset_s_first_agent_is_vinga`) | the same |
+| The local model in the `openai_compatible` example | `examples/llm-openai-compatible.yaml`, `tests/unit/test_config_examples.py`, `docs/run/security.md` | `Name Gemma 4 e4b in the local LLM fragment` |
+| `config.example.yaml` and `examples/README.md` follow; the Run pages that imported a preset into an agent | `vinga-server/config.example.yaml`, `vinga-server/examples/README.md`, `docs/run/configuration.md`, `docs/run/with-a-coding-agent.md` | `Say a preset's first agent is vinga` |
+| Getting Started (step 3 configures providers only, step 5 pairs and meets vinga) and its feature list; the local model; the cold first turn | `README.md` | `Meet vinga first in Getting Started` |
+| `docs/run/llm.md`: the local model the gate chose, and the cold first turn | `docs/run/llm.md` | `Name Gemma 4 e4b as the local model on llm.md` |
+| The fragment | `changelog.d/612-presets-first-contact.md` | with this section |
+
+Design footprint: none in `src`. The milestone moves documents and
+one test.
+
+### The preset boot case, red first
+
+`test_a_preset_s_first_agent_is_vinga`, parametrized over both
+presets, imports the preset verbatim into a server booted on a blank
+store, composes the stored half with `load_boot_config()` (what
+`main()` runs), and asserts the served agents are exactly `vinga` and
+the built-in is served; reads the store and asserts no default agent
+is stored; then a board checks in, is offered a code, and `vinga
+device pending claim <code>` naming no agent prints `wrote device
+02:00:00:00:00:34 bound to vinga`, and a second boot reads `vinga` as
+the agent that device reaches. Run before the presets changed, both
+cases failed at the first assertion, `assert ['assistant', 'vinga'] ==
+['vinga']` (`.logs/preset-red.log`); after, both passed.
+
+Mutations of the local preset, each applied, run against the case and
+restored by copy and `touch` (`.logs/m7-mutations.log`):
+
+| Mutation | Killed by |
+| --- | --- |
+| The preset stores `default_agent: vinga` (same claim result, a stored default) | the no-default assertion, `assert 'vinga' is None` |
+| `agent_defaults` without `vad` (vinga unprovided) | the served-agents assertion, `assert [] == ['vinga']` |
+| The preset stores an agent of its own and makes it the default | the served-agents assertion, `assert ['helper', 'vinga'] == ['vinga']` |
+
+No survivor. The claim's last two assertions are not the first to
+fail under any of these; what they hold is M3's claim arm seen from
+a preset, which M3's own cases already falsify.
+
+### Deviations from the plan
+
+1. **"Boots" is the boot's composition, not an app with engines
+   built.** The case composes the stored half with
+   `load_boot_config()`, validation and stored envelopes included,
+   and does not start the lifespan, because building the local
+   preset's engines downloads speech models and dials an Ollama: the
+   reason the existing preset case already gives for not running the
+   apply. The deployment-profile case in
+   `tests/integration/test_config_examples.py` reads "boots" the same
+   way.
+2. **The quoted MAC binding names vinga, and the presets stop quoting
+   `default-agent set`.** The presets quoted `vinga device bind
+   aa:bb:cc:dd:ee:ff assistant` and `vinga default-agent set
+   assistant`, and those lines are published as the "Devices and the
+   default agent" recipe and run by
+   `test_every_published_recipe_line_but_the_preset_apply_runs`. With
+   no `assistant` in a preset, the bind names `vinga` and the default
+   is described in prose (the command is still driven elsewhere in the
+   lane, by the onboarding case). The claim itself cannot be a quoted
+   line, since the lane would run it with a code no board was shown.
+3. **The `openai_compatible` fragment carries `reasoning_effort: none`
+   live**, not commented, because it names Gemma 4 e4b and the model
+   needs it. `test_an_open_doors_fragment_documents_only_real_options`
+   names the passthroughs the fragment documents, and now names this
+   one, as its docstring asks.
+4. **Pages beyond the footprint moved**: `docs/run/configuration.md`
+   bound a board to the cloud preset's `assistant` right after
+   importing it (now a claim with no agent), and `docs/run/security.md`
+   named `qwen3:8b` in its data-boundary recipe.
+
+### Resolutions
+
+- **Gemma 4 e4b's thinking.** `reasoning_effort` is not a declared
+  `openai_compatible` option; it travels to Ollama as a passthrough
+  key, as it did for `qwen3:8b`'s recipe on `docs/run/llm.md`. M6
+  measured the need (39 to 137 s for a one-tool question with the
+  thinking on); the preset, the fragment, Getting Started and the
+  `llm.md` recipe all carry it.
+- **The cold first turn**, stated where the local model is introduced
+  (Getting Started step 0, a warning after the pin; `docs/run/llm.md`,
+  its own paragraph) with M6's numbers: about 13 tokens per second on
+  an unseen prompt, 107.6 s to the first byte of a 1,990-token first
+  request, 179.8 s for a 2,363-token probe, 2.4 to 3.4 s warm, against
+  the fixed 30 s bound. Both say pinning the model is needed and not
+  enough, and that what answers the first turn on that hardware today
+  is a faster-read model, a GPU or a vendor's model. No warm-up
+  mechanism is described, because none exists: warming the prompt
+  means sending the server's own first request with no 30 s bound,
+  which nothing an operator runs does. The token count is attributed to
+  "the conversation measured" (the lane's assistant with vinga
+  reachable), not to vinga's own prompt, which was not measured.
+- **Getting Started's walk.** The step says it was walked with
+  `llama3.1:8b` and has not been walked with Gemma 4 e4b on macOS.
+- **Existing deployments.** Importing is additive, so a stored
+  `assistant`, default agent and bindings stay; the fragment's
+  `Upgrade:` line says how to move an existing local deployment to the
+  new model and that importing the new preset replaces the entries and
+  `agent_defaults` it names.
+
+### The inventories, untruncated
+
+Taken over tracked files, excluding `docs/plans/`, `docs/features/`,
+`CHANGELOG.md` and `changelog.d/` (history); every count from `wc -l`
+on a log read in full.
+
+- **The model names.** `git grep -n -e "qwen3:8b" -e "llama3.1:8b" --
+  . ':!docs/plans' ':!docs/features' ':!CHANGELOG.md' ':!changelog.d'`:
+  85 lines at the base (`.logs/inventory-models-base.log`), 77 after
+  (`.logs/inventory-models-after.log`). Moved: Getting Started's pull,
+  pin, stop and step 3 entry, both examples, `security.md`'s recipe,
+  and `llm.md`'s recipe. What remains, by class: `llm.md`'s dated
+  measurements of the two 8B models and its "What was run for this
+  guide" table (history, dated 2026-10-06); 54 lines of unit-test
+  fixtures, where the string is an arbitrary model id; the
+  `openai_compatible` `model` field's description in
+  `provider_options.py` and the three references generated from it
+  ("qwen3:8b on Ollama" as an example of the endpoint's vocabulary, not
+  a default); `tests/tools/event_baseline.py` (a fixture); and the local
+  lane's preferred model, `tests/local/conftest.py`,
+  `tests/local/test_tool_calling_for_real.py` and
+  `docs/contributing.md`, left alone because M5 is rerunning that lane
+  on this machine and the variable that overrides it is documented.
+- **The preset's `assistant`.** `git grep -n -w "assistant" --
+  README.md docs vinga-server/examples vinga-server/config.example.yaml
+  ':!docs/plans' ':!docs/features' ':!docs/adr'`: 124 lines at the base
+  (`.logs/inventory-assistant-base.log`), 103 after
+  (`.logs/inventory-assistant-after.log`). Moved: the presets' agents
+  and quoted commands, the generated recipes, Getting Started's step 3
+  document and step 5, `config.example.yaml`'s default-agent line,
+  `configuration.md`'s bind, and the coding-agent guide's interview and
+  example. What remains names the word as the role in a conversation,
+  an operator's own agent in a generic command (`examples/agent.yaml`
+  creates one called `assistant`; `cli-guide.md`'s grammar example;
+  `onboarding-a-device.md`'s claim naming an agent; `llm.md`'s
+  export-edit-set example, left for M5's rebase), or a measured
+  utterance. The same word in `vinga-server/src` (102 lines,
+  `.logs/inventory-assistant-src.log`) is the conversation role or
+  generic prose, none of it about a preset.
+
+### Discoveries
+
+1. **No warm-up exists for the Pi's first turn.** The documentation
+   says so rather than inventing one; whether the server should give
+   the first round a longer allowance, or warm the runner itself, is a
+   decision for #612's follow-ups (the 30 s read timeout in
+   `providers/kit.py` is already one).
+2. **The cloud preset composes at boot with no `ANTHROPIC_API_KEY`**:
+   the key is resolved when the engines are built, so the boot case
+   needs no credential.
+
+### Verification
+
+On the Raspberry Pi 5, logs in this worktree's `.logs/`. The full unit
+and integration lanes were not run here, by the brief, because M5's
+model gate was measuring latency on this machine; CI runs them.
+
+- `uv run ruff check .`: see the hand-back.
+- The preset cases, red then green: `.logs/preset-red.log` (`2
+  failed, 106 deselected in 8.30s`), `.logs/preset-green.log` (`5
+  passed, 103 deselected in 22.67s`, the two import cases, the two
+  first-contact cases and the published recipes).
+- The suites that read the examples: `tests/unit/test_config_docgen.py`,
+  `test_config_examples.py`, `test_config_round_trip.py` and
+  `test_config.py` before the fragment change (`229 passed in 61.50s`,
+  `.logs/unit-preset-suites.log`); the first three after it (`73 passed
+  in 99.68s`, `.logs/unit-fragment.log`); the published recipes after
+  it (`1 passed, 107 deselected in 39.67s`, `.logs/recipe-lane.log`).
+- The drift checks, scripted from the workflow's steps: the CLI
+  reference regenerated for the recipes, every other reference current.
+- `scripts/check_doc_links.py`, `scripts/check_run_use_pages.py`,
+  `scripts/fold_changelog.py check`, and `tests/census` last: in the
+  hand-back, since they read this section.
+
+Not verified: no image was built and no board or browser was
+onboarded against this build; Getting Started was not walked with
+Gemma 4 e4b on any machine; the cold-start numbers are M6's, not
+re-measured, since the runner is M5's for this milestone.
