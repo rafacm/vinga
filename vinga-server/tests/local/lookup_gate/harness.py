@@ -21,9 +21,8 @@ fresh device with no name and nothing remembered), which is the one
 way this prompt differs from the session's.
 
 Each answer is written as one JSON line, with the round timings: the
-first byte of each round and, for the round after a lookup, how long
-the model took to start answering, which is what the first-token
-allowance is about.
+first byte of each round, how long the round after a lookup took to
+start answering, and the tokens each round reported.
 """
 
 from __future__ import annotations
@@ -35,10 +34,11 @@ import sys
 import time
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 from tests.local.lookup_gate import scoring
 from vinga_server import knowledge
-from vinga_server.providers import StreamStarted, TextDelta, ToolCall, ToolResult, Turn
+from vinga_server.providers import StreamStarted, TextDelta, ToolCall, ToolResult, Turn, Usage
 from vinga_server.providers.base import ToolDef
 from vinga_server.providers.openai_llm import OpenAiCompatibleLlm
 from vinga_server.runtime.pipeline import MAX_TOOL_ROUNDS
@@ -68,9 +68,12 @@ VOLUME = ToolDef(
 STUBBED = "Done."
 
 
-def offered(lookup: ToolDef) -> list[ToolDef]:
+def offered() -> list[ToolDef]:
     """vinga's tools on a device bound to it alone, the lookup among
-    them, and the board's volume tool."""
+    them since `BuiltinTools` offers it to the built-in agent, and the
+    board's volume tool. Every name once: Ollama accepts a list naming
+    one tool twice and Anthropic's API refuses it, and the first gate
+    runs of M5 sent the lookup twice before that refusal showed it."""
     source = BuiltinTools(
         agents=["vinga"],
         memory=None,  # type: ignore[arg-type]
@@ -79,12 +82,14 @@ def offered(lookup: ToolDef) -> list[ToolDef]:
         remembers=lambda: True,
         is_builtin=lambda: True,
     )
-    return [*source.snapshot("vinga"), lookup, VOLUME]
+    tools = [*source.snapshot("vinga"), VOLUME]
+    assert len({tool.name for tool in tools}) == len(tools), "a tool offered twice"
+    return tools
 
 
 def system() -> str:
-    """vinga's persona (the lookup's sentence included) and the board's
-    facts, as the device block ends with them."""
+    """vinga's persona and the board's facts, as the device block ends
+    with them."""
     return f"{knowledge.persona()}\n\n{knowledge.board_facts(BOARD)}"
 
 
@@ -104,6 +109,7 @@ async def ask(llm, prompt, tools, history, text, lookup_name, guide):
             first_byte = first_text = None
             text_out: list[str] = []
             made: list[ToolCall] = []
+            usage: Usage | None = None
             remaining = QUESTION_CAP_S - (began - started)
             async with asyncio.timeout(remaining):
                 async for event in llm.stream(prompt, turns, tools, choice):
@@ -116,6 +122,8 @@ async def ask(llm, prompt, tools, history, text, lookup_name, guide):
                         text_out.append(event.text)
                     elif isinstance(event, ToolCall):
                         made.append(event)
+                    elif isinstance(event, Usage):
+                        usage = event
             rounds.append(
                 {
                     "first_byte_s": first_byte,
@@ -123,6 +131,9 @@ async def ask(llm, prompt, tools, history, text, lookup_name, guide):
                     "elapsed_s": time.monotonic() - began,
                     "after_lookup": after_lookup,
                     "calls": [call.name for call in made],
+                    "input_tokens": None if usage is None else usage.prompt_tokens,
+                    "output_tokens": None if usage is None else usage.completion_tokens,
+                    "cached_tokens": None if usage is None else usage.cached_prompt_tokens,
                 }
             )
             if not made:
@@ -156,7 +167,27 @@ async def ask(llm, prompt, tools, history, text, lookup_name, guide):
     )
 
 
-async def run(which: str, out: Path, lookup: ToolDef, guide: str | None):
+def provider() -> tuple[Any, str]:
+    """The model the lane names, through the server's own adapter: an
+    OpenAI-compatible Ollama by default, or Anthropic's API when
+    `VINGA_LOCAL_LLM_PROVIDER=anthropic`, its key read from
+    `VINGA_DEV_ANTHROPIC_API_KEY` and never printed."""
+    if os.environ.get("VINGA_LOCAL_LLM_PROVIDER") == "anthropic":
+        from vinga_server.providers.anthropic_llm import AnthropicLlm
+        from vinga_server.providers.kit import DEFAULT_MAX_TOKENS
+
+        model = os.environ.get("VINGA_LOCAL_LLM_MODEL", "claude-sonnet-5")
+        # Exactly what a deployment's `anthropic` entry sends, with no
+        # temperature: the adapter sends none, and claude-sonnet-5
+        # refuses one ("`temperature` is deprecated for this model"), so
+        # this run is not pinned to temperature 0 as the Ollama runs are.
+        llm = AnthropicLlm(
+            model=model,
+            max_tokens=DEFAULT_MAX_TOKENS,
+            api_key=os.environ["VINGA_DEV_ANTHROPIC_API_KEY"],
+            timeout_s=QUESTION_CAP_S,
+        )
+        return llm, model
     model = os.environ.get("VINGA_LOCAL_LLM_MODEL", "gemma4:e4b")
     llm = OpenAiCompatibleLlm(
         base_url=OLLAMA,
@@ -166,9 +197,14 @@ async def run(which: str, out: Path, lookup: ToolDef, guide: str | None):
         timeout_s=WARM_UP_S,
         passthrough={"temperature": 0, "seed": 42, "reasoning_effort": "none"},
     )
+    return llm, model
+
+
+async def run(which: str, out: Path, lookup: ToolDef, guide: str | None):
+    llm, model = provider()
     questions = scoring.frozen() if which == "frozen" else scoring.rephrased()
     prompt = system()
-    tools = offered(lookup)
+    tools = offered()
     exchanges: dict[str, list[Turn]] = {}
     out.parent.mkdir(parents=True, exist_ok=True)
     # A run that stopped part-way resumes where it stopped: answered
@@ -190,11 +226,13 @@ async def run(which: str, out: Path, lookup: ToolDef, guide: str | None):
     # The shared prefix (the persona, the facts and the tools) read once
     # before the first question, and not measured: a cold runner spends
     # minutes reading it on a Pi, which is the first question's cost
-    # and no answer's, and every later question finds it cached.
-    began = time.monotonic()
-    async for _ in llm.stream(prompt, [Turn("user", "Hello.")], tools, "none"):
-        pass
-    print(f"warm-up {time.monotonic() - began:.1f}s", flush=True)
+    # and no answer's, and every later question finds it cached. A
+    # vendor's API has no cold prefix to read, so it is not warmed.
+    if os.environ.get("VINGA_LOCAL_LLM_PROVIDER") != "anthropic":
+        began = time.monotonic()
+        async for _ in llm.stream(prompt, [Turn("user", "Hello.")], tools, "none"):
+            pass
+        print(f"warm-up {time.monotonic() - began:.1f}s", flush=True)
     with out.open("a", encoding="utf-8") as sink:
         for question in questions:
             if question.id in done:
