@@ -94,21 +94,29 @@ below all carry it.
 
 **On small hardware the first turn does not fit.** Every request
 carries the agent's instructions and the tools it is offered, and the
-runner reads all of it before the first word of the answer. On the
-same Pi, on 2026-10-09, Gemma 4 e4b read a prompt it had not seen at
-about 13 tokens per second: a conversation's first request of 1,990
-tokens took 107.6 s to its first byte, and a probe of 2,363 tokens
-179.8 s. The server gives a round up after 30 seconds without a byte,
-a fixed bound that `llm_first_token_timeout_s` cannot raise (see
-[What the model has to do](#what-the-model-has-to-do)), so on that
-machine the first turn after the model loads ends in the fallback
-phrase, and in the measurements trying again did not get through
-either. Once the runner held the prompt, the same request answered in
-2.4 to 3.4 s. Pinning the model, below, is still needed and is not
-enough, since it keeps the weights loaded and it is the prompt that is
-slow to read. On hardware that size, what answers the first turn today
-is a model the machine reads faster (the 1.5B model below spent 2.7 s
-on a tool round once warm), a machine with a GPU, or a vendor's model.
+runner reads all of it before the first byte of the answer. On the
+same Pi, on 2026-10-09, Gemma 4 e4b took 107.6 s to the first byte of
+a conversation's first request, 1,990 tokens it had not seen, and
+179.8 s for a probe of 2,363 tokens. With the defaults the server
+waits `llm_first_token_timeout_s`, 10 s, for the first sign of life,
+cancels the request and sends it once more, and when the second also
+stalls gives the turn up with a `FirstTokenTimeout` and speaks the
+agent's fallback phrase, about 20 s after the reply began. Raising the
+watchdog helps only up to 30 s, since each request also ends after 30
+s without a byte, a fixed transport bound, as a `ProviderCallTimeout`
+(see [What the model has to do](#what-the-model-has-to-do)); with the
+watchdog at 30 s, both requests stalled and the turn was given up
+after about a minute. Trying again did not help in the measurements:
+seven cold conversations in a row, over about a quarter of an hour,
+five at 10 s and two at 30 s and each with its retry, got no answer: a
+request the server cancelled left the next one no closer. Once the
+runner held the prompt, the same request came back in 2.4 to 3.4 s,
+but nothing in vinga gets it there today. Pinning the model, below, is
+still needed and is not enough, since it keeps the weights loaded and
+it is the prompt that is slow to read. On hardware that size, what
+answers the first turn today is a model the machine reads faster (the
+1.5B model below spent 2.7 s on a tool round once warm), a machine
+with a GPU, or a vendor's model.
 
 Before Gemma 4 e4b, the preset named `qwen3:8b` and Getting Started
 `llama3.1:8b`. Either remains an option on a machine that runs an 8B
