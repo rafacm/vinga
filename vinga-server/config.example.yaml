@@ -632,14 +632,6 @@ server:
   # so the default leans toward rescuing the user sooner.
   # llm_first_token_timeout_s: 10
 
-  # The same bound for the one round that follows the built-in agent's
-  # documentation lookup, which sends the passages found and so takes a
-  # small local model longer to start answering. Never shorter than
-  # the key above. The LLM clients give up after 30 seconds with no
-  # byte from the server, so against a server that sends nothing
-  # before its first token a value above 30 buys nothing.
-  # llm_lookup_first_token_timeout_s: 30
-
   # How long a shutdown waits for conversations in flight to finish
   # speaking. Twenty seconds sits inside the thirty an orchestrator
   # commonly allows between SIGTERM and SIGKILL; `docker stop` needs its

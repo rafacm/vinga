@@ -1516,21 +1516,6 @@ class ServerConfig(BaseModel):
         ),
     )
 
-    llm_lookup_first_token_timeout_s: float = Field(
-        default=30.0,
-        gt=0,
-        description=(
-            "How long the LLM may take to its first token on the round after the "
-            "built-in agent's documentation lookup, in seconds, in place of "
-            "`llm_first_token_timeout_s` and never shorter than it. That round sends "
-            "the passages the lookup found, and a small model on modest hardware reads "
-            "them before it says anything: measured on a Raspberry Pi 5 with Gemma 4 "
-            "e4b, a median of tens of seconds. The LLM clients' own read timeout, 30 "
-            "seconds without a byte, still applies, so against a server that sends "
-            "nothing before its first token a value above 30 buys nothing."
-        ),
-    )
-
     drain_s: float = Field(
         default=20.0,
         ge=0,

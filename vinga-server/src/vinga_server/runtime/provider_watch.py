@@ -188,7 +188,6 @@ class ProviderWatch:
         round_: int,
         prompt: RoundPrompt,
         history: HistorySent,
-        first_token_timeout_s: float | None = None,
     ) -> AsyncIterator[LlmEvent]:
         """An LLM stream whose wait for the first event is bounded.
 
@@ -238,18 +237,8 @@ class ProviderWatch:
         what its history lost on the way out (#599), and travels both
         routes beside `prompt`. This is itself the generator a caller iterates, with no
         second one wrapped around it, so a cancellation lands in the
-        wait above rather than in an await added on the way to it.
-
-        `first_token_timeout_s` is a round's own bound in place of the
-        session's, for the round after the built-in agent's lookup
-        (#612): that round sends the passages found, which a small model
-        reads before its first token. It is used only where it is the
-        longer of the two, so no round is bounded tighter than any other,
-        and the retry and the give-up are unchanged: the round after a
-        lookup that stalls twice is given up like any other."""
+        wait above rather than in an await added on the way to it."""
         timeout_s = self._first_token_timeout_s
-        if first_token_timeout_s is not None:
-            timeout_s = max(timeout_s, first_token_timeout_s)
         loop = asyncio.get_running_loop()
         for attempt in ("first", "retry"):
             events = self.watched(
