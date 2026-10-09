@@ -23,6 +23,14 @@ device's own controls reach the assistant. It is written about boards
 running the upstream firmware; where the browser differs, this guide
 says so.
 
+vinga, the built-in agent, knows it is speaking through a browser: the
+page reports `vinga-browser` as its board when it checks in, which
+names this guide, and vinga is told this guide's opening and its
+[Controls](#controls) section, as it is told a board's
+([the common page](README.md#what-vinga-knows-about-the-device)). Read
+from the page's and the server's code; the browser lane does not ask
+vinga about the device.
+
 ## Getting a browser onto your server
 
 A browser becomes a device in one of two ways. Both need the server's
