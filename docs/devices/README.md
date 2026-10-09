@@ -284,13 +284,15 @@ Controls section are part of what it is told. It knows which guide from
 the board model the device reports when it checks in with the server,
 which a board running the upstream firmware does each time it starts
 (the ESP32-S3-Touch-LCD-1.54 reports itself as
-`esp32-s3-touch-lcd-1.54`), and the browser page each time it loads.
+`esp32-s3-touch-lcd-1.54`), and the browser page each time Start or
+Start again is pressed, before it opens the conversation.
 
 The server keeps that board model in memory only. After the server
 restarts, vinga does not know which board it is speaking through until
 the device checks in again, and it says so rather than guessing; so
-does a board with no guide here. Restarting the device is what teaches
-it: switch the board off and on, or reload the browser page. Until
+does a board with no guide here. Checking in again is what teaches it:
+switch the board off and on, or, in the browser, press Start (or Start
+again), which checks in before every conversation. Until
 then vinga is told nothing about the device itself: asked about it, it
 says it does not know which board this is and points you to the guide
 for your board, which is the place to look.
