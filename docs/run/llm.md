@@ -182,9 +182,9 @@ be answered and should be declined, and 2 are volume commands.
 | --- | --- | --- | --- | --- | --- | --- |
 | `claude-sonnet-5` | 78%, 81% reworded | 0 | 13, 13 reworded | 3 | 2 | 2.9, 3.1 reworded |
 | `gemma4:e4b`, Pi 5 | 50%, 41% reworded | 0, 1 reworded | 5, 2 reworded | 3 | 1 | 6.3, 7.4 reworded |
-| `gemma4:31b`, Ollama's cloud | 62%, 56% reworded | 2, 3 reworded | 10, 6 reworded | 3, 2 reworded | 0 | 0.9, 0.7 reworded |
-| `gpt-oss:20b`, Ollama's cloud | 53%, 50% reworded | 5, 9 reworded | 9, 10 reworded | 3, 2 reworded | 1, 2 reworded | 1.6, 1.6 reworded |
-| `nemotron-3-nano:30b`, Ollama's cloud | 53%, 41% reworded | 10, 9 reworded | 1, 3 reworded | 1, 2 reworded | 2 | 1.0, 1.0 reworded |
+| `gemma4:31b`, Ollama's cloud | 62%, 56% reworded | 4, 6 reworded | 10, 6 reworded | 3, 2 reworded | 0 | 0.9, 0.7 reworded |
+| `gpt-oss:20b`, Ollama's cloud | 53%, 50% reworded | 9, 10 reworded | 9, 10 reworded | 3, 2 reworded | 1, 2 reworded | 1.6, 1.6 reworded |
+| `nemotron-3-nano:30b`, Ollama's cloud | 53%, 41% reworded | 11 | 1, 3 reworded | 1, 2 reworded | 2 | 1.0, 1.0 reworded |
 
 On Gemma 4 e4b the misses are mostly questions it answered "I do not
 have information" to without searching; the prompt's twelve questions
@@ -239,7 +239,7 @@ sibling of the default, was right more often than Gemma 4 e4b (62% and
 against 5 and 2), still
 short of the 70% the gate asked for, and it never made the volume call,
 pointing to the buttons or to an operator instead. `gpt-oss:20b` and
-`nemotron-3-nano:30b` invented a claim in 5 to 10 answers of 32, more
+`nemotron-3-nano:30b` invented a claim in 9 to 11 answers of 32, more
 than any other model in the table, `nemotron-3-nano:30b` searched on 1
 and 3 of the 15 questions that needed it, and `gpt-oss:20b` answered
 two English questions in German.
