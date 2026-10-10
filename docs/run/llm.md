@@ -224,25 +224,25 @@ measures a machine of yours. There are no token counts: the service
 sends them only when asked, and the adapter asks only OpenAI's own
 host.
 
-What carries over to a machine with a GPU is the left of the table:
-which answers are right and which are invented belong to the model's
-weights, and the same model at the same settings should give much the
-same ones, provided the weights are the same build: a local pull may be
-quantized differently from the service's copy, which was not measured.
-Read a difference of a few answers as noise: the service did not answer
-the same request the same way twice, and two runs of `gemma4:31b` a
-half hour apart differed in 8 and 9 answers of 32 (leaving out the one
-question a harness fix changed), its correct count moving by one in
-each set. On that measure Gemma 4 31B, the larger
-sibling of the default, was right more often than Gemma 4 e4b (62% and
-56% against 50% and 41%) and searched more often (10 and 6 of 15
-against 5 and 2), still
-short of the 70% the gate asked for, and it never made the volume call,
-pointing to the buttons or to an operator instead. `gpt-oss:20b` and
-`nemotron-3-nano:30b` invented a claim in 9 to 11 answers of 32, more
-than any other model in the table, `nemotron-3-nano:30b` searched on 1
-and 3 of the 15 questions that needed it, and `gpt-oss:20b` answered
-two English questions in German.
+These are hosted results. They suggest which models are worth
+evaluating on a machine of your own, and no more: answer quality on a
+local runner was not measured, and runners differ in context limits,
+prompt templates, how they handle parameters such as
+`reasoning_effort`, and quantization. Even on the service, read a
+difference of a few answers as noise: it did not answer the same
+request the same way twice, and two runs of `gemma4:31b` a half hour
+apart differed in 8 and 9 answers of 32 (leaving out the one question
+a harness fix changed), its correct count moving by one in each set.
+With that said, on the service Gemma 4 31B, the larger sibling of the
+default, was right more often than Gemma 4 e4b on the Pi (62% and 56%
+against 50% and 41%) and searched more often (10 and 6 of 15 against 5
+and 2), still short of the 70% the gate asked for, and it never made
+the volume call, pointing to the buttons or to an operator instead.
+`gpt-oss:20b` and `nemotron-3-nano:30b` invented a claim in 9 to 11
+answers of 32, more than any other model in the table,
+`nemotron-3-nano:30b` searched on 1 and 3 of the 15 questions that
+needed it, and `gpt-oss:20b` answered two English questions in
+German.
 
 ## Pointing an agent at an entry
 
