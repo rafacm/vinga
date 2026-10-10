@@ -175,7 +175,8 @@ class Endpoint:
     """A chat-completions endpoint on loopback that records what it was
     sent and answers each request from `replies` in turn: a reply text
     as a one-chunk stream, or `REFUSE`, a 401 whose body repeats the
-    request's Authorization header, as the worst server would."""
+    request's Authorization header in a response header and in its
+    body, as the worst server would."""
 
     REFUSE = object()
 
@@ -195,6 +196,7 @@ class Endpoint:
                     ).encode()
                     self.send_response(401)
                     self.send_header("Content-Type", "application/json")
+                    self.send_header("x-request-id", authorization)
                     self.send_header("Content-Length", str(len(payload)))
                     self.end_headers()
                     self.wfile.write(payload)
@@ -307,16 +309,20 @@ def test_options_that_are_not_an_object_stop_the_run(monkeypatch: pytest.MonkeyP
 
 
 def test_a_key_reaches_no_output_of_a_run_that_fails(tmp_path: Path) -> None:
-    """The documented command with a credential-shaped key, against an
+    """The documented command with a credential-shaped key and the SDK's
+    own debug logging switched on (`OPENAI_LOG=debug`), against an
     endpoint that answers the warm-up and the first question and then
-    refuses with the key in its error body: the key is sent, and
-    reaches neither stdout, stderr, nor the answers written."""
+    refuses with the key in a response header and its error body: the
+    key is sent, and reaches neither stdout, stderr, nor the answers
+    written, and stderr is the one stopped line, with no log record or
+    traceback beside it (PR #639 review, finding 1)."""
     served = Endpoint(["Hello.", "An answer.", Endpoint.REFUSE])
     out = tmp_path / "out.jsonl"
     environment = {
         **os.environ,
         "VINGA_LOCAL_OLLAMA": served.url,
         harness.API_KEY_ENV: KEY,
+        "OPENAI_LOG": "debug",
         "PYTHONDONTWRITEBYTECODE": "1",
     }
     for name in (harness.PASSTHROUGH_ENV, "VINGA_LOCAL_LLM_PROVIDER"):
@@ -336,6 +342,7 @@ def test_a_key_reaches_no_output_of_a_run_that_fails(tmp_path: Path) -> None:
     assert [authorization for authorization, _ in served.received] == [f"Bearer {KEY}"] * 3
     assert ran.returncode == 1
     assert ran.stderr.startswith("the lookup gate stopped: ")
+    assert ran.stderr.count("\n") == 1
     assert "Traceback" not in ran.stderr
     assert len(out.read_text(encoding="utf-8").splitlines()) == 1
     assert KEY not in ran.stdout + ran.stderr + out.read_text(encoding="utf-8")

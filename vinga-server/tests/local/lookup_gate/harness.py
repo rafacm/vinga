@@ -47,7 +47,7 @@ from pathlib import Path
 from typing import Any
 
 from tests.local.lookup_gate import scoring
-from vinga_server import knowledge
+from vinga_server import knowledge, logs
 from vinga_server.class_names import failure_name
 from vinga_server.providers import StreamStarted, TextDelta, ToolCall, ToolResult, Turn, Usage
 from vinga_server.providers.base import ToolDef
@@ -233,7 +233,14 @@ def provider() -> tuple[Any, str]:
     OpenAI-compatible Ollama by default, or Anthropic's API when
     `VINGA_LOCAL_LLM_PROVIDER=anthropic`, its key read from
     `VINGA_DEV_ANTHROPIC_API_KEY` and never printed. The compatible
-    path's key and options are `API_KEY_ENV` and `passthrough()`."""
+    path's key and options are `API_KEY_ENV` and `passthrough()`.
+
+    The vendor libraries are held at the server's floors first, as the
+    server's own entry points hold them: the SDKs log request and
+    response headers, a key among them, and tracebacks when their own
+    debug logging is switched on (`OPENAI_LOG=debug`), and none of that
+    passes through `main()`'s containment (PR #639 review, finding 1)."""
+    logs.quiet_vendor_libraries()
     if os.environ.get("VINGA_LOCAL_LLM_PROVIDER") == "anthropic":
         from vinga_server.providers.anthropic_llm import AnthropicLlm
         from vinga_server.providers.kit import DEFAULT_MAX_TOKENS
